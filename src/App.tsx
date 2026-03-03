@@ -166,6 +166,12 @@ export default function App() {
                       It is a <span className="font-bold">2-day business matching experience</span> designed for serious business owners who want intentional and sustainable growth.
                     </p>
 
+                    <div className="py-6 flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-8 text-xl md:text-2xl font-semibold text-white">
+                      <span>June 17–18, 2026</span>
+                      <span className="text-brand-red hidden sm:inline">•</span>
+                      <span>Pasay City</span>
+                    </div>
+
                     <div className="space-y-4">
                       <p>Most businesses don’t struggle because they lack talent.</p>
                       <p className="font-semibold text-white text-2xl md:text-3xl">They struggle because growth feels random.</p>
@@ -466,9 +472,15 @@ export default function App() {
                 
                 <div className="my-12">
                   <p className="text-2xl md:text-3xl font-light opacity-50 mb-4 italic">Pause.</p>
-                  <h3 className="text-3xl md:text-5xl font-semibold tracking-tight">
+                  <h3 className="text-3xl md:text-5xl font-semibold tracking-tight mb-8">
                     Or ready to be in the <span className="text-brand-red">right room?</span>
                   </h3>
+                  <p className="text-xl md:text-2xl text-white/80 mb-2">Growth won&apos;t fix itself.</p>
+                  <p className="text-xl md:text-2xl text-white/80 mb-6">Rooms decide results.</p>
+                  <p className="text-lg md:text-xl text-white/70">
+                    If you&apos;re serious about building,<br />
+                    be in the room where it happens.
+                  </p>
                 </div>
 
                 <div className="pt-8">
@@ -481,9 +493,11 @@ export default function App() {
                     </span>
                     <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                   </button>
-                  <div className="mt-8 space-y-2">
+                  <div className="mt-8 space-y-3">
                     <p className="text-lg font-medium text-white/80">Stop looking. Start finding.</p>
-                    <p className="text-xs uppercase tracking-[0.4em] opacity-30">IBMC 2026 • June 17-18 • NPAT, Pasay City</p>
+                    <p className="text-xs uppercase tracking-[0.3em] text-brand-red font-bold">IBMC 2026</p>
+                    <p className="text-xl md:text-2xl font-semibold text-white/90 tracking-wide">June 17–18, 2026</p>
+                    <p className="text-lg md:text-xl font-medium text-white/80">Pasay City</p>
                   </div>
                 </div>
               </div>
