@@ -1,8 +1,40 @@
 import { useState, FormEvent, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { ArrowRight, CheckCircle2, Users, Handshake, Globe, TrendingUp, X, CreditCard, Mail, Phone, User } from "lucide-react";
+import { ArrowRight, CheckCircle2, Users, Handshake, Globe, TrendingUp, X, CreditCard, Mail, Phone, User, ChevronDown } from "lucide-react";
 
 type ViewState = "landing" | "register" | "thanks";
+
+const EVENT_DATE = new Date("2026-06-17T00:00:00");
+
+function CountdownBanner() {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const diff = Math.max(0, EVENT_DATE.getTime() - now.getTime());
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+
+  return (
+    <div className="countdown-banner bg-brand-red text-white py-3 px-4 text-center shrink-0">
+      <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 md:gap-8 text-lg sm:text-base md:text-lg font-semibold tracking-wide">
+        <span>IBMC 2026 — June 17-18, 2026</span>
+        <span className="hidden sm:inline opacity-60">|</span>
+        <span className="flex items-center justify-center gap-3 sm:gap-2 md:gap-4 flex-wrap text-lg sm:text-base">
+          <span><span className="font-display text-xl sm:text-lg md:text-xl tabular-nums">{days}</span> days</span>
+          <span><span className="font-display text-xl sm:text-lg md:text-xl tabular-nums">{hours}</span> hrs</span>
+          <span><span className="font-display text-xl sm:text-lg md:text-xl tabular-nums">{minutes}</span> min</span>
+          <span><span className="font-display text-xl sm:text-lg md:text-xl tabular-nums">{seconds}</span> sec</span>
+        </span>
+      </div>
+    </div>
+  );
+}
 
 const HERO_QUOTES = [
   "“I was chasing leads. But I found my best client in IBMC.”",
@@ -15,9 +47,18 @@ const HERO_QUOTES = [
   "“I was surviving. But I found momentum.”"
 ];
 
+const FAQ_ITEMS = [
+  { q: "What is IBMC?", a: "IBMC stands for International Business Matching Conference. It's a 2-day business matching experience designed for serious business owners who want intentional and sustainable growth through structured one-to-one meetings and curated rooms." },
+  { q: "When and where is IBMC 2026?", a: "IBMC 2026 takes place on June 17–18, 2026 in Pasay City, Philippines." },
+  { q: "Who should attend?", a: "Business owners, decision-makers, and professionals who are ready to grow through strategic partnerships, direct access to buyers and sellers, and meaningful connections. If you're tired of random networking and want purposeful growth, IBMC is for you." },
+  { q: "How does the business matching work?", a: "Through structured one-to-one matching and curated rooms, you connect directly with decision-makers and strategic partners. No random introductions—every interaction is designed to move your business forward." },
+  { q: "How do I register?", a: "Click 'Secure Your Seat' anywhere on this page to complete your registration. You'll receive a confirmation email with next steps and how to prepare your business profile for matching." },
+];
+
 export default function App() {
   const [view, setView] = useState<ViewState>("landing");
   const [quoteIndex, setQuoteIndex] = useState(0);
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   useEffect(() => {
     if (view !== "landing") return;
@@ -34,6 +75,22 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-black text-white selection:bg-brand-red selection:text-white overflow-x-hidden font-sans">
+      <header className="fixed top-0 left-0 right-0 z-[60] flex flex-col">
+        <CountdownBanner />
+        <nav className="w-full px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-black shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="font-display text-2xl tracking-tighter text-brand-red">IBMC</span>
+                <span className="text-xs font-bold tracking-[0.2em] opacity-50 uppercase">2026</span>
+              </div>
+              <button 
+                onClick={() => setView("register")}
+                className="min-h-[48px] min-w-[44px] px-6 py-3.5 border border-white/20 rounded-full text-base font-semibold hover:bg-white hover:text-black transition-all duration-300 cursor-pointer"
+              >
+                Secure Your Seat
+              </button>
+            </nav>
+      </header>
+
       <AnimatePresence mode="wait">
         {view === "landing" && (
           <motion.div
@@ -43,22 +100,8 @@ export default function App() {
             exit={{ opacity: 0 }}
             className="relative"
           >
-            {/* Navigation */}
-            <nav className="fixed top-0 w-full z-50 px-6 py-6 flex justify-between items-center bg-gradient-to-b from-black/80 to-transparent backdrop-blur-sm">
-              <div className="flex items-center gap-2">
-                <span className="font-display text-2xl tracking-tighter text-brand-red">IBMC</span>
-                <span className="text-xs font-bold tracking-[0.2em] opacity-50 uppercase">2026</span>
-              </div>
-              <button 
-                onClick={() => setView("register")}
-                className="px-6 py-2 border border-white/20 rounded-full text-sm font-semibold hover:bg-white hover:text-black transition-all duration-300 cursor-pointer"
-              >
-                Secure Your Seat
-              </button>
-            </nav>
-
             {/* Hero Section */}
-            <section className="relative min-h-screen flex flex-col items-center justify-center px-6 pt-20 overflow-hidden">
+            <section className="relative min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-36 overflow-hidden">
               <div className="absolute inset-0 z-0 opacity-20">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-brand-red/20 rounded-full blur-[120px]" />
               </div>
@@ -69,19 +112,19 @@ export default function App() {
                 transition={{ duration: 0.8 }}
                 className="relative z-10 text-center max-w-5xl mx-auto"
               >
-                <h1 className="font-display text-[15vw] md:text-[12vw] leading-[0.85] uppercase tracking-tighter animate-slam">
+                <h1 className="font-display text-[clamp(2.5rem,14vw,8rem)] sm:text-[12vw] leading-[0.85] uppercase tracking-tighter animate-slam">
                   Be in the <br />
                   <span className="text-brand-red">Right Room.</span>
                 </h1>
                 
                 <div className="mt-12 space-y-8">
                   <div className="space-y-4">
-                    <p className="text-2xl md:text-4xl font-light tracking-tight text-white/90">
+                    <p className="text-xl sm:text-2xl md:text-4xl font-light tracking-tight text-white/90">
                       You don’t need more tactics. <br />
-                      <span className="font-semibold">You need the right environment.</span>
+                      <span className="font-semibold">You need direct access to the right people.</span>
                     </p>
-                    <p className="text-lg md:text-xl text-white/50 max-w-2xl mx-auto">
-                      A 2-day business matching experience designed for serious business owners ready to grow.
+                    <p className="text-base sm:text-lg md:text-xl text-white/50 max-w-2xl mx-auto">
+                      IBMC is a 2-day business matching experience designed for serious business owners ready to grow.
                     </p>
                   </div>
 
@@ -96,23 +139,17 @@ export default function App() {
                         transition={{ duration: 0.6, ease: "easeInOut" }}
                         className="max-w-3xl"
                       >
-                        <p className="text-xl md:text-3xl font-semibold leading-tight tracking-tight text-white italic">
+                        <p className="text-lg sm:text-xl md:text-3xl font-semibold leading-tight tracking-tight text-white italic">
                           {HERO_QUOTES[quoteIndex]}
                         </p>
                       </motion.div>
                     </AnimatePresence>
                   </div>
                   
-                  <div className="flex flex-col md:flex-row items-center justify-center gap-4 md:gap-8 text-lg md:text-xl text-white/60 font-medium pt-4">
-                    <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-brand-red" /> The right conversations</span>
-                    <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-brand-red" /> The right connections</span>
-                    <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-brand-red" /> The right opportunities</span>
-                  </div>
-
                   <div className="pt-8">
                     <button 
                       onClick={() => setView("register")}
-                      className="group relative px-12 py-5 bg-brand-red text-white font-display text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                      className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                     >
                       <span className="relative z-10 flex items-center gap-3">
                         Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
@@ -120,6 +157,18 @@ export default function App() {
                       <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                     </button>
                     <p className="mt-4 text-xs uppercase tracking-[0.3em] opacity-40">All in one room.</p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-stretch justify-center gap-4 md:gap-6 pt-12">
+                    <div className="border-2 border-brand-red/60 bg-white/5 rounded-2xl p-6 sm:p-8 flex items-center justify-center min-h-[120px] sm:min-h-[140px]">
+                      <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white text-center uppercase tracking-tight">The right conversations</p>
+                    </div>
+                    <div className="border-2 border-brand-red/60 bg-white/5 rounded-2xl p-6 sm:p-8 flex items-center justify-center min-h-[120px] sm:min-h-[140px]">
+                      <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white text-center uppercase tracking-tight">The right connections</p>
+                    </div>
+                    <div className="border-2 border-brand-red/60 bg-white/5 rounded-2xl p-6 sm:p-8 flex items-center justify-center min-h-[120px] sm:min-h-[140px]">
+                      <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white text-center uppercase tracking-tight">The right opportunities</p>
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -135,7 +184,7 @@ export default function App() {
             </section>
 
             {/* Section: What is IBMC? */}
-            <section className="py-32 px-6 bg-black border-y border-white/5 relative overflow-hidden">
+            <section className="py-20 sm:py-32 px-4 sm:px-6 bg-black border-y border-white/5 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-1/3 h-full bg-brand-red/5 blur-[120px] -z-10" />
               <div className="max-w-4xl mx-auto text-center">
                 <motion.div
@@ -144,7 +193,7 @@ export default function App() {
                   viewport={{ once: true }}
                 >
                   <h2 className="text-xs uppercase tracking-[0.4em] text-brand-red font-bold mb-8">Why We Exist</h2>
-                  <h3 className="font-display text-5xl md:text-7xl uppercase tracking-tighter mb-12">
+                  <h3 className="font-display text-4xl sm:text-5xl md:text-7xl uppercase tracking-tighter mb-12">
                     What is <span className="text-brand-red">IBMC?</span>
                   </h3>
                   <div className="space-y-10 text-xl md:text-2xl font-light leading-relaxed text-white/80">
@@ -162,15 +211,9 @@ export default function App() {
                       <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent" />
                     </div>
 
-                    <p className="text-white/90">
-                      It is a <span className="font-bold">2-day business matching experience</span> designed for serious business owners who want intentional and sustainable growth.
+                    <p className="text-white/90 text-xl md:text-2xl">
+                      IBMC is a 2-day business matching experience for serious business owners who want intentional and sustainable growth, taking place on June 17–18, 2026 in Pasay City.
                     </p>
-
-                    <div className="py-6 flex flex-col sm:flex-row items-center justify-center gap-4 sm:gap-8 text-xl md:text-2xl font-semibold text-white">
-                      <span>June 17–18, 2026</span>
-                      <span className="text-brand-red hidden sm:inline">•</span>
-                      <span>Pasay City</span>
-                    </div>
 
                     <div className="space-y-4">
                       <p>Most businesses don’t struggle because they lack talent.</p>
@@ -204,7 +247,7 @@ export default function App() {
                     <div className="pt-12">
                       <button 
                         onClick={() => setView("register")}
-                        className="group relative px-12 py-5 bg-brand-red text-white font-display text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                        className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                       >
                         <span className="relative z-10 flex items-center gap-3">
                           Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
@@ -218,16 +261,16 @@ export default function App() {
             </section>
 
             {/* Section 2 – THE REAL PROBLEM */}
-            <section className="py-32 px-6 bg-zinc-950">
+            <section className="py-20 sm:py-32 px-4 sm:px-6 bg-zinc-950">
               <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-16 items-center">
                 <div>
-                  <h2 className="font-display text-6xl md:text-8xl leading-none uppercase tracking-tighter">
+                  <h2 className="font-display text-4xl sm:text-6xl md:text-8xl leading-none uppercase tracking-tighter">
                     Maybe you’re <br />
                     not missing <br />
                     <span className="text-stroke">effort.</span>
                   </h2>
                   <h3 className="mt-6 text-3xl md:text-4xl font-light text-brand-red">
-                    Maybe you’re missing the room.
+                    Maybe You’re not in a room that accelerates growth.
                   </h3>
                 </div>
                 
@@ -253,7 +296,7 @@ export default function App() {
                   <div className="pt-8">
                     <button 
                       onClick={() => setView("register")}
-                      className="group relative px-12 py-5 bg-brand-red text-white font-display text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                      className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                     >
                       <span className="relative z-10 flex items-center gap-3">
                         Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
@@ -266,7 +309,7 @@ export default function App() {
             </section>
 
             {/* Section 3 – THE SHIFT */}
-            <section className="py-32 px-6 relative overflow-hidden">
+            <section className="py-20 sm:py-32 px-4 sm:px-6 relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
                 <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white to-transparent" />
                 <div className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white to-transparent" />
@@ -274,7 +317,7 @@ export default function App() {
 
               <div className="max-w-7xl mx-auto">
                 <div className="text-center mb-24">
-                  <h2 className="font-display text-7xl md:text-9xl uppercase tracking-tighter mb-8">
+                  <h2 className="font-display text-4xl sm:text-6xl md:text-9xl uppercase tracking-tighter mb-8">
                     Rooms shape <span className="text-brand-red">results.</span>
                   </h2>
                   <p className="text-xl md:text-2xl text-white/60 max-w-2xl mx-auto">
@@ -338,7 +381,7 @@ export default function App() {
                 <div className="flex justify-center pt-12">
                   <button 
                     onClick={() => setView("register")}
-                    className="group relative px-12 py-5 bg-brand-red text-white font-display text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                    className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                   >
                     <span className="relative z-10 flex items-center gap-3">
                       Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
@@ -350,11 +393,11 @@ export default function App() {
             </section>
 
             {/* Section 4 – WHAT THIS ROOM IS */}
-            <section className="py-32 px-6 bg-white text-black">
+            <section className="py-20 sm:py-32 px-4 sm:px-6 bg-white text-black">
               <div className="max-w-7xl mx-auto">
                 <div className="grid lg:grid-cols-2 gap-20 items-end mb-20">
                   <div>
-                    <h2 className="font-display text-6xl md:text-8xl uppercase tracking-tighter leading-[0.9]">
+                    <h2 className="font-display text-4xl sm:text-6xl md:text-8xl uppercase tracking-tighter leading-[0.9]">
                       This is not <br />
                       just an <span className="text-brand-red">event.</span>
                     </h2>
@@ -394,7 +437,7 @@ export default function App() {
                 <div className="flex justify-center pt-16">
                   <button 
                     onClick={() => setView("register")}
-                    className="group relative px-12 py-5 bg-brand-red text-white font-display text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                    className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                   >
                     <span className="relative z-10 flex items-center gap-3">
                       Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
@@ -406,7 +449,7 @@ export default function App() {
             </section>
 
             {/* Section: The Cost of Missing Out (StoryBrand Consequence) */}
-            <section className="py-32 px-6 bg-zinc-900 relative overflow-hidden">
+            <section className="py-20 sm:py-32 px-4 sm:px-6 bg-zinc-900 relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-full opacity-5 pointer-events-none">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-[radial-gradient(circle,rgba(227,30,36,0.2)_0%,transparent_70%)]" />
               </div>
@@ -418,7 +461,7 @@ export default function App() {
                   viewport={{ once: true }}
                 >
                   <h2 className="text-xs uppercase tracking-[0.4em] text-brand-red font-bold mb-8">The Consequence</h2>
-                  <h3 className="font-display text-5xl md:text-7xl uppercase tracking-tighter mb-12">
+                  <h3 className="font-display text-4xl sm:text-5xl md:text-7xl uppercase tracking-tighter mb-12">
                     What happens if you <br /><span className="text-stroke">miss the room?</span>
                   </h3>
                   
@@ -446,7 +489,7 @@ export default function App() {
                       <p className="text-lg font-medium">Don't let 2026 be another year of "almost."</p>
                       <button 
                         onClick={() => setView("register")}
-                        className="group relative px-12 py-5 bg-brand-red text-white font-display text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer shrink-0"
+                        className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer shrink-0"
                       >
                         <span className="relative z-10 flex items-center gap-3">
                           Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
@@ -460,13 +503,13 @@ export default function App() {
             </section>
 
             {/* Section 5 – DECISION */}
-            <section className="py-40 px-6 text-center relative overflow-hidden">
+            <section className="py-24 sm:py-40 px-4 sm:px-6 text-center relative overflow-hidden">
               <div className="absolute inset-0 z-0 opacity-30">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[1000px] bg-brand-red/10 rounded-full blur-[150px]" />
               </div>
 
               <div className="relative z-10 max-w-4xl mx-auto">
-                <h2 className="font-display text-7xl md:text-9xl uppercase tracking-tighter mb-4">
+                <h2 className="font-display text-4xl sm:text-6xl md:text-9xl uppercase tracking-tighter mb-4">
                   Still looking?
                 </h2>
                 
@@ -486,7 +529,7 @@ export default function App() {
                 <div className="pt-8">
                   <button 
                     onClick={() => setView("register")}
-                    className="group relative px-16 py-6 bg-brand-red text-white font-display text-3xl uppercase tracking-wider rounded-full overflow-hidden transition-all hover:scale-110 hover:shadow-[0_0_50px_rgba(227,30,36,0.4)] active:scale-95 cursor-pointer"
+                    className="group relative min-h-[56px] px-8 py-6 sm:px-16 sm:py-6 bg-brand-red text-white font-display text-2xl sm:text-3xl uppercase tracking-wider rounded-full overflow-hidden transition-all hover:scale-110 hover:shadow-[0_0_50px_rgba(227,30,36,0.4)] active:scale-95 cursor-pointer"
                   >
                     <span className="relative z-10 flex items-center gap-4">
                       Be in the Right Room <ArrowRight className="w-8 h-8 group-hover:translate-x-2 transition-transform" />
@@ -499,6 +542,47 @@ export default function App() {
                     <p className="text-xl md:text-2xl font-semibold text-white/90 tracking-wide">June 17–18, 2026</p>
                     <p className="text-lg md:text-xl font-medium text-white/80">Pasay City</p>
                   </div>
+                </div>
+              </div>
+            </section>
+
+            {/* FAQ Section */}
+            <section className="py-20 sm:py-32 px-4 sm:px-6 bg-zinc-950 border-t border-white/5">
+              <div className="max-w-3xl mx-auto">
+                <h2 className="text-xs uppercase tracking-[0.4em] text-brand-red font-bold mb-8">FAQ</h2>
+                <h3 className="font-display text-4xl sm:text-5xl md:text-6xl uppercase tracking-tighter mb-16">
+                  Frequently asked <span className="text-brand-red">questions</span>
+                </h3>
+                <div className="space-y-4">
+                  {FAQ_ITEMS.map((item, i) => (
+                    <div
+                      key={i}
+                      className="border border-white/10 rounded-2xl overflow-hidden"
+                    >
+                      <button
+                        onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                        className="w-full flex items-center justify-between gap-4 p-6 sm:p-8 text-left hover:bg-white/5 transition-colors"
+                      >
+                        <span className="font-semibold text-lg sm:text-xl text-white">{item.q}</span>
+                        <ChevronDown className={`w-6 h-6 shrink-0 text-brand-red transition-transform duration-300 ${openFaq === i ? "rotate-180" : ""}`} />
+                      </button>
+                      <AnimatePresence>
+                        {openFaq === i && (
+                          <motion.div
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.3 }}
+                            className="overflow-hidden"
+                          >
+                            <p className="px-6 sm:px-8 pb-6 sm:pb-8 text-white/70 text-base sm:text-lg leading-relaxed -mt-2">
+                              {item.a}
+                            </p>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  ))}
                 </div>
               </div>
             </section>
@@ -516,7 +600,7 @@ export default function App() {
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 1.05 }}
-            className="min-h-screen flex items-center justify-center p-6 bg-zinc-950"
+            className="min-h-screen flex items-center justify-center p-6 pt-20 bg-zinc-950"
           >
             <div className="w-full max-w-xl">
               <div className="flex justify-between items-center mb-12">
@@ -526,65 +610,65 @@ export default function App() {
                 </div>
                 <button 
                   onClick={() => setView("landing")}
-                  className="p-2 hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+                  className="min-h-[48px] min-w-[48px] p-3 flex items-center justify-center hover:bg-white/10 rounded-full transition-colors cursor-pointer"
                 >
-                  <X className="w-6 h-6" />
+                  <X className="w-7 h-7" />
                 </button>
               </div>
 
               <div className="mb-10">
-                <h2 className="font-display text-5xl uppercase tracking-tighter mb-2">Secure Your Seat</h2>
-                <p className="text-white/60">Fill in your details to join the room.</p>
+                <h2 className="font-display text-4xl sm:text-5xl uppercase tracking-tighter mb-2">Secure Your Seat</h2>
+                <p className="text-base text-white/60">Fill in your details to join the room.</p>
               </div>
 
               <form onSubmit={handleRegister} className="space-y-6">
                 <div className="space-y-4">
                   <div className="relative">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/30" />
+                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-white/30" />
                     <input 
                       required
                       type="text" 
                       placeholder="Full Name" 
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-all"
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 pl-14 pr-4 text-base focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-all min-h-[52px]"
                     />
                   </div>
                   <div className="relative">
-                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/30" />
+                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-white/30" />
                     <input 
                       required
                       type="email" 
                       placeholder="Email Address" 
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-all"
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 pl-14 pr-4 text-base focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-all min-h-[52px]"
                     />
                   </div>
                   <div className="relative">
-                    <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/30" />
+                    <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-white/30" />
                     <input 
                       required
                       type="tel" 
                       placeholder="Mobile Number" 
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-12 pr-4 focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-all"
+                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 pl-14 pr-4 text-base focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-all min-h-[52px]"
                     />
                   </div>
                 </div>
 
                 <div className="pt-4">
-                  <label className="block text-xs uppercase tracking-widest text-white/40 mb-4 font-bold">Payment Method (Mockup)</label>
+                  <label className="block text-sm uppercase tracking-widest text-white/40 mb-4 font-bold">Payment Method (Mockup)</label>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="p-4 rounded-2xl border-2 border-brand-red bg-brand-red/5 flex flex-col items-center gap-2 cursor-pointer transition-all">
-                      <CreditCard className="w-6 h-6 text-brand-red" />
-                      <span className="text-sm font-semibold">Credit Card</span>
+                    <div className="min-h-[80px] p-5 rounded-2xl border-2 border-brand-red bg-brand-red/5 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all">
+                      <CreditCard className="w-8 h-8 text-brand-red" />
+                      <span className="text-base font-semibold">Credit Card</span>
                     </div>
-                    <div className="p-4 rounded-2xl border border-white/10 bg-white/5 flex flex-col items-center gap-2 opacity-50 cursor-not-allowed">
-                      <Handshake className="w-6 h-6" />
-                      <span className="text-sm font-semibold">Bank Transfer</span>
+                    <div className="min-h-[80px] p-5 rounded-2xl border border-white/10 bg-white/5 flex flex-col items-center justify-center gap-2 opacity-50 cursor-not-allowed">
+                      <Handshake className="w-8 h-8" />
+                      <span className="text-base font-semibold">Bank Transfer</span>
                     </div>
                   </div>
                 </div>
 
                 <button 
                   type="submit"
-                  className="w-full py-5 bg-brand-red text-white font-display text-xl uppercase tracking-wider rounded-2xl hover:bg-red-600 transition-all active:scale-[0.98] cursor-pointer mt-8"
+                  className="w-full min-h-[56px] py-6 bg-brand-red text-white font-display text-xl uppercase tracking-wider rounded-2xl hover:bg-red-600 transition-all active:scale-[0.98] cursor-pointer mt-8"
                 >
                   Complete Registration
                 </button>
@@ -599,14 +683,14 @@ export default function App() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0 }}
-            className="min-h-screen flex items-center justify-center p-6 bg-black"
+            className="min-h-screen flex items-center justify-center p-6 pt-20 bg-black"
           >
             <div className="max-w-xl text-center">
               <div className="w-24 h-24 bg-brand-red/20 rounded-full flex items-center justify-center mx-auto mb-8">
                 <CheckCircle2 className="w-12 h-12 text-brand-red" />
               </div>
-              <h2 className="font-display text-6xl uppercase tracking-tighter mb-6">See you in <br /><span className="text-brand-red">the room.</span></h2>
-              <p className="text-xl text-white/60 mb-12">Your registration is complete. We've sent a confirmation to your email with the next steps.</p>
+              <h2 className="font-display text-4xl sm:text-6xl uppercase tracking-tighter mb-6">See you in <br /><span className="text-brand-red">the room.</span></h2>
+              <p className="text-lg sm:text-xl text-white/60 mb-12">Your registration is complete. We've sent a confirmation to your email with the next steps.</p>
               
               <div className="glass-card p-8 rounded-3xl text-left mb-12">
                 <h4 className="text-xs uppercase tracking-widest text-brand-red font-bold mb-6">Next Steps</h4>
@@ -628,7 +712,7 @@ export default function App() {
 
               <button 
                 onClick={() => setView("landing")}
-                className="text-white/40 hover:text-white transition-colors text-sm uppercase tracking-widest font-bold cursor-pointer"
+                className="min-h-[48px] px-6 py-3 text-white/40 hover:text-white transition-colors text-base uppercase tracking-widest font-bold cursor-pointer"
               >
                 Back to Home
               </button>

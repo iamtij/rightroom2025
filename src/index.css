@@ -38,3 +38,15 @@ body {
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
+
+/* Mobile: prevent double-tap zoom delay, improve tap responsiveness */
+button, a, [role="button"] {
+  touch-action: manipulation;
+}
+
+/* Safe area for notched devices (e.g. iPhone) */
+@supports (padding: env(safe-area-inset-top)) {
+  .countdown-banner {
+    padding-top: max(0.75rem, env(safe-area-inset-top));
+  }
+}
