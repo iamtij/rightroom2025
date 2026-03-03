@@ -79,7 +79,7 @@ export default function App() {
         <CountdownBanner />
         <nav className="w-full px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-black shrink-0">
               <div className="flex items-center gap-2">
-                <span className="font-display text-2xl tracking-tighter text-brand-red">IBMC</span>
+                <span className="font-display text-2xl tracking-tight text-brand-red">IBMC</span>
                 <span className="text-xs font-bold tracking-[0.2em] opacity-50 uppercase">2026</span>
               </div>
               <button 
@@ -112,7 +112,7 @@ export default function App() {
                 transition={{ duration: 0.8 }}
                 className="relative z-10 text-center max-w-5xl mx-auto"
               >
-                <h1 className="font-display text-[clamp(2.5rem,14vw,8rem)] sm:text-[12vw] leading-[0.85] uppercase tracking-tighter animate-slam">
+                <h1 className="font-display text-[clamp(2.5rem,14vw,8rem)] sm:text-[12vw] leading-[0.85] uppercase tracking-tight animate-slam">
                   Be in the <br />
                   <span className="text-brand-red">Right Room.</span>
                 </h1>
@@ -193,7 +193,7 @@ export default function App() {
                   viewport={{ once: true }}
                 >
                   <h2 className="text-xs uppercase tracking-[0.4em] text-brand-red font-bold mb-8">Why We Exist</h2>
-                  <h3 className="font-display text-4xl sm:text-5xl md:text-7xl uppercase tracking-tighter mb-12">
+                  <h3 className="font-display text-4xl sm:text-5xl md:text-7xl uppercase tracking-tight mb-12">
                     What is <span className="text-brand-red">IBMC?</span>
                   </h3>
                   <div className="space-y-10 text-xl md:text-2xl font-light leading-relaxed text-white/80">
@@ -236,12 +236,12 @@ export default function App() {
 
                     <div className="py-8">
                       <p className="text-white/40 mb-2 italic">You don’t just exchange business cards.</p>
-                      <p className="font-display text-6xl md:text-8xl text-brand-red uppercase tracking-tighter">You build strategic matches.</p>
+                      <p className="font-display text-6xl md:text-8xl text-brand-red uppercase tracking-tight">You build strategic matches.</p>
                     </div>
 
                     <div className="space-y-2 pt-8">
-                      <p className="text-3xl font-bold uppercase tracking-tighter">Stop looking. Start finding.</p>
-                      <p className="text-brand-red font-display text-4xl uppercase tracking-tighter">Be in the right room.</p>
+                      <p className="text-3xl font-bold uppercase tracking-tight">Stop looking. Start finding.</p>
+                      <p className="text-brand-red font-display text-4xl uppercase tracking-tight">Be in the right room.</p>
                     </div>
 
                     <div className="pt-12">
@@ -264,7 +264,7 @@ export default function App() {
             <section className="py-20 sm:py-32 px-4 sm:px-6 bg-zinc-950">
               <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-16 items-center">
                 <div>
-                  <h2 className="font-display text-4xl sm:text-6xl md:text-8xl leading-none uppercase tracking-tighter">
+                  <h2 className="font-display text-4xl sm:text-6xl md:text-8xl leading-none uppercase tracking-tight">
                     Maybe you’re <br />
                     not missing <br />
                     <span className="text-stroke">effort.</span>
@@ -317,7 +317,7 @@ export default function App() {
 
               <div className="max-w-7xl mx-auto">
                 <div className="text-center mb-24">
-                  <h2 className="font-display text-4xl sm:text-6xl md:text-9xl uppercase tracking-tighter mb-8">
+                  <h2 className="font-display text-4xl sm:text-6xl md:text-9xl uppercase tracking-tight mb-8">
                     Rooms shape <span className="text-brand-red">results.</span>
                   </h2>
                   <p className="text-xl md:text-2xl text-white/60 max-w-2xl mx-auto">
@@ -336,7 +336,7 @@ export default function App() {
                     <div className="absolute inset-0 bg-brand-red/10 mix-blend-overlay" />
                     <div className="absolute bottom-8 left-8 right-8">
                       <p className="text-sm uppercase tracking-widest font-bold text-brand-red mb-2">The Result</p>
-                      <p className="text-2xl font-display uppercase tracking-tighter">Strategic Alignment</p>
+                      <p className="text-2xl font-display uppercase tracking-tight">Strategic Alignment</p>
                     </div>
                   </div>
 
@@ -397,7 +397,7 @@ export default function App() {
               <div className="max-w-7xl mx-auto">
                 <div className="grid lg:grid-cols-2 gap-20 items-end mb-20">
                   <div>
-                    <h2 className="font-display text-4xl sm:text-6xl md:text-8xl uppercase tracking-tighter leading-[0.9]">
+                    <h2 className="font-display text-4xl sm:text-6xl md:text-8xl uppercase tracking-tight leading-[0.9]">
                       This is not <br />
                       just an <span className="text-brand-red">event.</span>
                     </h2>
@@ -461,7 +461,7 @@ export default function App() {
                   viewport={{ once: true }}
                 >
                   <h2 className="text-xs uppercase tracking-[0.4em] text-brand-red font-bold mb-8">The Consequence</h2>
-                  <h3 className="font-display text-4xl sm:text-5xl md:text-7xl uppercase tracking-tighter mb-12">
+                  <h3 className="font-display text-4xl sm:text-5xl md:text-7xl uppercase tracking-tight mb-12">
                     What happens if you <br /><span className="text-stroke">miss the room?</span>
                   </h3>
                   
@@ -509,7 +509,7 @@ export default function App() {
               </div>
 
               <div className="relative z-10 max-w-4xl mx-auto">
-                <h2 className="font-display text-4xl sm:text-6xl md:text-9xl uppercase tracking-tighter mb-4">
+                <h2 className="font-display text-4xl sm:text-6xl md:text-9xl uppercase tracking-tight mb-4">
                   Still looking?
                 </h2>
                 
@@ -550,7 +550,7 @@ export default function App() {
             <section className="py-20 sm:py-32 px-4 sm:px-6 bg-zinc-950 border-t border-white/5">
               <div className="max-w-3xl mx-auto">
                 <h2 className="text-xs uppercase tracking-[0.4em] text-brand-red font-bold mb-8">FAQ</h2>
-                <h3 className="font-display text-4xl sm:text-5xl md:text-6xl uppercase tracking-tighter mb-16">
+                <h3 className="font-display text-4xl sm:text-5xl md:text-6xl uppercase tracking-tight mb-16">
                   Frequently asked <span className="text-brand-red">questions</span>
                 </h3>
                 <div className="space-y-4">
@@ -605,7 +605,7 @@ export default function App() {
             <div className="w-full max-w-xl">
               <div className="flex justify-between items-center mb-12">
                 <div className="flex items-center gap-2">
-                  <span className="font-display text-2xl tracking-tighter text-brand-red">IBMC</span>
+                  <span className="font-display text-2xl tracking-tight text-brand-red">IBMC</span>
                   <span className="text-xs font-bold tracking-[0.2em] opacity-50 uppercase">2026</span>
                 </div>
                 <button 
@@ -617,7 +617,7 @@ export default function App() {
               </div>
 
               <div className="mb-10">
-                <h2 className="font-display text-4xl sm:text-5xl uppercase tracking-tighter mb-2">Secure Your Seat</h2>
+                <h2 className="font-display text-4xl sm:text-5xl uppercase tracking-tight mb-2">Secure Your Seat</h2>
                 <p className="text-base text-white/60">Fill in your details to join the room.</p>
               </div>
 
@@ -689,7 +689,7 @@ export default function App() {
               <div className="w-24 h-24 bg-brand-red/20 rounded-full flex items-center justify-center mx-auto mb-8">
                 <CheckCircle2 className="w-12 h-12 text-brand-red" />
               </div>
-              <h2 className="font-display text-4xl sm:text-6xl uppercase tracking-tighter mb-6">See you in <br /><span className="text-brand-red">the room.</span></h2>
+              <h2 className="font-display text-4xl sm:text-6xl uppercase tracking-tight mb-6">See you in <br /><span className="text-brand-red">the room.</span></h2>
               <p className="text-lg sm:text-xl text-white/60 mb-12">Your registration is complete. We've sent a confirmation to your email with the next steps.</p>
               
               <div className="glass-card p-8 rounded-3xl text-left mb-12">
