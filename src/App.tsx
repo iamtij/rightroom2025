@@ -22,7 +22,7 @@ function CountdownBanner() {
 
   return (
     <div className="countdown-banner bg-brand-red text-white py-3 px-4 text-center shrink-0">
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 md:gap-8 text-lg sm:text-base md:text-lg font-semibold tracking-wide">
+      <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 md:gap-8 text-base sm:text-base md:text-lg font-semibold tracking-wide">
         <span>IBMC 2026 — June 17-18, 2026</span>
         <span className="hidden sm:inline opacity-60">|</span>
         <span className="flex items-center justify-center gap-3 sm:gap-2 md:gap-4 flex-wrap text-lg sm:text-base">
@@ -101,8 +101,8 @@ export default function App() {
             className="relative"
           >
             {/* Hero Section */}
-            <section className="relative min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-36 overflow-hidden">
-              <div className="absolute inset-0 z-0 opacity-20">
+            <section className="relative min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-40 sm:pt-36 overflow-visible">
+              <div className="absolute inset-0 z-0 opacity-20 overflow-hidden pointer-events-none">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-brand-red/20 rounded-full blur-[120px]" />
               </div>
 
@@ -110,9 +110,9 @@ export default function App() {
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.8 }}
-                className="relative z-10 text-center max-w-5xl mx-auto"
+                className="relative z-10 text-center max-w-5xl mx-auto w-full"
               >
-                <h1 className="font-display text-[clamp(2.5rem,14vw,8rem)] sm:text-[12vw] leading-[0.85] uppercase tracking-tight animate-slam">
+                <h1 className="font-display text-[clamp(3rem,16vw,8rem)] sm:text-[12vw] leading-[1.1] sm:leading-[0.9] md:leading-[0.85] uppercase tracking-tight animate-slam pt-2">
                   Be in the <br />
                   <span className="text-brand-red">Right Room.</span>
                 </h1>
@@ -146,7 +146,7 @@ export default function App() {
                     </AnimatePresence>
                   </div>
                   
-                  <div className="pt-8">
+                  <div className="flex justify-center pt-8">
                     <button 
                       onClick={() => setView("register")}
                       className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
@@ -192,8 +192,8 @@ export default function App() {
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
                 >
-                  <h2 className="text-xs uppercase tracking-[0.4em] text-brand-red font-bold mb-8">Why We Exist</h2>
-                  <h3 className="font-display text-4xl sm:text-5xl md:text-7xl uppercase tracking-tight mb-12">
+                  <h2 className="section-eyebrow mb-8">Why We Exist</h2>
+                  <h3 className="section-title-lg mb-12">
                     What is <span className="text-brand-red">IBMC?</span>
                   </h3>
                   <div className="space-y-10 text-xl md:text-2xl font-light leading-relaxed text-white/80">
@@ -244,7 +244,7 @@ export default function App() {
                       <p className="text-brand-red font-display text-4xl uppercase tracking-tight">Be in the right room.</p>
                     </div>
 
-                    <div className="pt-12">
+                    <div className="flex justify-center pt-12">
                       <button 
                         onClick={() => setView("register")}
                         className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
@@ -261,48 +261,53 @@ export default function App() {
             </section>
 
             {/* Section 2 – THE REAL PROBLEM */}
-            <section className="py-20 sm:py-32 px-4 sm:px-6 bg-zinc-950">
-              <div className="max-w-7xl mx-auto grid md:grid-cols-2 gap-16 items-center">
-                <div>
-                  <h2 className="font-display text-4xl sm:text-6xl md:text-8xl leading-none uppercase tracking-tight">
-                    Maybe you’re <br />
-                    not missing <br />
-                    <span className="text-stroke">effort.</span>
-                  </h2>
-                  <h3 className="mt-6 text-3xl md:text-4xl font-light text-brand-red">
-                    Maybe You’re not in a room that accelerates growth.
-                  </h3>
-                </div>
-                
-                <div className="space-y-8">
-                  {[
-                    "You’re working hard but growth feels random",
-                    "You’re networking but not progressing",
-                    "You’re meeting people but not decision-makers",
-                    "You’re active but not advancing"
-                    ].map((text, i) => (
-                    <motion.div 
-                      key={i}
-                      initial={{ opacity: 0, x: 20 }}
-                      whileInView={{ opacity: 1, x: 0 }}
-                      transition={{ delay: i * 0.1 }}
-                      viewport={{ once: true }}
-                      className="flex items-start gap-4 group"
-                    >
-                      <div className="mt-1.5 w-2 h-2 rounded-full bg-brand-red group-hover:scale-150 transition-transform" />
-                      <p className="text-xl md:text-2xl font-medium text-white/80">{text}</p>
-                    </motion.div>
-                  ))}
-                  <div className="pt-8">
-                    <button 
-                      onClick={() => setView("register")}
-                      className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
-                    >
-                      <span className="relative z-10 flex items-center gap-3">
-                        Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
-                      </span>
-                      <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                    </button>
+            <section className="py-12 sm:py-20 px-4 sm:px-6 bg-zinc-950">
+              <div className="max-w-7xl mx-auto">
+                <div className="border-2 border-brand-red/40 rounded-3xl p-8 sm:p-12 md:p-16 bg-black/50">
+                  <div className="grid md:grid-cols-2 gap-12 md:gap-20 items-center">
+                    <div>
+                      <h2 className="section-eyebrow mb-6">The Problem</h2>
+                      <h3 className="font-display text-[clamp(2.5rem,10vw,6rem)] sm:text-5xl md:text-6xl lg:text-7xl leading-[0.95] uppercase tracking-tight">
+                        Maybe you’re <br />
+                        not missing <br />
+                        <span className="text-stroke">effort.</span>
+                      </h3>
+                      <p className="mt-6 text-xl sm:text-2xl md:text-3xl font-light text-brand-red">
+                        Maybe you’re not in a room that accelerates growth.
+                      </p>
+                    </div>
+                    
+                    <div className="space-y-4 sm:space-y-6">
+                      {[
+                        "You’re working hard but growth feels random",
+                        "You’re networking but not progressing",
+                        "You’re meeting people but not decision-makers",
+                        "You’re active but not advancing"
+                        ].map((text, i) => (
+                        <motion.div 
+                          key={i}
+                          initial={{ opacity: 0, x: 20 }}
+                          whileInView={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.1 }}
+                          viewport={{ once: true }}
+                          className="flex items-start gap-4 group"
+                        >
+                          <div className="mt-1.5 w-2 h-2 rounded-full bg-brand-red group-hover:scale-150 transition-transform shrink-0" />
+                          <p className="text-lg sm:text-xl md:text-2xl font-medium text-white/80">{text}</p>
+                        </motion.div>
+                      ))}
+                      <div className="flex justify-center pt-6 sm:pt-8">
+                        <button 
+                          onClick={() => setView("register")}
+                          className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                        >
+                          <span className="relative z-10 flex items-center gap-3">
+                            Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+                          </span>
+                          <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -317,9 +322,10 @@ export default function App() {
 
               <div className="max-w-7xl mx-auto">
                 <div className="text-center mb-24">
-                  <h2 className="font-display text-4xl sm:text-6xl md:text-9xl uppercase tracking-tight mb-8">
+                  <h2 className="section-eyebrow mb-6">The Shift</h2>
+                  <h3 className="section-title-lg mb-8">
                     Rooms shape <span className="text-brand-red">results.</span>
-                  </h2>
+                  </h3>
                   <p className="text-xl md:text-2xl text-white/60 max-w-2xl mx-auto">
                     The room you sit in determines everything about your trajectory.
                   </p>
@@ -335,14 +341,14 @@ export default function App() {
                     />
                     <div className="absolute inset-0 bg-brand-red/10 mix-blend-overlay" />
                     <div className="absolute bottom-8 left-8 right-8">
-                      <p className="text-sm uppercase tracking-widest font-bold text-brand-red mb-2">The Result</p>
-                      <p className="text-2xl font-display uppercase tracking-tight">Strategic Alignment</p>
+                      <p className="section-eyebrow mb-2">The Result</p>
+                      <p className="section-title text-xl sm:text-2xl">Strategic Alignment</p>
                     </div>
                   </div>
 
                   <div className="glass-card p-10 sm:p-14 md:p-16 rounded-3xl order-1 md:order-2 flex flex-col justify-center items-center text-center min-h-[400px] md:min-h-[500px] w-full">
-                    <h4 className="text-xs uppercase tracking-[0.3em] text-brand-red mb-6 font-bold">The Environment Effect</h4>
-                    <p className="font-display text-3xl sm:text-4xl md:text-5xl lg:text-6xl uppercase tracking-tight text-white mb-10 md:mb-14 leading-tight max-w-xl">
+                    <h4 className="section-eyebrow mb-6">The Environment Effect</h4>
+                    <p className="section-title text-white mb-10 md:mb-14 leading-tight max-w-xl">
                       Rooms Decide <span className="text-brand-red">Results.</span>
                     </p>
                     <ul className="grid sm:grid-cols-2 gap-x-12 sm:gap-x-16 md:gap-x-20 gap-y-8 md:gap-y-10 w-full max-w-2xl mx-auto">
@@ -400,10 +406,11 @@ export default function App() {
               <div className="max-w-7xl mx-auto">
                 <div className="grid lg:grid-cols-2 gap-20 items-end mb-20">
                   <div>
-                    <h2 className="font-display text-4xl sm:text-6xl md:text-8xl uppercase tracking-tight leading-[0.9]">
+                    <h2 className="section-eyebrow mb-6">What This Room Is</h2>
+                    <h3 className="section-title-lg leading-[0.95]">
                       This is not <br />
                       just an <span className="text-brand-red">event.</span>
-                    </h2>
+                    </h3>
                   </div>
                   <div className="pb-4">
                     <p className="text-2xl md:text-3xl font-light leading-tight">
@@ -463,8 +470,8 @@ export default function App() {
                   whileInView={{ opacity: 1, scale: 1 }}
                   viewport={{ once: true }}
                 >
-                  <h2 className="text-xs uppercase tracking-[0.4em] text-brand-red font-bold mb-8">The Consequence</h2>
-                  <h3 className="font-display text-4xl sm:text-5xl md:text-7xl uppercase tracking-tight mb-12">
+                  <h2 className="section-eyebrow mb-8">The Consequence</h2>
+                  <h3 className="section-title-lg mb-12">
                     What happens if you <br /><span className="text-stroke">miss the room?</span>
                   </h3>
                   
@@ -512,9 +519,10 @@ export default function App() {
               </div>
 
               <div className="relative z-10 max-w-4xl mx-auto">
-                <h2 className="font-display text-4xl sm:text-6xl md:text-9xl uppercase tracking-tight mb-4">
+                <h2 className="section-eyebrow mb-6">Your Decision</h2>
+                <h3 className="section-title-lg mb-4">
                   Still looking?
-                </h2>
+                </h3>
                 
                 <div className="my-12">
                   <p className="text-2xl md:text-3xl font-light opacity-50 mb-4 italic">Pause.</p>
@@ -529,7 +537,7 @@ export default function App() {
                   </p>
                 </div>
 
-                <div className="pt-8">
+                <div className="flex justify-center pt-8">
                   <button 
                     onClick={() => setView("register")}
                     className="group relative min-h-[56px] px-8 py-6 sm:px-16 sm:py-6 bg-brand-red text-white font-display text-2xl sm:text-3xl uppercase tracking-wider rounded-full overflow-hidden transition-all hover:scale-110 hover:shadow-[0_0_50px_rgba(227,30,36,0.4)] active:scale-95 cursor-pointer"
@@ -539,9 +547,9 @@ export default function App() {
                     </span>
                     <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                   </button>
-                  <div className="mt-8 space-y-3">
-                    <p className="text-lg font-medium text-white/80">Stop looking. Start finding.</p>
-                    <p className="text-xs uppercase tracking-[0.3em] text-brand-red font-bold">IBMC 2026</p>
+                  <div className="mt-10 space-y-4">
+                    <p className="text-xl md:text-2xl font-medium text-white/80">Stop looking. Start finding.</p>
+                    <p className="text-3xl md:text-5xl uppercase tracking-[0.2em] text-brand-red font-bold">IBMC 2026</p>
                     <p className="text-xl md:text-2xl font-semibold text-white/90 tracking-wide">June 17–18, 2026</p>
                     <p className="text-lg md:text-xl font-medium text-white/80">Pasay City</p>
                   </div>
@@ -552,8 +560,8 @@ export default function App() {
             {/* FAQ Section */}
             <section className="py-20 sm:py-32 px-4 sm:px-6 bg-zinc-950 border-t border-white/5">
               <div className="max-w-3xl mx-auto">
-                <h2 className="text-xs uppercase tracking-[0.4em] text-brand-red font-bold mb-8">FAQ</h2>
-                <h3 className="font-display text-4xl sm:text-5xl md:text-6xl uppercase tracking-tight mb-16">
+                <h2 className="section-eyebrow mb-8">FAQ</h2>
+                <h3 className="section-title-lg mb-16">
                   Frequently asked <span className="text-brand-red">questions</span>
                 </h3>
                 <div className="space-y-4">

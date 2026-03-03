@@ -39,6 +39,19 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+/* Consistent section headers */
+.section-eyebrow {
+  @apply text-base sm:text-xs uppercase tracking-[0.35em] sm:tracking-[0.4em] text-brand-red font-bold;
+}
+
+.section-title {
+  @apply font-display text-4xl sm:text-5xl md:text-6xl uppercase tracking-tight;
+}
+
+.section-title-lg {
+  @apply font-display text-4xl sm:text-5xl md:text-6xl lg:text-7xl uppercase tracking-tight;
+}
+
 /* Mobile: prevent double-tap zoom delay, improve tap responsiveness */
 button, a, [role="button"] {
   touch-action: manipulation;
