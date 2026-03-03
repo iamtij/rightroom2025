@@ -325,8 +325,8 @@ export default function App() {
                   </p>
                 </div>
 
-                <div className="grid md:grid-cols-2 gap-12 mb-32 items-center">
-                  <div className="relative h-[500px] rounded-3xl overflow-hidden order-2 md:order-1">
+                <div className="grid md:grid-cols-2 gap-12 mb-32 items-stretch">
+                  <div className="relative min-h-[400px] md:min-h-[500px] rounded-3xl overflow-hidden order-2 md:order-1">
                     <img 
                       src="https://images.unsplash.com/photo-1543269865-cbf427effbad?auto=format&fit=crop&q=80&w=800" 
                       alt="Business handshake" 
@@ -340,24 +340,27 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="glass-card p-12 rounded-3xl order-1 md:order-2">
-                    <h4 className="text-xs uppercase tracking-[0.3em] text-brand-red mb-8 font-bold">The Environment Effect</h4>
-                    <ul className="space-y-6">
+                  <div className="glass-card p-10 sm:p-14 md:p-16 rounded-3xl order-1 md:order-2 flex flex-col justify-center items-center text-center min-h-[400px] md:min-h-[500px] w-full">
+                    <h4 className="text-xs uppercase tracking-[0.3em] text-brand-red mb-6 font-bold">The Environment Effect</h4>
+                    <p className="font-display text-3xl sm:text-4xl md:text-5xl lg:text-6xl uppercase tracking-tight text-white mb-10 md:mb-14 leading-tight max-w-xl">
+                      Rooms Decide <span className="text-brand-red">Results.</span>
+                    </p>
+                    <ul className="grid sm:grid-cols-2 gap-x-12 sm:gap-x-16 md:gap-x-20 gap-y-8 md:gap-y-10 w-full max-w-2xl mx-auto">
                       {[
-                        "The level of conversations you have",
-                        "The quality of referrals you receive",
-                        "The partnerships you form",
-                        "The ideas you discover"
+                        "The level of conversations you have.",
+                        "The quality of referrals you receive.",
+                        "The partnerships you form.",
+                        "The ideas you discover."
                       ].map((item, i) => (
-                        <li key={i} className="flex items-center gap-4 text-xl font-medium">
-                          <CheckCircle2 className="text-brand-red w-6 h-6 shrink-0" />
-                          {item}
+                        <li key={i} className="flex items-start gap-4 text-lg sm:text-xl font-medium text-left">
+                          <CheckCircle2 className="text-brand-red w-6 h-6 shrink-0 mt-0.5" />
+                          <span>{item}</span>
                         </li>
                       ))}
                     </ul>
                   </div>
 
-                  <div className="flex flex-col justify-center gap-8">
+                  <div className="flex flex-col justify-center gap-8 md:col-span-2 max-w-2xl md:mx-auto">
                     {[
                       { from: "I was chasing leads.", to: "I chose to be in the right room. I found my best client." },
                       { from: "I was begging for attention.", to: "I stepped into the right room. I found my next partner." },
