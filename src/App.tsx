@@ -171,7 +171,7 @@ export default function App() {
                       <p className="font-semibold text-white text-2xl md:text-3xl">They struggle because growth feels random.</p>
                     </div>
 
-                    <div className="flex flex-col md:flex-row justify-center gap-4 md:gap-12 text-brand-red font-display uppercase tracking-widest text-lg">
+                    <div className="flex flex-col md:flex-row justify-center gap-4 md:gap-12 text-white font-sans font-bold uppercase tracking-widest text-lg">
                       <span>Random introductions.</span>
                       <span>Random opportunities.</span>
                       <span>Random results.</span>
@@ -193,6 +193,18 @@ export default function App() {
                     <div className="space-y-2 pt-8">
                       <p className="text-3xl font-bold uppercase tracking-tighter">Stop looking. Start finding.</p>
                       <p className="text-brand-red font-display text-4xl uppercase tracking-tighter">Be in the right room.</p>
+                    </div>
+
+                    <div className="pt-12">
+                      <button 
+                        onClick={() => setView("register")}
+                        className="group relative px-12 py-5 bg-brand-red text-white font-display text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                      >
+                        <span className="relative z-10 flex items-center gap-3">
+                          Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+                        </span>
+                        <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+                      </button>
                     </div>
                   </div>
                 </motion.div>
@@ -219,7 +231,7 @@ export default function App() {
                     "You’re networking but not progressing",
                     "You’re meeting people but not decision-makers",
                     "You’re active but not advancing"
-                  ].map((text, i) => (
+                    ].map((text, i) => (
                     <motion.div 
                       key={i}
                       initial={{ opacity: 0, x: 20 }}
@@ -232,6 +244,17 @@ export default function App() {
                       <p className="text-xl md:text-2xl font-medium text-white/80">{text}</p>
                     </motion.div>
                   ))}
+                  <div className="pt-8">
+                    <button 
+                      onClick={() => setView("register")}
+                      className="group relative px-12 py-5 bg-brand-red text-white font-display text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                    >
+                      <span className="relative z-10 flex items-center gap-3">
+                        Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+                      </span>
+                      <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+                    </button>
+                  </div>
                 </div>
               </div>
             </section>
@@ -305,6 +328,18 @@ export default function App() {
                     ))}
                   </div>
                 </div>
+
+                <div className="flex justify-center pt-12">
+                  <button 
+                    onClick={() => setView("register")}
+                    className="group relative px-12 py-5 bg-brand-red text-white font-display text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                  >
+                    <span className="relative z-10 flex items-center gap-3">
+                      Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+                    </span>
+                    <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+                  </button>
+                </div>
               </div>
             </section>
 
@@ -349,6 +384,18 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+
+                <div className="flex justify-center pt-16">
+                  <button 
+                    onClick={() => setView("register")}
+                    className="group relative px-12 py-5 bg-brand-red text-white font-display text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                  >
+                    <span className="relative z-10 flex items-center gap-3">
+                      Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+                    </span>
+                    <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+                  </button>
+                </div>
               </div>
             </section>
 
@@ -391,6 +438,15 @@ export default function App() {
                     </p>
                     <div className="mt-8 flex flex-col md:flex-row items-center justify-center gap-6">
                       <p className="text-lg font-medium">Don't let 2026 be another year of "almost."</p>
+                      <button 
+                        onClick={() => setView("register")}
+                        className="group relative px-12 py-5 bg-brand-red text-white font-display text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer shrink-0"
+                      >
+                        <span className="relative z-10 flex items-center gap-3">
+                          Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+                        </span>
+                        <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
+                      </button>
                     </div>
                   </div>
                 </motion.div>

@@ -5,6 +5,7 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-display: "Anton", sans-serif;
   --color-brand-red: #E31E24;
+  --color-brand-red-light: #ff5555; /* Higher contrast on dark backgrounds */
 }
 
 :root {
