@@ -11,6 +11,40 @@ function BoldIBMC({ text }: { text: string }) {
   return <>{parts.map((part, i) => part === "IBMC" ? <span key={i} className="font-bold">IBMC</span> : part)}</>;
 }
 
+const scrollReveal = {
+  hidden: { opacity: 0, y: 40 },
+  visible: (i = 0) => ({
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.6, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] },
+  }),
+};
+const scrollRevealScale = {
+  hidden: { opacity: 0, scale: 0.92 },
+  visible: (i = 0) => ({
+    opacity: 1,
+    scale: 1,
+    transition: { duration: 0.6, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] },
+  }),
+};
+const scrollRevealLeft = {
+  hidden: { opacity: 0, x: -40 },
+  visible: (i = 0) => ({
+    opacity: 1,
+    x: 0,
+    transition: { duration: 0.6, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] },
+  }),
+};
+const scrollRevealRight = {
+  hidden: { opacity: 0, x: 40 },
+  visible: (i = 0) => ({
+    opacity: 1,
+    x: 0,
+    transition: { duration: 0.6, delay: i * 0.1, ease: [0.22, 1, 0.36, 1] },
+  }),
+};
+const viewport = { once: true, margin: "-80px" };
+
 function CountdownBanner() {
   const [now, setNow] = useState(() => new Date());
 
@@ -224,24 +258,36 @@ export default function App() {
             </section>
 
             {/* Section: All in One Room */}
-            <section className="py-20 sm:py-28 px-4 sm:px-6 bg-zinc-950 border-y border-white/5">
+            <section className="py-20 sm:py-28 px-4 sm:px-6 bg-zinc-950 border-y border-white/5 overflow-hidden">
               <div className="max-w-5xl mx-auto text-center">
-                <h3 className="font-display text-3xl sm:text-4xl md:text-5xl uppercase tracking-wide text-white mb-12 sm:mb-16">
+                <motion.h3
+                  initial="hidden"
+                  whileInView="visible"
+                  viewport={viewport}
+                  variants={scrollReveal}
+                  className="font-display text-3xl sm:text-4xl md:text-5xl uppercase tracking-wide text-white mb-12 sm:mb-16"
+                >
                   All in one room.
-                </h3>
+                </motion.h3>
                 <div className="flex flex-col sm:flex-row items-stretch justify-center gap-4 md:gap-6">
-                  <div className="border-2 border-brand-red/60 bg-white/5 rounded-2xl p-6 sm:p-8 flex flex-col items-center justify-center min-h-[120px] sm:min-h-[140px] gap-4">
-                    <Users className="w-10 h-10 sm:w-12 sm:h-12 text-brand-red shrink-0" />
-                    <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white text-center uppercase tracking-tight">The right conversations</p>
-                  </div>
-                  <div className="border-2 border-brand-red/60 bg-white/5 rounded-2xl p-6 sm:p-8 flex flex-col items-center justify-center min-h-[120px] sm:min-h-[140px] gap-4">
-                    <Handshake className="w-10 h-10 sm:w-12 sm:h-12 text-brand-red shrink-0" />
-                    <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white text-center uppercase tracking-tight">The right connections</p>
-                  </div>
-                  <div className="border-2 border-brand-red/60 bg-white/5 rounded-2xl p-6 sm:p-8 flex flex-col items-center justify-center min-h-[120px] sm:min-h-[140px] gap-4">
-                    <TrendingUp className="w-10 h-10 sm:w-12 sm:h-12 text-brand-red shrink-0" />
-                    <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white text-center uppercase tracking-tight">The right opportunities</p>
-                  </div>
+                  {[
+                    { icon: Users, text: "The right conversations" },
+                    { icon: Handshake, text: "The right connections" },
+                    { icon: TrendingUp, text: "The right opportunities" },
+                  ].map((item, i) => (
+                    <motion.div
+                      key={i}
+                      initial="hidden"
+                      whileInView="visible"
+                      viewport={viewport}
+                      variants={scrollRevealScale}
+                      custom={i}
+                      className="border-2 border-brand-red/60 bg-white/5 rounded-2xl p-6 sm:p-8 flex flex-col items-center justify-center min-h-[120px] sm:min-h-[140px] gap-4"
+                    >
+                      <item.icon className="w-10 h-10 sm:w-12 sm:h-12 text-brand-red shrink-0" />
+                      <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white text-center uppercase tracking-tight">{item.text}</p>
+                    </motion.div>
+                  ))}
                 </div>
               </div>
             </section>
@@ -323,11 +369,22 @@ export default function App() {
             </section>
 
             {/* Section 2 – THE REAL PROBLEM */}
-            <section className="py-12 sm:py-20 px-4 sm:px-6 bg-zinc-950">
+            <section className="py-12 sm:py-20 px-4 sm:px-6 bg-zinc-950 overflow-hidden">
               <div className="max-w-7xl mx-auto">
-                <div className="border-2 border-brand-red/40 rounded-3xl p-8 sm:p-12 md:p-16 bg-black/50">
+                <motion.div
+                  initial="hidden"
+                  whileInView="visible"
+                  viewport={viewport}
+                  variants={scrollRevealScale}
+                  className="border-2 border-brand-red/40 rounded-3xl p-8 sm:p-12 md:p-16 bg-black/50"
+                >
                   <div className="grid md:grid-cols-2 gap-12 md:gap-20 items-center">
-                    <div>
+                    <motion.div
+                      initial="hidden"
+                      whileInView="visible"
+                      viewport={viewport}
+                      variants={scrollRevealLeft}
+                    >
                       <h2 className="section-eyebrow mb-6">The Problem</h2>
                       <h3 className="font-display text-[clamp(2.5rem,10vw,6rem)] sm:text-5xl md:text-6xl lg:text-7xl leading-[0.95] uppercase tracking-wide">
                         Maybe you’re <br />
@@ -337,9 +394,15 @@ export default function App() {
                       <p className="mt-6 text-xl sm:text-2xl md:text-3xl font-light text-brand-red">
                         Maybe you’re not in a room that accelerates growth.
                       </p>
-                    </div>
+                    </motion.div>
                     
-                    <div className="space-y-4 sm:space-y-6">
+                    <motion.div
+                      initial="hidden"
+                      whileInView="visible"
+                      viewport={viewport}
+                      variants={scrollRevealRight}
+                      className="space-y-4 sm:space-y-6"
+                    >
                       {[
                         "You’re working hard but growth feels random",
                         "You’re networking but not progressing",
@@ -369,9 +432,9 @@ export default function App() {
                           <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                         </button>
                       </div>
-                    </div>
+                    </motion.div>
                   </div>
-                </div>
+                </motion.div>
               </div>
             </section>
 
@@ -383,7 +446,13 @@ export default function App() {
               </div>
 
               <div className="max-w-7xl mx-auto">
-                <div className="text-center mb-24">
+                <motion.div
+                  initial="hidden"
+                  whileInView="visible"
+                  viewport={viewport}
+                  variants={scrollReveal}
+                  className="text-center mb-24"
+                >
                   <h2 className="section-eyebrow mb-6">The Shift</h2>
                   <h3 className="section-title-lg mb-8">
                     Rooms shape <span className="text-brand-red">results.</span>
@@ -391,10 +460,16 @@ export default function App() {
                   <p className="text-xl md:text-2xl text-white/60 max-w-2xl mx-auto">
                     The room you sit in determines everything about your trajectory.
                   </p>
-                </div>
+                </motion.div>
 
                 <div className="grid md:grid-cols-2 gap-12 mb-32 items-stretch">
-                  <div className="relative min-h-[400px] md:min-h-[500px] rounded-3xl overflow-hidden order-2 md:order-1">
+                  <motion.div
+                    initial="hidden"
+                    whileInView="visible"
+                    viewport={viewport}
+                    variants={scrollRevealLeft}
+                    className="relative min-h-[400px] md:min-h-[500px] rounded-3xl overflow-hidden order-2 md:order-1"
+                  >
                     <img
                       src="/assets/ibmc-strategic-alignment.png"
                       alt="Strategic alignment at IBMC"
@@ -405,9 +480,15 @@ export default function App() {
                       <p className="section-eyebrow mb-2">The Result</p>
                       <p className="section-title text-xl sm:text-2xl">Strategic Alignment</p>
                     </div>
-                  </div>
+                  </motion.div>
 
-                  <div className="glass-card p-10 sm:p-14 md:p-16 rounded-3xl order-1 md:order-2 flex flex-col justify-center items-center text-center min-h-[400px] md:min-h-[500px] w-full">
+                  <motion.div
+                    initial="hidden"
+                    whileInView="visible"
+                    viewport={viewport}
+                    variants={scrollRevealRight}
+                    className="glass-card p-10 sm:p-14 md:p-16 rounded-3xl order-1 md:order-2 flex flex-col justify-center items-center text-center min-h-[400px] md:min-h-[500px] w-full"
+                  >
                     <h4 className="section-eyebrow mb-6">The Environment Effect</h4>
                     <p className="section-title text-white mb-10 md:mb-14 leading-tight max-w-xl">
                       Rooms Decide <span className="text-brand-red">Results.</span>
@@ -425,7 +506,7 @@ export default function App() {
                         </li>
                       ))}
                     </ul>
-                  </div>
+                  </motion.div>
 
                   <div className="flex flex-col justify-center gap-8 md:col-span-2 max-w-2xl md:mx-auto">
                     {[
@@ -465,7 +546,13 @@ export default function App() {
             {/* Section 4 – WHAT THIS ROOM IS */}
             <section className="py-20 sm:py-32 px-4 sm:px-6 bg-white text-black">
               <div className="max-w-7xl mx-auto">
-                <div className="grid lg:grid-cols-2 gap-20 items-end mb-20">
+                <motion.div
+                  initial="hidden"
+                  whileInView="visible"
+                  viewport={viewport}
+                  variants={scrollReveal}
+                  className="grid lg:grid-cols-2 gap-20 items-end mb-20"
+                >
                   <div>
                     <h2 className="section-eyebrow mb-6">What This Room Is</h2>
                     <h3 className="section-title-lg leading-[0.95]">
@@ -478,21 +565,27 @@ export default function App() {
                       This is a room <span className="font-bold">designed for business.</span> No fluff. No jargon. Just outcomes.
                     </p>
                   </div>
-                </div>
+                </motion.div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mb-12">
-                  <div className="relative aspect-[4/3] rounded-2xl overflow-hidden">
-                    <img src="/assets/ibmc-2.png" alt="IBMC networking" className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-500" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
-                  </div>
-                  <div className="relative aspect-[4/3] rounded-2xl overflow-hidden">
-                    <img src="/assets/ibmc-3.png" alt="IBMC conference discussion" className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-500" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
-                  </div>
-                  <div className="relative aspect-[4/3] rounded-2xl overflow-hidden">
-                    <img src="/assets/ibmc-4.png" alt="IBMC business matching" className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-500" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
-                  </div>
+                  {[
+                    { src: "/assets/ibmc-2.png", alt: "IBMC networking" },
+                    { src: "/assets/ibmc-3.png", alt: "IBMC conference discussion" },
+                    { src: "/assets/ibmc-4.png", alt: "IBMC business matching" },
+                  ].map((img, i) => (
+                    <motion.div
+                      key={i}
+                      initial="hidden"
+                      whileInView="visible"
+                      viewport={viewport}
+                      variants={scrollRevealScale}
+                      custom={i}
+                      className="relative aspect-[4/3] rounded-2xl overflow-hidden"
+                    >
+                      <img src={img.src} alt={img.alt} className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-500" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+                    </motion.div>
+                  ))}
                 </div>
 
                 <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8">
@@ -597,7 +690,7 @@ export default function App() {
                     Or ready to be in the <span className="text-brand-red">right room?</span>
                   </h3>
                   <p className="text-xl sm:text-2xl md:text-3xl text-white/90 font-light leading-relaxed">
-                    <span className="font-semibold text-white">Growth</span> won&apos;t <span className="text-brand-red font-semibold">fix itself.</span>
+                    <span className="font-semibold text-white">Growth</span> isn&apos;t <span className="text-brand-red font-semibold">random.</span>
                   </p>
                   <p className="text-xl sm:text-2xl md:text-3xl text-white/90 font-light leading-relaxed">
                     <span className="text-brand-red font-semibold">Rooms</span> decide <span className="font-semibold text-white">results.</span>
@@ -616,7 +709,7 @@ export default function App() {
                     className="group relative min-h-[52px] px-6 py-4 sm:px-10 sm:py-5 lg:px-12 lg:py-5 bg-brand-red text-white font-display uppercase tracking-wider rounded-full overflow-hidden transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(227,30,36,0.3)] active:scale-95 cursor-pointer"
                   >
                     <span className="relative z-10 flex items-center gap-3">
-                      Be in the Right Room <ArrowRight className="w-6 h-6 sm:w-7 sm:h-7 group-hover:translate-x-2 transition-transform" />
+                      Secure Your Seat <ArrowRight className="w-6 h-6 sm:w-7 sm:h-7 group-hover:translate-x-2 transition-transform" />
                     </span>
                     <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                   </button>
