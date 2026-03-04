@@ -5,8 +5,18 @@ import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  const siteUrl = env.VITE_SITE_URL || env.SITE_URL || 'https://rightroom2025.railway.app';
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [
+      react(),
+      tailwindcss(),
+      {
+        name: 'html-transform',
+        transformIndexHtml(html) {
+          return html.replace(/__SITE_URL__/g, siteUrl.replace(/\/$/, ''));
+        },
+      },
+    ],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },

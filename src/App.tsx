@@ -126,7 +126,7 @@ function LogoMarquee() {
       {[...Array(2)].map((_, setIdx) => (
         <div key={setIdx} className="flex items-center gap-0 shrink-0">
           {[...Array(40)].map((_, i) => (
-            <img key={`${setIdx}-${i}`} src="/assets/ibmc-logo-white.png" alt="IBMC 2026" className="h-full w-auto object-contain shrink-0 scale-[0.4] sm:scale-[0.5] md:scale-[0.6] -mr-[650px] md:-mr-[350px]" />
+            <img key={`${setIdx}-${i}`} src="/assets/ibmc-logo-white-2.png" alt="IBMC 2026" className="h-full w-auto object-contain shrink-0 scale-[0.6] sm:scale-[0.7] md:scale-[0.8] -mr-[650px] md:-mr-[350px]" />
           ))}
         </div>
       ))}
@@ -162,12 +162,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-black text-white selection:bg-brand-red selection:text-white overflow-x-hidden font-sans">
-      <header className="fixed top-0 left-0 right-0 z-[60] flex flex-col">
+      <header className="fixed top-0 left-0 right-0 z-[60] flex flex-col overflow-visible">
         <CountdownBanner />
-        <nav className="w-full px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-black shrink-0">
-              <div className="flex items-center gap-2">
-                <span className="font-display text-2xl font-bold tracking-tight text-brand-red">IBMC</span>
-                <span className="text-xs font-bold tracking-[0.2em] opacity-50 uppercase">2026</span>
+        <nav className="w-full px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-black shrink-0 overflow-visible">
+              <div className="flex items-center h-10 sm:h-12 overflow-visible">
+                <img src="/assets/ibmc-logo-white-2.png" alt="IBMC 2026" className="h-full w-auto object-contain object-left origin-left scale-[2.75] sm:scale-[3]" />
               </div>
               <button 
                 onClick={() => setView("register")}
@@ -789,9 +788,8 @@ export default function App() {
           >
             <div className="w-full max-w-xl">
               <div className="flex justify-between items-center mb-12">
-                <div className="flex items-center gap-2">
-                  <span className="font-display text-2xl font-bold tracking-tight text-brand-red">IBMC</span>
-                  <span className="text-xs font-bold tracking-[0.2em] opacity-50 uppercase">2026</span>
+                <div className="flex items-center">
+                  <img src="/assets/ibmc-logo-white-2.png" alt="IBMC 2026" className="h-12 sm:h-14 w-auto max-h-16 sm:max-h-20 object-contain" />
                 </div>
                 <button 
                   onClick={() => setView("landing")}
