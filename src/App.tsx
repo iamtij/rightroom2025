@@ -207,11 +207,10 @@ export default function App() {
                     </p>
                     
                     <div className="relative h-64 md:h-96 w-full rounded-3xl overflow-hidden my-12">
-                      <img 
-                        src="https://images.unsplash.com/photo-1515187029135-18ee286d815b?auto=format&fit=crop&q=80&w=1200" 
-                        alt="Professionals collaborating" 
+                      <img
+                        src="/assets/ibmc-5.png"
+                        alt="IBMC event venue"
                         className="w-full h-full object-cover grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all duration-700"
-                        referrerPolicy="no-referrer"
                       />
                       <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent" />
                     </div>
@@ -338,11 +337,10 @@ export default function App() {
 
                 <div className="grid md:grid-cols-2 gap-12 mb-32 items-stretch">
                   <div className="relative min-h-[400px] md:min-h-[500px] rounded-3xl overflow-hidden order-2 md:order-1">
-                    <img 
-                      src="https://images.unsplash.com/photo-1543269865-cbf427effbad?auto=format&fit=crop&q=80&w=800" 
-                      alt="Business handshake" 
+                    <img
+                      src="/assets/ibmc-strategic-alignment.png"
+                      alt="Strategic alignment at IBMC"
                       className="w-full h-full object-cover grayscale opacity-50"
-                      referrerPolicy="no-referrer"
                     />
                     <div className="absolute inset-0 bg-brand-red/10 mix-blend-overlay" />
                     <div className="absolute bottom-8 left-8 right-8">
@@ -424,16 +422,22 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8">
-                  <div className="relative h-full min-h-[300px] rounded-3xl overflow-hidden hidden lg:block">
-                    <img 
-                      src="https://images.unsplash.com/photo-1556761175-4b46a572b786?auto=format&fit=crop&q=80&w=800" 
-                      alt="Business meeting" 
-                      className="w-full h-full object-cover grayscale opacity-40"
-                      referrerPolicy="no-referrer"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-br from-brand-red/20 to-transparent" />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-6 mb-12">
+                  <div className="relative aspect-[4/3] rounded-2xl overflow-hidden">
+                    <img src="/assets/ibmc-2.png" alt="IBMC networking" className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-500" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
                   </div>
+                  <div className="relative aspect-[4/3] rounded-2xl overflow-hidden">
+                    <img src="/assets/ibmc-3.png" alt="IBMC conference discussion" className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-500" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+                  </div>
+                  <div className="relative aspect-[4/3] rounded-2xl overflow-hidden">
+                    <img src="/assets/ibmc-4.png" alt="IBMC business matching" className="w-full h-full object-cover grayscale hover:grayscale-0 transition-all duration-500" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
+                  </div>
+                </div>
+
+                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-8">
                   {[
                     { icon: Users, title: "Business owners ready to collaborate", desc: "Connect with peers who are at your level or higher." },
                     { icon: Handshake, title: "Structured one-to-one business meetings", desc: "No random networking. Purposeful, timed interactions." },
