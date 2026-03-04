@@ -68,6 +68,15 @@ button, a, [role="button"] {
   touch-action: manipulation;
 }
 
+.bni-logo {
+  height: 120px;
+}
+@media (min-width: 640px) {
+  .bni-logo {
+    height: 100px;
+  }
+}
+
 /* Safe area for notched devices (e.g. iPhone) */
 @supports (padding: env(safe-area-inset-top)) {
   .countdown-banner {
