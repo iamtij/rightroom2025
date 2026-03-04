@@ -84,7 +84,7 @@ export default function App() {
               </div>
               <button 
                 onClick={() => setView("register")}
-                className="min-h-[48px] min-w-[44px] px-6 py-3.5 border border-white/20 rounded-full text-base font-semibold hover:bg-white hover:text-black transition-all duration-300 cursor-pointer"
+                className="animate-pulse-slow min-h-[48px] min-w-[44px] px-6 py-3.5 bg-brand-red text-white border border-brand-red rounded-full text-base font-semibold hover:bg-brand-red-light hover:shadow-[0_0_24px_rgba(227,30,36,0.6)] transition-all duration-300 cursor-pointer"
               >
                 Secure Your Seat
               </button>
@@ -513,45 +513,45 @@ export default function App() {
             </section>
 
             {/* Section 5 – DECISION */}
-            <section className="py-24 sm:py-40 px-4 sm:px-6 text-center relative overflow-hidden">
+            <section className="py-20 sm:py-28 lg:py-32 px-4 sm:px-6 text-center relative overflow-hidden">
               <div className="absolute inset-0 z-0 opacity-30">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[1000px] bg-brand-red/10 rounded-full blur-[150px]" />
               </div>
 
               <div className="relative z-10 max-w-4xl mx-auto">
                 <h2 className="section-eyebrow mb-6">Your Decision</h2>
-                <h3 className="section-title-lg mb-4">
+                <h3 className="section-title mb-4 sm:mb-6">
                   Still looking?
                 </h3>
                 
-                <div className="my-12">
-                  <p className="text-2xl md:text-3xl font-light opacity-50 mb-4 italic">Pause.</p>
-                  <h3 className="text-3xl md:text-5xl font-semibold tracking-tight mb-8">
+                <div className="my-8 sm:my-12">
+                  <p className="text-xl sm:text-2xl lg:text-2xl font-light opacity-50 mb-4 italic">Pause.</p>
+                  <h3 className="text-2xl sm:text-3xl md:text-4xl font-semibold tracking-tight mb-6 sm:mb-8">
                     Or ready to be in the <span className="text-brand-red">right room?</span>
                   </h3>
-                  <p className="text-xl md:text-2xl text-white/80 mb-2">Growth won&apos;t fix itself.</p>
-                  <p className="text-xl md:text-2xl text-white/80 mb-6">Rooms decide results.</p>
-                  <p className="text-lg md:text-xl text-white/70">
+                  <p className="text-lg sm:text-xl text-white/80 mb-2">Growth won&apos;t fix itself.</p>
+                  <p className="text-lg sm:text-xl text-white/80 mb-4 sm:mb-6">Rooms decide results.</p>
+                  <p className="text-base sm:text-lg text-white/70">
                     If you&apos;re serious about building,<br />
                     be in the room where it happens.
                   </p>
                 </div>
 
-                <div className="flex justify-center pt-8">
+                <div className="flex flex-col items-center pt-6 sm:pt-8">
                   <button 
                     onClick={() => setView("register")}
-                    className="group relative min-h-[56px] px-8 py-6 sm:px-16 sm:py-6 bg-brand-red text-white font-display text-2xl sm:text-3xl uppercase tracking-wider rounded-full overflow-hidden transition-all hover:scale-110 hover:shadow-[0_0_50px_rgba(227,30,36,0.4)] active:scale-95 cursor-pointer"
+                    className="group relative min-h-[52px] px-6 py-4 sm:px-10 sm:py-5 lg:px-12 lg:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(227,30,36,0.3)] active:scale-95 cursor-pointer"
                   >
-                    <span className="relative z-10 flex items-center gap-4">
-                      Be in the Right Room <ArrowRight className="w-8 h-8 group-hover:translate-x-2 transition-transform" />
+                    <span className="relative z-10 flex items-center gap-3">
+                      Be in the Right Room <ArrowRight className="w-6 h-6 sm:w-7 sm:h-7 group-hover:translate-x-2 transition-transform" />
                     </span>
                     <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                   </button>
-                  <div className="mt-10 space-y-4">
-                    <p className="text-xl md:text-2xl font-medium text-white/80">Stop looking. Start finding.</p>
-                    <p className="text-3xl md:text-5xl uppercase tracking-[0.2em] text-brand-red font-bold">IBMC 2026</p>
-                    <p className="text-xl md:text-2xl font-semibold text-white/90 tracking-wide">June 17–18, 2026</p>
-                    <p className="text-lg md:text-xl font-medium text-white/80">Pasay City</p>
+                  <div className="mt-8 sm:mt-10 space-y-2 sm:space-y-4">
+                    <p className="text-lg sm:text-xl font-medium text-white/80">Stop looking. Start finding.</p>
+                    <p className="text-2xl sm:text-3xl md:text-4xl uppercase tracking-[0.2em] text-brand-red font-bold">IBMC 2026</p>
+                    <p className="text-lg sm:text-xl font-semibold text-white/90 tracking-wide">June 17–18, 2026</p>
+                    <p className="text-base sm:text-lg font-medium text-white/80">Pasay City</p>
                   </div>
                 </div>
               </div>
