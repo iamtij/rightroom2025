@@ -126,7 +126,7 @@ function LogoMarquee() {
       {[...Array(2)].map((_, setIdx) => (
         <div key={setIdx} className="flex items-center gap-0 shrink-0">
           {[...Array(40)].map((_, i) => (
-            <img key={`${setIdx}-${i}`} src="/assets/ibmc-logo-white-2.png" alt="IBMC 2026" className="h-full w-auto object-contain shrink-0 scale-[0.6] sm:scale-[0.7] md:scale-[0.8] -mr-[650px] md:-mr-[350px]" />
+            <img key={`${setIdx}-${i}`} src="/assets/ibmc-logo-white-2.png" alt="IBMC 2026" className="h-full w-auto object-contain shrink-0 scale-[0.45] sm:scale-[0.55] md:scale-[0.65] -mr-[550px] md:-mr-[450px] lg:-mr-[350px]" />
           ))}
         </div>
       ))}
@@ -166,7 +166,7 @@ export default function App() {
         <CountdownBanner />
         <nav className="w-full px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-black shrink-0 overflow-visible">
               <div className="flex items-center h-10 sm:h-12 overflow-visible">
-                <img src="/assets/ibmc-logo-white-2.png" alt="IBMC 2026" className="h-full w-auto object-contain object-left origin-left scale-[2.75] sm:scale-[3]" />
+                <img src="/assets/ibmc-logo-white-2.png" alt="IBMC 2026" className="h-full w-auto object-contain object-left origin-left scale-[2] sm:scale-[2.25]" />
               </div>
               <button 
                 onClick={() => setView("register")}
@@ -714,7 +714,7 @@ export default function App() {
                   </button>
                   <div className="mt-[50px]">
                     <p className="font-medium text-white/80 mb-0">Stop looking. Start finding.</p>
-                    <div className="mt-0 h-[200px] sm:h-[260px] md:h-[320px] overflow-hidden w-screen relative left-1/2 -translate-x-1/2">
+                    <div className="mt-4 h-[160px] sm:h-[200px] md:h-[240px] overflow-hidden w-screen relative left-1/2 -translate-x-1/2">
                       <LogoMarquee />
                     </div>
                   </div>
