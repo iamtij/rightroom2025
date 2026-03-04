@@ -6,6 +6,11 @@ type ViewState = "landing" | "register" | "thanks";
 
 const EVENT_DATE = new Date("2026-06-17T00:00:00");
 
+function BoldIBMC({ text }: { text: string }) {
+  const parts = text.split(/(IBMC)/g);
+  return <>{parts.map((part, i) => part === "IBMC" ? <span key={i} className="font-bold">IBMC</span> : part)}</>;
+}
+
 function CountdownBanner() {
   const [now, setNow] = useState(() => new Date());
 
@@ -23,7 +28,7 @@ function CountdownBanner() {
   return (
     <div className="countdown-banner bg-brand-red text-white py-3 px-4 text-center shrink-0">
       <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 md:gap-8 text-base sm:text-base md:text-lg font-semibold tracking-wide">
-        <span>IBMC 2026 — June 17-18, 2026</span>
+        <span><span className="font-bold">IBMC</span> 2026 — <span className="font-bold">June 17-18, 2026</span></span>
         <span className="hidden sm:inline opacity-60">|</span>
         <span className="flex items-center justify-center gap-3 sm:gap-2 md:gap-4 flex-wrap text-lg sm:text-base">
           <span><span className="font-display text-xl sm:text-lg md:text-xl tabular-nums">{days}</span> days</span>
@@ -79,7 +84,7 @@ export default function App() {
         <CountdownBanner />
         <nav className="w-full px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-black shrink-0">
               <div className="flex items-center gap-2">
-                <span className="font-display text-2xl tracking-tight text-brand-red">IBMC</span>
+                <span className="font-display text-2xl font-bold tracking-tight text-brand-red">IBMC</span>
                 <span className="text-xs font-bold tracking-[0.2em] opacity-50 uppercase">2026</span>
               </div>
               <button 
@@ -124,7 +129,7 @@ export default function App() {
                       <span className="font-semibold">You need direct access to the right people.</span>
                     </p>
                     <p className="text-base sm:text-lg md:text-xl text-white/50 max-w-2xl mx-auto">
-                      IBMC is a 2-day business matching experience designed for serious business owners ready to grow.
+                      <BoldIBMC text="IBMC is a 2-day business matching experience designed for serious business owners ready to grow." />
                     </p>
                   </div>
 
@@ -140,7 +145,7 @@ export default function App() {
                         className="max-w-3xl"
                       >
                         <p className="text-lg sm:text-xl md:text-3xl font-semibold leading-tight tracking-tight text-white italic">
-                          {HERO_QUOTES[quoteIndex]}
+                          <BoldIBMC text={HERO_QUOTES[quoteIndex]} />
                         </p>
                       </motion.div>
                     </AnimatePresence>
@@ -193,8 +198,8 @@ export default function App() {
                   viewport={{ once: true }}
                 >
                   <h2 className="section-eyebrow mb-8">Why We Exist</h2>
-                  <h3 className="section-title-lg mb-12">
-                    What is <span className="text-brand-red">IBMC?</span>
+                    <h3 className="section-title-lg mb-12">
+                    What is <span className="text-brand-red font-bold">IBMC?</span>
                   </h3>
                   <div className="space-y-10 text-xl md:text-2xl font-light leading-relaxed text-white/80">
                     <p>
@@ -212,7 +217,7 @@ export default function App() {
                     </div>
 
                     <p className="text-white/90 text-xl md:text-2xl">
-                      IBMC is a 2-day business matching experience for serious business owners who want intentional and sustainable growth, taking place on June 17–18, 2026 in Pasay City.
+                      <BoldIBMC text="IBMC is a 2-day business matching experience for serious business owners who want intentional and sustainable growth, taking place on " /> <span className="font-bold">June 17–18, 2026 in Pasay City</span>.
                     </p>
 
                     <div className="space-y-4">
@@ -227,7 +232,7 @@ export default function App() {
                     </div>
 
                     <p className="text-white/90">
-                      IBMC was built to <span className="text-brand-red font-bold">remove that randomness.</span>
+                      <BoldIBMC text="IBMC was built to " /><span className="text-brand-red font-bold">remove that randomness.</span>
                     </p>
 
                     <p>
@@ -550,8 +555,8 @@ export default function App() {
                   <div className="mt-8 sm:mt-10 space-y-2 sm:space-y-4">
                     <p className="text-lg sm:text-xl font-medium text-white/80">Stop looking. Start finding.</p>
                     <p className="text-2xl sm:text-3xl md:text-4xl uppercase tracking-[0.2em] text-brand-red font-bold">IBMC 2026</p>
-                    <p className="text-lg sm:text-xl font-semibold text-white/90 tracking-wide">June 17–18, 2026</p>
-                    <p className="text-base sm:text-lg font-medium text-white/80">Pasay City</p>
+                    <p className="text-lg sm:text-xl font-bold text-white/90 tracking-wide">June 17–18, 2026</p>
+                    <p className="text-base sm:text-lg font-bold text-white/80">Pasay City</p>
                   </div>
                 </div>
               </div>
@@ -574,7 +579,7 @@ export default function App() {
                         onClick={() => setOpenFaq(openFaq === i ? null : i)}
                         className="w-full flex items-center justify-between gap-4 p-6 sm:p-8 text-left hover:bg-white/5 transition-colors"
                       >
-                        <span className="font-semibold text-lg sm:text-xl text-white">{item.q}</span>
+                        <span className="font-semibold text-lg sm:text-xl text-white"><BoldIBMC text={item.q} /></span>
                         <ChevronDown className={`w-6 h-6 shrink-0 text-brand-red transition-transform duration-300 ${openFaq === i ? "rotate-180" : ""}`} />
                       </button>
                       <AnimatePresence>
@@ -587,7 +592,7 @@ export default function App() {
                             className="overflow-hidden"
                           >
                             <p className="px-6 sm:px-8 pb-6 sm:pb-8 text-white/70 text-base sm:text-lg leading-relaxed -mt-2">
-                              {item.a}
+                              <BoldIBMC text={item.a} />
                             </p>
                           </motion.div>
                         )}
@@ -616,7 +621,7 @@ export default function App() {
             <div className="w-full max-w-xl">
               <div className="flex justify-between items-center mb-12">
                 <div className="flex items-center gap-2">
-                  <span className="font-display text-2xl tracking-tight text-brand-red">IBMC</span>
+                  <span className="font-display text-2xl font-bold tracking-tight text-brand-red">IBMC</span>
                   <span className="text-xs font-bold tracking-[0.2em] opacity-50 uppercase">2026</span>
                 </div>
                 <button 
@@ -712,7 +717,7 @@ export default function App() {
                   </li>
                   <li className="flex items-start gap-3">
                     <div className="w-5 h-5 rounded-full bg-brand-red/20 flex items-center justify-center text-[10px] font-bold text-brand-red shrink-0 mt-0.5">2</div>
-                    <p className="text-white/80">Add the event to your calendar (June 17-18, 2026).</p>
+                    <p className="text-white/80">Add the event to your calendar (<span className="font-bold">June 17-18, 2026</span>).</p>
                   </li>
                   <li className="flex items-start gap-3">
                     <div className="w-5 h-5 rounded-full bg-brand-red/20 flex items-center justify-center text-[10px] font-bold text-brand-red shrink-0 mt-0.5">3</div>
