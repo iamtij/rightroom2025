@@ -146,8 +146,8 @@ export default function App() {
                     </AnimatePresence>
                   </div>
                   
-                  <div className="flex justify-center pt-8">
-                    <button 
+                  <div className="flex flex-col items-center pt-8">
+                    <button
                       onClick={() => setView("register")}
                       className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                     >
@@ -156,7 +156,7 @@ export default function App() {
                       </span>
                       <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                     </button>
-                    <p className="mt-4 text-xs uppercase tracking-[0.3em] opacity-40">All in one room.</p>
+                    <p className="mt-4 text-sm sm:text-base uppercase tracking-[0.25em] text-white/60 text-center">All in one room.</p>
                   </div>
 
                   <div className="flex flex-col sm:flex-row items-stretch justify-center gap-4 md:gap-6 pt-12">
