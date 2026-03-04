@@ -5,7 +5,7 @@ import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
-  const siteUrl = env.VITE_SITE_URL || env.SITE_URL || 'https://rightroom2025.railway.app';
+  const siteUrl = env.VITE_SITE_URL || env.SITE_URL || 'https://ibmc2026.up.railway.app';
   return {
     plugins: [
       react(),
