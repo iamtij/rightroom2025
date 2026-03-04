@@ -61,10 +61,10 @@ function CountdownBanner() {
 
   return (
     <div className="countdown-banner bg-brand-red text-white py-3 px-4 text-center shrink-0">
-      <div className="flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-4 md:gap-8 text-base sm:text-base md:text-lg font-semibold tracking-wide">
+      <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-1 sm:gap-2 md:gap-4 text-base sm:text-base md:text-lg font-semibold tracking-wide">
         <span><span className="font-bold">IBMC</span> 2026 — <span className="font-bold">June 17-18, 2026</span> | NPAT, Pasay City</span>
-        <span className="hidden sm:inline opacity-60">|</span>
-        <span className="flex items-center justify-center gap-3 sm:gap-2 md:gap-4 flex-wrap text-lg sm:text-base">
+        <span className="hidden lg:inline opacity-60">|</span>
+        <span className="flex items-center justify-center gap-3 sm:gap-2 md:gap-4 flex-wrap shrink-0 text-lg sm:text-base">
           <span><span className="font-display text-xl sm:text-lg md:text-xl tabular-nums">{days}</span> days</span>
           <span><span className="font-display text-xl sm:text-lg md:text-xl tabular-nums">{hours}</span> hrs</span>
           <span><span className="font-display text-xl sm:text-lg md:text-xl tabular-nums">{minutes}</span> min</span>
