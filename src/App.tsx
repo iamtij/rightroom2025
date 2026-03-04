@@ -209,19 +209,6 @@ export default function App() {
                       </span>
                       <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                     </button>
-                    <p className="mt-4 text-sm sm:text-base uppercase tracking-[0.25em] text-white/60 text-center">All in one room.</p>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row items-stretch justify-center gap-4 md:gap-6 pt-12">
-                    <div className="border-2 border-brand-red/60 bg-white/5 rounded-2xl p-6 sm:p-8 flex items-center justify-center min-h-[120px] sm:min-h-[140px]">
-                      <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white text-center uppercase tracking-tight">The right conversations</p>
-                    </div>
-                    <div className="border-2 border-brand-red/60 bg-white/5 rounded-2xl p-6 sm:p-8 flex items-center justify-center min-h-[120px] sm:min-h-[140px]">
-                      <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white text-center uppercase tracking-tight">The right connections</p>
-                    </div>
-                    <div className="border-2 border-brand-red/60 bg-white/5 rounded-2xl p-6 sm:p-8 flex items-center justify-center min-h-[120px] sm:min-h-[140px]">
-                      <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white text-center uppercase tracking-tight">The right opportunities</p>
-                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -234,6 +221,29 @@ export default function App() {
               >
                 <div className="w-px h-12 bg-gradient-to-b from-white to-transparent" />
               </motion.div>
+            </section>
+
+            {/* Section: All in One Room */}
+            <section className="py-20 sm:py-28 px-4 sm:px-6 bg-zinc-950 border-y border-white/5">
+              <div className="max-w-5xl mx-auto text-center">
+                <h3 className="font-display text-3xl sm:text-4xl md:text-5xl uppercase tracking-wide text-white mb-12 sm:mb-16">
+                  All in one room.
+                </h3>
+                <div className="flex flex-col sm:flex-row items-stretch justify-center gap-4 md:gap-6">
+                  <div className="border-2 border-brand-red/60 bg-white/5 rounded-2xl p-6 sm:p-8 flex flex-col items-center justify-center min-h-[120px] sm:min-h-[140px] gap-4">
+                    <Users className="w-10 h-10 sm:w-12 sm:h-12 text-brand-red shrink-0" />
+                    <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white text-center uppercase tracking-tight">The right conversations</p>
+                  </div>
+                  <div className="border-2 border-brand-red/60 bg-white/5 rounded-2xl p-6 sm:p-8 flex flex-col items-center justify-center min-h-[120px] sm:min-h-[140px] gap-4">
+                    <Handshake className="w-10 h-10 sm:w-12 sm:h-12 text-brand-red shrink-0" />
+                    <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white text-center uppercase tracking-tight">The right connections</p>
+                  </div>
+                  <div className="border-2 border-brand-red/60 bg-white/5 rounded-2xl p-6 sm:p-8 flex flex-col items-center justify-center min-h-[120px] sm:min-h-[140px] gap-4">
+                    <TrendingUp className="w-10 h-10 sm:w-12 sm:h-12 text-brand-red shrink-0" />
+                    <p className="text-xl sm:text-2xl md:text-3xl font-bold text-white text-center uppercase tracking-tight">The right opportunities</p>
+                  </div>
+                </div>
+              </div>
             </section>
 
             {/* Section: What is IBMC? */}
