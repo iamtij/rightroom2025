@@ -13,13 +13,28 @@
   --ink: #ffffff;
 }
 
-/* Hide scrollbar while keeping scroll */
-html {
-  scrollbar-width: none;
+/* Hide scrollbar: use scroll wrapper so we control the scroll container */
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+.scroll-wrapper {
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
   -ms-overflow-style: none;
 }
-html::-webkit-scrollbar {
-  display: none;
+.scroll-wrapper::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+@-moz-document url-prefix() {
+  .scroll-wrapper {
+    scrollbar-width: none;
+  }
 }
 
 body {

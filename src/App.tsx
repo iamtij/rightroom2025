@@ -62,7 +62,7 @@ function CountdownBanner() {
   return (
     <div className="countdown-banner bg-brand-red text-white py-3 px-4 text-center shrink-0">
       <div className="flex flex-col sm:flex-row flex-wrap items-center justify-center gap-1 sm:gap-2 md:gap-4 text-base sm:text-base md:text-lg font-semibold tracking-wide">
-        <span><span className="font-bold">IBMC</span> 2026 — <span className="font-bold">June 17-18, 2026</span> | NPAT, Pasay City</span>
+        <span><span className="font-bold">IBMC</span> 2026 — <span className="font-bold">June 17-18, 2026</span> | NPAT (Newport Performing Arts Theater), Pasay City</span>
         <span className="hidden lg:inline opacity-60">|</span>
         <span className="flex items-center justify-center gap-3 sm:gap-2 md:gap-4 flex-wrap shrink-0 text-lg sm:text-base">
           <span><span className="font-display text-xl sm:text-lg md:text-xl tabular-nums">{days}</span> days</span>
@@ -136,7 +136,7 @@ function LogoMarquee() {
 
 const FAQ_ITEMS = [
   { q: "What is IBMC?", a: "IBMC stands for International Business Matching Conference. It's a 2-day business matching experience designed for serious business owners who want intentional and sustainable growth through structured one-to-one meetings and curated rooms." },
-  { q: "When and where is IBMC 2026?", a: "IBMC 2026 takes place on June 17–18, 2026 in NPAT, Pasay City." },
+  { q: "When and where is IBMC 2026?", a: "IBMC 2026 takes place on June 17–18, 2026 in NPAT (Newport Performing Arts Theater), Pasay City." },
   { q: "Who should attend?", a: "Business owners, decision-makers, and professionals who are ready to grow through strategic partnerships, direct access to buyers and sellers, and meaningful connections. If you're tired of random networking and want purposeful growth, IBMC is for you." },
   { q: "How does the business matching work?", a: "Through structured one-to-one matching and curated rooms, you connect directly with decision-makers and strategic partners. No random introductions—every interaction is designed to move your business forward." },
   { q: "How do I register?", a: "Click 'Secure Your Seat' anywhere on this page to complete your registration. You'll receive a confirmation email with next steps and how to prepare your business profile for matching." },
@@ -161,7 +161,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-black text-white selection:bg-brand-red selection:text-white overflow-x-hidden font-sans">
+    <div className="h-full min-h-screen bg-black text-white selection:bg-brand-red selection:text-white font-sans">
       <header className="fixed top-0 left-0 right-0 z-[60] flex flex-col overflow-visible">
         <CountdownBanner />
         <nav className="w-full px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-black shrink-0 overflow-visible">
@@ -177,6 +177,7 @@ export default function App() {
             </nav>
       </header>
 
+      <div className="scroll-wrapper">
       <AnimatePresence mode="wait">
         {view === "landing" && (
           <motion.div
@@ -187,7 +188,7 @@ export default function App() {
             className="relative"
           >
             {/* Hero Section */}
-            <section className="relative min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-40 sm:pt-36 overflow-visible">
+            <section className="relative min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-[50px] sm:pt-[150px] md:pt-[134px] overflow-visible">
               <div className="absolute inset-0 z-0 opacity-20 overflow-hidden pointer-events-none">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-brand-red/20 rounded-full blur-[120px]" />
               </div>
@@ -208,9 +209,6 @@ export default function App() {
                     <p className="text-xl sm:text-2xl md:text-4xl font-light tracking-tight text-white/90">
                       You don’t need more tactics. <br />
                       <span className="font-semibold">You need direct access to the right people.</span>
-                    </p>
-                    <p className="text-base sm:text-lg md:text-xl text-white/50 max-w-2xl mx-auto">
-                      <BoldIBMC text="IBMC is a 2-day business matching experience for serious business owners who want intentional and sustainable growth, taking place on June 17–18, 2026 in NPAT, Pasay City." />
                     </p>
                   </div>
 
@@ -300,7 +298,7 @@ export default function App() {
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
                 >
-                  <h2 className="section-eyebrow mb-8">Why We Exist</h2>
+                  <h2 className="section-eyebrow mb-4">Why We Exist</h2>
                     <h3 className="section-title-lg mb-12">
                     What is <span className="text-brand-red font-bold">IBMC?</span>
                   </h3>
@@ -319,7 +317,7 @@ export default function App() {
                     </div>
 
                     <p className="text-white/90 text-xl md:text-2xl">
-                      <BoldIBMC text="IBMC is a 2-day business matching experience for serious business owners who want intentional and sustainable growth, taking place on " /> <span className="font-bold">June 17–18, 2026 in NPAT, Pasay City</span>.
+                      <BoldIBMC text="IBMC is a 2-day business matching experience for serious business owners who want intentional and sustainable growth, taking place on " /> <span className="font-bold">June 17–18, 2026 in NPAT (Newport Performing Arts Theater), Pasay City</span>.
                     </p>
 
                     <div className="space-y-4">
@@ -737,10 +735,10 @@ export default function App() {
                     >
                       <button
                         onClick={() => setOpenFaq(openFaq === i ? null : i)}
-                        className="w-full flex items-center justify-between gap-4 p-6 sm:p-8 text-left hover:bg-white/5 transition-colors"
+                        className="w-full flex items-start sm:items-center justify-between gap-4 p-6 sm:p-8 text-left hover:bg-white/5 transition-colors"
                       >
-                        <span className="font-semibold text-lg sm:text-xl text-white"><BoldIBMC text={item.q} /></span>
-                        <ChevronDown className={`w-6 h-6 shrink-0 text-brand-red transition-transform duration-300 ${openFaq === i ? "rotate-180" : ""}`} />
+                        <span className="font-semibold text-lg sm:text-xl text-white flex-1 min-w-0"><BoldIBMC text={item.q} /></span>
+                        <ChevronDown className={`w-6 h-6 shrink-0 text-brand-red transition-transform duration-300 flex-shrink-0 ${openFaq === i ? "rotate-180" : ""}`} />
                       </button>
                       <AnimatePresence>
                         {openFaq === i && (
@@ -751,7 +749,7 @@ export default function App() {
                             transition={{ duration: 0.3 }}
                             className="overflow-hidden"
                           >
-                            <p className="px-6 sm:px-8 pb-6 sm:pb-8 text-white/70 text-base sm:text-lg leading-relaxed -mt-2">
+                            <p className="px-6 sm:px-8 pt-4 sm:pt-2 pb-6 sm:pb-8 text-white/70 text-base sm:text-lg leading-relaxed">
                               <BoldIBMC text={item.a} />
                             </p>
                           </motion.div>
@@ -903,6 +901,7 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+      </div>
     </div>
   );
 }
