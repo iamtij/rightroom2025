@@ -1,6 +1,6 @@
 import { useState, FormEvent, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { ArrowRight, CheckCircle2, Users, Handshake, Globe, TrendingUp, X, CreditCard, Mail, Phone, User, ChevronDown } from "lucide-react";
+import { ArrowRight, CheckCircle2, Users, Handshake, Globe, TrendingUp, Lightbulb, X, CreditCard, Mail, Phone, User, ChevronDown } from "lucide-react";
 
 type ViewState = "landing" | "register" | "thanks";
 
@@ -591,7 +591,8 @@ export default function App() {
                     { icon: Handshake, title: "Structured one-to-one business meetings", desc: "No random networking. Purposeful, timed interactions." },
                     { icon: TrendingUp, title: "Buyers and sellers in the same space", desc: "Direct access to the decision-makers you've been looking for." },
                     { icon: Globe, title: "Local and international connections", desc: "Expand your reach beyond your current borders." },
-                    { icon: CheckCircle2, title: "Two days focused on growth", desc: "Dedicated time to work ON your business, not just in it." }
+                    { icon: CheckCircle2, title: "Two days focused on growth", desc: "Dedicated time to work ON your business, not just in it." },
+                    { icon: Lightbulb, title: "Learn and be inspired from the best", desc: "Sharing proven and effective ways to grow your business." }
                   ].map((item, i) => (
                     <div key={i} className="p-8 border border-black/10 rounded-3xl hover:bg-zinc-50 transition-colors">
                       <item.icon className="w-10 h-10 text-brand-red mb-6" />
