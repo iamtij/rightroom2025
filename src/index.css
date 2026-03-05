@@ -61,7 +61,16 @@ body {
   animation: pulse-slow 2.5s ease-in-out infinite;
 }
 
+/* Marker-style underline animation */
+@keyframes markerUnderline {
+  0% { transform: scaleX(0); }
+  100% { transform: scaleX(1); }
+}
 
+.animate-marker-underline {
+  transform-origin: left;
+  animation: markerUnderline 1.2s cubic-bezier(0.22, 1, 0.36, 1) 0.5s forwards;
+}
 
 .text-stroke {
   -webkit-text-stroke: 1px rgba(255, 255, 255, 0.3);

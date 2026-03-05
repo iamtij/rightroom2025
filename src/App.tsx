@@ -188,7 +188,7 @@ export default function App() {
             className="relative"
           >
             {/* Hero Section */}
-            <section className="relative min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-[50px] sm:pt-[150px] md:pt-[134px] overflow-visible">
+            <section className="relative min-h-0 sm:min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-[220px] sm:pt-[150px] md:pt-[134px] pb-12 sm:pb-0 overflow-visible">
               <div className="absolute inset-0 z-0 opacity-20 overflow-hidden pointer-events-none">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-brand-red/20 rounded-full blur-[120px]" />
               </div>
@@ -206,9 +206,19 @@ export default function App() {
                 
                 <div className="mt-12 space-y-8">
                   <div className="space-y-4">
-                    <p className="text-xl sm:text-2xl md:text-4xl font-light tracking-tight text-white/90">
+                    <p className="text-2xl sm:text-2xl md:text-4xl font-light tracking-tight text-white/90">
                       You don’t need more tactics. <br />
-                      <span className="font-semibold">You need direct access to the right people.</span>
+                      <span className="font-semibold">You need </span>
+                      <span className="relative inline-block font-semibold">
+                        <span className="absolute bottom-0.5 left-0 right-0 h-0.5 bg-brand-red origin-left animate-marker-underline z-0" />
+                        <span className="relative z-10">direct access</span>
+                      </span>
+                      <span className="font-semibold"> to the </span>
+                      <span className="relative inline-block font-semibold">
+                        <span className="absolute bottom-1 -left-1 -right-1 h-6 sm:h-7 bg-brand-red origin-left animate-marker-underline z-0" />
+                        <span className="relative z-10">right people</span>
+                      </span>
+                      <span className="font-semibold">.</span>
                     </p>
                   </div>
 
@@ -240,22 +250,21 @@ export default function App() {
                       </span>
                       <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                     </button>
+                    {/* Scroll Indicator */}
+                    <motion.div 
+                      animate={{ y: [0, 10, 0] }}
+                      transition={{ duration: 2, repeat: Infinity }}
+                      className="mt-8 opacity-30"
+                    >
+                      <div className="w-px h-12 bg-gradient-to-b from-white to-transparent mx-auto" />
+                    </motion.div>
                   </div>
                 </div>
-              </motion.div>
-
-              {/* Scroll Indicator */}
-              <motion.div 
-                animate={{ y: [0, 10, 0] }}
-                transition={{ duration: 2, repeat: Infinity }}
-                className="absolute bottom-10 left-1/2 -translate-x-1/2 opacity-30"
-              >
-                <div className="w-px h-12 bg-gradient-to-b from-white to-transparent" />
               </motion.div>
             </section>
 
             {/* Section: All in One Room */}
-            <section className="py-20 sm:py-28 px-4 sm:px-6 bg-zinc-950 border-y border-white/5 overflow-hidden">
+            <section className="pt-12 pb-20 sm:py-28 px-4 sm:px-6 bg-zinc-950 border-y border-white/5 overflow-hidden">
               <div className="max-w-5xl mx-auto text-center">
                 <motion.h3
                   initial="hidden"
