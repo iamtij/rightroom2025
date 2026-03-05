@@ -699,6 +699,9 @@ export default function App() {
                   <p className="text-2xl sm:text-3xl md:text-4xl font-semibold text-white tracking-tight pt-1">
                     be in the <span className="text-brand-red">room</span> where it happens.
                   </p>
+                  <p className="text-lg sm:text-xl text-brand-red font-semibold pt-6 sm:pt-8">
+                    Slots are limited. This is only for serious business owners.
+                  </p>
                 </div>
 
                 <div className="flex flex-col items-center pt-4 sm:pt-5">
