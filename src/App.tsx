@@ -139,7 +139,7 @@ const FAQ_ITEMS = [
   { q: "When and where is IBMC 2026?", a: "IBMC 2026 takes place on June 17–18, 2026 in NPAT (Newport Performing Arts Theater), Pasay City." },
   { q: "Who should attend?", a: "Business owners, decision-makers, and professionals who are ready to grow through strategic partnerships, direct access to buyers and sellers, and meaningful connections. If you're tired of random networking and want purposeful growth, IBMC is for you." },
   { q: "How does the business matching work?", a: "Through structured one-to-one matching and curated rooms, you connect directly with decision-makers and strategic partners. No random introductions—every interaction is designed to move your business forward." },
-  { q: "How do I register?", a: "Click 'Secure Your Seat' anywhere on this page to complete your registration. You'll receive a confirmation email with next steps and how to prepare your business profile for matching." },
+  { q: "How do I register?", a: "Click 'Secure your slot' anywhere on this page to complete your registration. You'll receive a confirmation email with next steps and how to prepare your business profile for matching." },
 ];
 
 export default function App() {
@@ -170,9 +170,9 @@ export default function App() {
               </div>
               <button 
                 onClick={() => setView("register")}
-                className="animate-pulse-slow min-h-[48px] min-w-[44px] px-6 py-3.5 bg-brand-red text-white border border-brand-red rounded-full text-base font-semibold hover:bg-brand-red-light hover:shadow-[0_0_24px_rgba(227,30,36,0.6)] transition-all duration-300 cursor-pointer"
+                className="animate-pulse-slow min-h-[48px] min-w-[44px] px-6 py-3.5 bg-brand-red text-white border border-brand-red rounded-full font-display text-base uppercase tracking-wider hover:bg-brand-red-light hover:shadow-[0_0_24px_rgba(227,30,36,0.6)] transition-all duration-300 cursor-pointer"
               >
-                Secure Your Seat
+                Secure your slot
               </button>
             </nav>
       </header>
@@ -246,7 +246,7 @@ export default function App() {
                       className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                     >
                       <span className="relative z-10 flex items-center gap-3">
-                        Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+                        Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
                       </span>
                       <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                     </button>
@@ -364,7 +364,7 @@ export default function App() {
                         className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                       >
                         <span className="relative z-10 flex items-center gap-3">
-                          Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+                          Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
                         </span>
                         <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                       </button>
@@ -433,7 +433,7 @@ export default function App() {
                           className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                         >
                           <span className="relative z-10 flex items-center gap-3">
-                            Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+                            Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
                           </span>
                           <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                         </button>
@@ -541,7 +541,7 @@ export default function App() {
                     className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                   >
                     <span className="relative z-10 flex items-center gap-3">
-                      Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+                      Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
                     </span>
                     <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                   </button>
@@ -617,7 +617,7 @@ export default function App() {
                     className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
                   >
                     <span className="relative z-10 flex items-center gap-3">
-                      Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+                      Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
                     </span>
                     <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                   </button>
@@ -669,7 +669,7 @@ export default function App() {
                         className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer shrink-0"
                       >
                         <span className="relative z-10 flex items-center gap-3">
-                          Secure Your Seat <ArrowRight className="group-hover:translate-x-1 transition-transform" />
+                          Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
                         </span>
                         <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                       </button>
@@ -719,7 +719,7 @@ export default function App() {
                     className="group relative min-h-[52px] px-6 py-4 sm:px-10 sm:py-5 lg:px-12 lg:py-5 bg-brand-red text-white font-display uppercase tracking-wider rounded-full overflow-hidden transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(227,30,36,0.3)] active:scale-95 cursor-pointer"
                   >
                     <span className="relative z-10 flex items-center gap-3">
-                      Secure Your Seat <ArrowRight className="w-6 h-6 sm:w-7 sm:h-7 group-hover:translate-x-2 transition-transform" />
+                      Secure your slot <ArrowRight className="w-6 h-6 sm:w-7 sm:h-7 group-hover:translate-x-2 transition-transform" />
                     </span>
                     <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
                   </button>
@@ -811,7 +811,7 @@ export default function App() {
               </div>
 
               <div className="mb-10">
-                <h2 className="font-display text-4xl sm:text-5xl uppercase tracking-tight mb-2">Secure Your Seat</h2>
+                <h2 className="font-display text-4xl sm:text-5xl uppercase tracking-tight mb-2">Secure your slot</h2>
                 <p className="text-base text-white/60">Fill in your details to join the room.</p>
               </div>
 
