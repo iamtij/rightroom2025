@@ -1,10 +1,9 @@
-import { useState, FormEvent, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { ArrowRight, CheckCircle2, Users, Handshake, Globe, TrendingUp, Lightbulb, X, CreditCard, Mail, Phone, User, ChevronDown } from "lucide-react";
-
-type ViewState = "landing" | "register" | "thanks";
+import { ArrowRight, CheckCircle2, Users, Handshake, Globe, TrendingUp, Lightbulb, ChevronDown } from "lucide-react";
 
 const EVENT_DATE = new Date("2026-06-17T00:00:00");
+const REGISTRATION_URL = "https://events.mygrid.club/ibmcvisitor";
 
 function BoldIBMC({ text }: { text: string }) {
   const parts = text.split(/(IBMC)/g);
@@ -139,26 +138,19 @@ const FAQ_ITEMS = [
   { q: "When and where is IBMC 2026?", a: "IBMC 2026 takes place on June 17–18, 2026 in NPAT (Newport Performing Arts Theater), Pasay City." },
   { q: "Who should attend?", a: "Business owners, decision-makers, and professionals who are ready to grow through strategic partnerships, direct access to buyers and sellers, and meaningful connections. If you're tired of random networking and want purposeful growth, IBMC is for you." },
   { q: "How does the business matching work?", a: "Through structured one-to-one matching and curated rooms, you connect directly with decision-makers and strategic partners. No random introductions—every interaction is designed to move your business forward." },
-  { q: "How do I register?", a: "Click 'Secure your slot' anywhere on this page to complete your registration. You'll receive a confirmation email with next steps and how to prepare your business profile for matching." },
+  { q: "How do I register?", a: "Click 'Secure your slot' anywhere on this page to be taken to the registration page. You'll receive a confirmation email with next steps and how to prepare your business profile for matching." },
 ];
 
 export default function App() {
-  const [view, setView] = useState<ViewState>("landing");
   const [quoteIndex, setQuoteIndex] = useState(0);
   const [openFaq, setOpenFaq] = useState<number | null>(null);
 
   useEffect(() => {
-    if (view !== "landing") return;
     const interval = setInterval(() => {
       setQuoteIndex((prev) => (prev + 1) % HERO_QUOTES.length);
     }, 4000);
     return () => clearInterval(interval);
-  }, [view]);
-
-  const handleRegister = (e: FormEvent) => {
-    e.preventDefault();
-    setView("thanks");
-  };
+  }, []);
 
   return (
     <div className="h-full min-h-screen bg-black text-white selection:bg-brand-red selection:text-white font-sans">
@@ -168,19 +160,20 @@ export default function App() {
               <div className="flex items-center h-10 sm:h-12 overflow-visible">
                 <img src="/assets/ibmc-logo-white-2.png" alt="IBMC 2026" className="h-full w-auto object-contain object-left origin-left scale-[2] sm:scale-[2.25]" />
               </div>
-              <button 
-                onClick={() => setView("register")}
-                className="animate-pulse-slow min-h-[48px] min-w-[44px] px-6 py-3.5 bg-brand-red text-white border border-brand-red rounded-full font-display text-base uppercase tracking-wider hover:bg-brand-red-light hover:shadow-[0_0_24px_rgba(227,30,36,0.6)] transition-all duration-300 cursor-pointer"
+              <a 
+                href={REGISTRATION_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="animate-pulse-slow min-h-[48px] min-w-[44px] px-6 py-3.5 bg-brand-red text-white border border-brand-red rounded-full font-display text-base uppercase tracking-wider hover:bg-brand-red-light hover:shadow-[0_0_24px_rgba(227,30,36,0.6)] transition-all duration-300 cursor-pointer inline-flex items-center justify-center"
               >
                 Secure your slot
-              </button>
+              </a>
             </nav>
       </header>
 
       <div className="scroll-wrapper">
       <AnimatePresence mode="wait">
-        {view === "landing" && (
-          <motion.div
+        <motion.div
             key="landing"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -241,15 +234,17 @@ export default function App() {
                   </div>
                   
                   <div className="flex flex-col items-center pt-8">
-                    <button
-                      onClick={() => setView("register")}
-                      className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                    <a
+                      href={REGISTRATION_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center"
                     >
                       <span className="relative z-10 flex items-center gap-3">
                         Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
                       </span>
                       <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                    </button>
+                    </a>
                     {/* Scroll Indicator */}
                     <motion.div 
                       animate={{ y: [0, 10, 0] }}
@@ -359,15 +354,17 @@ export default function App() {
                     </div>
 
                     <div className="flex justify-center pt-12">
-                      <button 
-                        onClick={() => setView("register")}
-                        className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                      <a 
+                        href={REGISTRATION_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center"
                       >
                         <span className="relative z-10 flex items-center gap-3">
                           Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
                         </span>
                         <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                      </button>
+                      </a>
                     </div>
                   </div>
                 </motion.div>
@@ -428,15 +425,17 @@ export default function App() {
                         </motion.div>
                       ))}
                       <div className="flex justify-center pt-6 sm:pt-8">
-                        <button 
-                          onClick={() => setView("register")}
-                          className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                        <a 
+                          href={REGISTRATION_URL}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center"
                         >
                           <span className="relative z-10 flex items-center gap-3">
                             Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
                           </span>
                           <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                        </button>
+                        </a>
                       </div>
                     </motion.div>
                   </div>
@@ -536,15 +535,17 @@ export default function App() {
                 </div>
 
                 <div className="flex justify-center pt-12">
-                  <button 
-                    onClick={() => setView("register")}
-                    className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                  <a 
+                    href={REGISTRATION_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center"
                   >
                     <span className="relative z-10 flex items-center gap-3">
                       Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
                     </span>
                     <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                  </button>
+                  </a>
                 </div>
               </div>
             </section>
@@ -612,15 +613,17 @@ export default function App() {
                 </div>
 
                 <div className="flex justify-center pt-16">
-                  <button 
-                    onClick={() => setView("register")}
-                    className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer"
+                  <a 
+                    href={REGISTRATION_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center"
                   >
                     <span className="relative z-10 flex items-center gap-3">
                       Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
                     </span>
                     <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                  </button>
+                  </a>
                 </div>
               </div>
             </section>
@@ -664,15 +667,17 @@ export default function App() {
                     </p>
                     <div className="mt-8 flex flex-col md:flex-row items-center justify-center gap-6">
                       <p className="text-lg font-medium">Don't let 2026 be another year of "almost."</p>
-                      <button 
-                        onClick={() => setView("register")}
-                        className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer shrink-0"
+                      <a 
+                        href={REGISTRATION_URL}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer shrink-0 inline-flex items-center justify-center"
                       >
                         <span className="relative z-10 flex items-center gap-3">
                           Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
                         </span>
                         <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                      </button>
+                      </a>
                     </div>
                   </div>
                 </motion.div>
@@ -714,15 +719,17 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col items-center pt-4 sm:pt-5">
-                  <button 
-                    onClick={() => setView("register")}
-                    className="group relative min-h-[52px] px-6 py-4 sm:px-10 sm:py-5 lg:px-12 lg:py-5 bg-brand-red text-white font-display uppercase tracking-wider rounded-full overflow-hidden transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(227,30,36,0.3)] active:scale-95 cursor-pointer"
+                  <a 
+                    href={REGISTRATION_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="group relative min-h-[52px] px-6 py-4 sm:px-10 sm:py-5 lg:px-12 lg:py-5 bg-brand-red text-white font-display uppercase tracking-wider rounded-full overflow-hidden transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(227,30,36,0.3)] active:scale-95 cursor-pointer inline-flex items-center justify-center"
                   >
                     <span className="relative z-10 flex items-center gap-3">
                       Secure your slot <ArrowRight className="w-6 h-6 sm:w-7 sm:h-7 group-hover:translate-x-2 transition-transform" />
                     </span>
                     <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                  </button>
+                  </a>
                   <div className="mt-[50px]">
                     <p className="font-medium text-white/80 mb-0">Stop looking. Start finding.</p>
                     <div className="mt-4 h-[160px] sm:h-[200px] md:h-[240px] overflow-hidden w-screen relative left-1/2 -translate-x-1/2">
@@ -787,132 +794,6 @@ export default function App() {
               </div>
             </footer>
           </motion.div>
-        )}
-
-        {view === "register" && (
-          <motion.div
-            key="register"
-            initial={{ opacity: 0, scale: 0.95 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 1.05 }}
-            className="min-h-screen flex items-center justify-center p-6 pt-20 bg-zinc-950"
-          >
-            <div className="w-full max-w-xl">
-              <div className="flex justify-between items-center mb-12">
-                <div className="flex items-center">
-                  <img src="/assets/ibmc-logo-white-2.png" alt="IBMC 2026" className="h-12 sm:h-14 w-auto max-h-16 sm:max-h-20 object-contain" />
-                </div>
-                <button 
-                  onClick={() => setView("landing")}
-                  className="min-h-[48px] min-w-[48px] p-3 flex items-center justify-center hover:bg-white/10 rounded-full transition-colors cursor-pointer"
-                >
-                  <X className="w-7 h-7" />
-                </button>
-              </div>
-
-              <div className="mb-10">
-                <h2 className="font-display text-4xl sm:text-5xl uppercase tracking-tight mb-2">Secure your slot</h2>
-                <p className="text-base text-white/60">Fill in your details to join the room.</p>
-              </div>
-
-              <form onSubmit={handleRegister} className="space-y-6">
-                <div className="space-y-4">
-                  <div className="relative">
-                    <User className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-white/30" />
-                    <input 
-                      required
-                      type="text" 
-                      placeholder="Full Name" 
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 pl-14 pr-4 text-base focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-all min-h-[52px]"
-                    />
-                  </div>
-                  <div className="relative">
-                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-white/30" />
-                    <input 
-                      required
-                      type="email" 
-                      placeholder="Email Address" 
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 pl-14 pr-4 text-base focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-all min-h-[52px]"
-                    />
-                  </div>
-                  <div className="relative">
-                    <Phone className="absolute left-4 top-1/2 -translate-y-1/2 w-6 h-6 text-white/30" />
-                    <input 
-                      required
-                      type="tel" 
-                      placeholder="Mobile Number" 
-                      className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 pl-14 pr-4 text-base focus:outline-none focus:border-brand-red focus:ring-1 focus:ring-brand-red transition-all min-h-[52px]"
-                    />
-                  </div>
-                </div>
-
-                <div className="pt-4">
-                  <label className="block text-sm uppercase tracking-widest text-white/40 mb-4 font-bold">Payment Method (Mockup)</label>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="min-h-[80px] p-5 rounded-2xl border-2 border-brand-red bg-brand-red/5 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all">
-                      <CreditCard className="w-8 h-8 text-brand-red" />
-                      <span className="text-base font-semibold">Credit Card</span>
-                    </div>
-                    <div className="min-h-[80px] p-5 rounded-2xl border border-white/10 bg-white/5 flex flex-col items-center justify-center gap-2 opacity-50 cursor-not-allowed">
-                      <Handshake className="w-8 h-8" />
-                      <span className="text-base font-semibold">Bank Transfer</span>
-                    </div>
-                  </div>
-                </div>
-
-                <button 
-                  type="submit"
-                  className="w-full min-h-[56px] py-6 bg-brand-red text-white font-display text-xl uppercase tracking-wider rounded-2xl hover:bg-red-600 transition-all active:scale-[0.98] cursor-pointer mt-8"
-                >
-                  Complete Registration
-                </button>
-              </form>
-            </div>
-          </motion.div>
-        )}
-
-        {view === "thanks" && (
-          <motion.div
-            key="thanks"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            className="min-h-screen flex items-center justify-center p-6 pt-20 bg-black"
-          >
-            <div className="max-w-xl text-center">
-              <div className="w-24 h-24 bg-brand-red/20 rounded-full flex items-center justify-center mx-auto mb-8">
-                <CheckCircle2 className="w-12 h-12 text-brand-red" />
-              </div>
-              <h2 className="font-display text-4xl sm:text-6xl uppercase tracking-tight mb-6">See you in <br /><span className="text-brand-red">the room.</span></h2>
-              <p className="text-lg sm:text-xl text-white/60 mb-12">Your registration is complete. We've sent a confirmation to your email with the next steps.</p>
-              
-              <div className="glass-card p-8 rounded-3xl text-left mb-12">
-                <h4 className="text-xs uppercase tracking-widest text-brand-red font-bold mb-6">Next Steps</h4>
-                <ul className="space-y-4">
-                  <li className="flex items-start gap-3">
-                    <div className="w-5 h-5 rounded-full bg-brand-red/20 flex items-center justify-center text-[10px] font-bold text-brand-red shrink-0 mt-0.5">1</div>
-                    <p className="text-white/80">Check your inbox for the welcome kit.</p>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <div className="w-5 h-5 rounded-full bg-brand-red/20 flex items-center justify-center text-[10px] font-bold text-brand-red shrink-0 mt-0.5">2</div>
-                    <p className="text-white/80">Add the event to your calendar (<span className="font-bold">June 17-18, 2026</span>).</p>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <div className="w-5 h-5 rounded-full bg-brand-red/20 flex items-center justify-center text-[10px] font-bold text-brand-red shrink-0 mt-0.5">3</div>
-                    <p className="text-white/80">Prepare your business profile for matching.</p>
-                  </li>
-                </ul>
-              </div>
-
-              <button 
-                onClick={() => setView("landing")}
-                className="min-h-[48px] px-6 py-3 text-white/40 hover:text-white transition-colors text-base uppercase tracking-widest font-bold cursor-pointer"
-              >
-                Back to Home
-              </button>
-            </div>
-          </motion.div>
-        )}
       </AnimatePresence>
       </div>
     </div>
