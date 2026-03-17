@@ -238,7 +238,7 @@ export default function App() {
 
   return (
     <div className="h-full min-h-screen bg-black text-white selection:bg-brand-red selection:text-white font-sans">
-      <header className="fixed top-0 left-0 right-0 z-[60] flex flex-col overflow-visible">
+      <header className="fixed top-0 left-0 right-0 z-[60] flex flex-col overflow-visible pt-[env(safe-area-inset-top,0px)]">
         <CountdownBanner />
         <nav className="w-full px-4 sm:px-6 py-3 sm:py-4 flex justify-between items-center bg-black shrink-0 overflow-visible">
               <div className="flex items-center h-10 sm:h-12 overflow-visible">
@@ -258,7 +258,7 @@ export default function App() {
             className="relative"
           >
             {/* Hero Section */}
-            <section className="relative min-h-0 sm:min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-[200px] sm:pt-[140px] md:pt-[130px] lg:pt-[120px] pb-12 sm:pb-0 overflow-visible">
+            <section className="relative min-h-0 sm:min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-[220px] sm:pt-[160px] md:pt-[150px] lg:pt-[140px] pb-12 sm:pb-0 overflow-visible">
               <div className="absolute inset-0 z-0 opacity-20 overflow-hidden pointer-events-none">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-brand-red/20 rounded-full blur-[120px]" />
               </div>
