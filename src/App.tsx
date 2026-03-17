@@ -3,7 +3,9 @@ import { motion, AnimatePresence } from "motion/react";
 import { ArrowRight, CheckCircle2, Users, Handshake, Globe, TrendingUp, Lightbulb, ChevronDown } from "lucide-react";
 
 const EVENT_DATE = new Date("2026-06-17T00:00:00");
-const REGISTRATION_URL = "https://events.mygrid.club/ibmcvisitor";
+const REGISTRATION_URL_VISITOR = "https://events.mygrid.club/ibmcvisitor";
+const REGISTRATION_URL_MEMBER = "https://events.mygrid.club/ibmc";
+const REGISTRATION_URL_SPONSOR = "https://cname.mygrid.club/ibmcsponsor";
 
 function BoldIBMC({ text }: { text: string }) {
   const parts = text.split(/(IBMC)/g);
@@ -138,8 +140,90 @@ const FAQ_ITEMS = [
   { q: "When and where is IBMC 2026?", a: "IBMC 2026 takes place on June 17–18, 2026 in NPAT (Newport Performing Arts Theater), Pasay City." },
   { q: "Who should attend?", a: "Business owners, decision-makers, and professionals who are ready to grow through strategic partnerships, direct access to buyers and sellers, and meaningful connections. If you're tired of random networking and want purposeful growth, IBMC is for you." },
   { q: "How does the business matching work?", a: "Through structured one-to-one matching and curated rooms, you connect directly with decision-makers and strategic partners. No random introductions—every interaction is designed to move your business forward." },
-  { q: "How do I register?", a: "Click 'Secure your slot' anywhere on this page to be taken to the registration page. You'll receive a confirmation email with next steps and how to prepare your business profile for matching." },
+  { q: "How do I register?", a: "Click 'Secure your slot' anywhere on this page. You'll see three options: Visitors, BNI Members, or Sponsors. Choose the one that applies to you to complete registration. You'll receive a confirmation email with next steps and how to prepare your business profile for matching." },
 ];
+
+function RegistrationModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-sm"
+          />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            className="fixed left-1/2 top-1/2 z-[101] -translate-x-1/2 -translate-y-1/2 w-full max-w-md mx-4"
+          >
+            <div className="bg-zinc-900 border border-white/10 rounded-2xl p-8 shadow-2xl">
+              <h3 className="font-sans text-xl uppercase tracking-wider text-white mb-6 text-center font-semibold">
+                Choose your registration
+              </h3>
+              <div className="flex flex-col gap-4">
+                <a
+                  href={REGISTRATION_URL_VISITOR}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block w-full py-4 px-6 bg-brand-red text-white font-sans text-base uppercase tracking-wider rounded-xl hover:bg-brand-red-light transition-colors text-center font-semibold"
+                >
+                  Visitors
+                </a>
+                <a
+                  href={REGISTRATION_URL_MEMBER}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block w-full py-4 px-6 bg-brand-red text-white font-sans text-base uppercase tracking-wider rounded-xl hover:bg-brand-red-light transition-colors text-center font-semibold"
+                >
+                  BNI Members
+                </a>
+                <a
+                  href={REGISTRATION_URL_SPONSOR}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block w-full py-4 px-6 bg-brand-red text-white font-sans text-base uppercase tracking-wider rounded-xl hover:bg-brand-red-light transition-colors text-center font-semibold"
+                >
+                  Sponsors
+                </a>
+              </div>
+              <button
+                onClick={onClose}
+                className="mt-6 w-full py-2 text-white/60 hover:text-white text-sm transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </motion.div>
+        </>
+      )}
+    </AnimatePresence>
+  );
+}
+
+function RegistrationCTA({ className = "", showArrow = true }: { className?: string; showArrow?: boolean }) {
+  const [showModal, setShowModal] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setShowModal(true)}
+        className={`relative ${className}`}
+      >
+        <span className="relative z-10 flex items-center gap-3">
+          Secure your slot {showArrow && <ArrowRight className="group-hover:translate-x-1 transition-transform" />}
+        </span>
+        <div className="absolute inset-0 bg-white/10 translate-y-full opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300 pointer-events-none" />
+      </button>
+      <RegistrationModal isOpen={showModal} onClose={() => setShowModal(false)} />
+    </>
+  );
+}
 
 export default function App() {
   const [quoteIndex, setQuoteIndex] = useState(0);
@@ -160,14 +244,7 @@ export default function App() {
               <div className="flex items-center h-10 sm:h-12 overflow-visible">
                 <img src="/assets/ibmc-logo-white-2.png" alt="IBMC 2026" className="h-full w-auto object-contain object-left origin-left scale-[2] sm:scale-[2.25]" />
               </div>
-              <a 
-                href={REGISTRATION_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="animate-pulse-slow min-h-[48px] min-w-[44px] px-6 py-3.5 bg-brand-red text-white border border-brand-red rounded-full font-display text-base uppercase tracking-wider hover:bg-brand-red-light hover:shadow-[0_0_24px_rgba(227,30,36,0.6)] transition-all duration-300 cursor-pointer inline-flex items-center justify-center"
-              >
-                Secure your slot
-              </a>
+              <RegistrationCTA showArrow={false} className="animate-pulse-slow min-h-[48px] min-w-[44px] px-6 py-3.5 bg-brand-red text-white border border-brand-red rounded-full font-display text-base uppercase tracking-wider hover:bg-brand-red-light hover:shadow-[0_0_24px_rgba(227,30,36,0.6)] transition-all duration-300 cursor-pointer inline-flex items-center justify-center" />
             </nav>
       </header>
 
@@ -181,7 +258,7 @@ export default function App() {
             className="relative"
           >
             {/* Hero Section */}
-            <section className="relative min-h-0 sm:min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-[220px] sm:pt-[150px] md:pt-[134px] pb-12 sm:pb-0 overflow-visible">
+            <section className="relative min-h-0 sm:min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-[200px] sm:pt-[50px] pb-12 sm:pb-0 overflow-visible">
               <div className="absolute inset-0 z-0 opacity-20 overflow-hidden pointer-events-none">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-brand-red/20 rounded-full blur-[120px]" />
               </div>
@@ -197,7 +274,7 @@ export default function App() {
                   <span className="text-brand-red">Right Room.</span>
                 </h1>
                 
-                <div className="mt-12 space-y-8">
+                <div className="mt-8 sm:mt-10 space-y-6 sm:space-y-8">
                   <div className="space-y-4">
                     <p className="text-2xl sm:text-2xl md:text-4xl font-light tracking-tight text-white/90">
                       You don’t need more tactics. <br />
@@ -233,18 +310,8 @@ export default function App() {
                     </AnimatePresence>
                   </div>
                   
-                  <div className="flex flex-col items-center pt-8">
-                    <a
-                      href={REGISTRATION_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center"
-                    >
-                      <span className="relative z-10 flex items-center gap-3">
-                        Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
-                      </span>
-                      <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                    </a>
+                  <div className="flex flex-col items-center pt-6 sm:pt-8">
+                    <RegistrationCTA className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center" />
                     {/* Scroll Indicator */}
                     <motion.div 
                       animate={{ y: [0, 10, 0] }}
@@ -354,17 +421,7 @@ export default function App() {
                     </div>
 
                     <div className="flex justify-center pt-12">
-                      <a 
-                        href={REGISTRATION_URL}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center"
-                      >
-                        <span className="relative z-10 flex items-center gap-3">
-                          Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
-                        </span>
-                        <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                      </a>
+                      <RegistrationCTA className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center" />
                     </div>
                   </div>
                 </motion.div>
@@ -425,17 +482,7 @@ export default function App() {
                         </motion.div>
                       ))}
                       <div className="flex justify-center pt-6 sm:pt-8">
-                        <a 
-                          href={REGISTRATION_URL}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center"
-                        >
-                          <span className="relative z-10 flex items-center gap-3">
-                            Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
-                          </span>
-                          <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                        </a>
+                        <RegistrationCTA className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center" />
                       </div>
                     </motion.div>
                   </div>
@@ -535,17 +582,7 @@ export default function App() {
                 </div>
 
                 <div className="flex justify-center pt-12">
-                  <a 
-                    href={REGISTRATION_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center"
-                  >
-                    <span className="relative z-10 flex items-center gap-3">
-                      Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
-                    </span>
-                    <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                  </a>
+                  <RegistrationCTA className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center" />
                 </div>
               </div>
             </section>
@@ -613,17 +650,7 @@ export default function App() {
                 </div>
 
                 <div className="flex justify-center pt-16">
-                  <a 
-                    href={REGISTRATION_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center"
-                  >
-                    <span className="relative z-10 flex items-center gap-3">
-                      Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
-                    </span>
-                    <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                  </a>
+                  <RegistrationCTA className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center" />
                 </div>
               </div>
             </section>
@@ -667,17 +694,7 @@ export default function App() {
                     </p>
                     <div className="mt-8 flex flex-col md:flex-row items-center justify-center gap-6">
                       <p className="text-lg font-medium">Don't let 2026 be another year of "almost."</p>
-                      <a 
-                        href={REGISTRATION_URL}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer shrink-0 inline-flex items-center justify-center"
-                      >
-                        <span className="relative z-10 flex items-center gap-3">
-                          Secure your slot <ArrowRight className="group-hover:translate-x-1 transition-transform" />
-                        </span>
-                        <div className="absolute inset-0 bg-white/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                      </a>
+                      <RegistrationCTA className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer shrink-0 inline-flex items-center justify-center" />
                     </div>
                   </div>
                 </motion.div>
@@ -719,17 +736,7 @@ export default function App() {
                 </div>
 
                 <div className="flex flex-col items-center pt-4 sm:pt-5">
-                  <a 
-                    href={REGISTRATION_URL}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="group relative min-h-[52px] px-6 py-4 sm:px-10 sm:py-5 lg:px-12 lg:py-5 bg-brand-red text-white font-display uppercase tracking-wider rounded-full overflow-hidden transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(227,30,36,0.3)] active:scale-95 cursor-pointer inline-flex items-center justify-center"
-                  >
-                    <span className="relative z-10 flex items-center gap-3">
-                      Secure your slot <ArrowRight className="w-6 h-6 sm:w-7 sm:h-7 group-hover:translate-x-2 transition-transform" />
-                    </span>
-                    <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform duration-300" />
-                  </a>
+                  <RegistrationCTA className="group relative min-h-[52px] px-6 py-4 sm:px-10 sm:py-5 lg:px-12 lg:py-5 bg-brand-red text-white font-display uppercase tracking-wider rounded-full overflow-hidden transition-all hover:scale-105 hover:shadow-[0_0_40px_rgba(227,30,36,0.3)] active:scale-95 cursor-pointer inline-flex items-center justify-center" />
                   <div className="mt-[50px]">
                     <p className="font-medium text-white/80 mb-0">Stop looking. Start finding.</p>
                     <div className="mt-4 h-[160px] sm:h-[200px] md:h-[240px] overflow-hidden w-screen relative left-1/2 -translate-x-1/2">
