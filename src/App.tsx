@@ -162,7 +162,7 @@ function RegistrationModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
             transition={{ type: "spring", damping: 25, stiffness: 300 }}
             className="fixed left-1/2 top-1/2 z-[101] -translate-x-1/2 -translate-y-1/2 w-full max-w-md mx-4"
           >
-            <div className="bg-zinc-900 border border-white/10 rounded-2xl p-8 shadow-2xl">
+            <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 sm:p-8 shadow-2xl">
               <h3 className="font-sans text-xl uppercase tracking-wider text-white mb-6 text-center font-semibold">
                 Choose your registration
               </h3>
@@ -258,7 +258,7 @@ export default function App() {
             className="relative"
           >
             {/* Hero Section */}
-            <section className="relative min-h-0 sm:min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-[200px] sm:pt-[50px] pb-12 sm:pb-0 overflow-visible">
+            <section className="relative min-h-0 sm:min-h-screen flex flex-col items-center justify-center px-4 sm:px-6 pt-[200px] sm:pt-[140px] md:pt-[130px] lg:pt-[120px] pb-12 sm:pb-0 overflow-visible">
               <div className="absolute inset-0 z-0 opacity-20 overflow-hidden pointer-events-none">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-brand-red/20 rounded-full blur-[120px]" />
               </div>
@@ -326,7 +326,7 @@ export default function App() {
             </section>
 
             {/* Section: All in One Room */}
-            <section className="pt-12 pb-20 sm:py-28 px-4 sm:px-6 bg-zinc-950 border-y border-white/5 overflow-hidden">
+            <section className="pt-10 pb-16 sm:pt-20 sm:pb-24 md:py-28 px-4 sm:px-6 bg-zinc-950 border-y border-white/5 overflow-hidden">
               <div className="max-w-5xl mx-auto text-center">
                 <motion.h3
                   initial="hidden"
@@ -361,7 +361,7 @@ export default function App() {
             </section>
 
             {/* Section: What is IBMC? */}
-            <section className="py-20 sm:py-32 px-4 sm:px-6 bg-black border-y border-white/5 relative overflow-hidden">
+            <section className="py-16 sm:py-24 md:py-32 px-4 sm:px-6 bg-black border-y border-white/5 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-1/3 h-full bg-brand-red/5 blur-[120px] -z-10" />
               <div className="max-w-4xl mx-auto text-center">
                 <motion.div
@@ -429,7 +429,7 @@ export default function App() {
             </section>
 
             {/* Section 2 – THE REAL PROBLEM */}
-            <section className="py-12 sm:py-20 px-4 sm:px-6 bg-zinc-950 overflow-hidden">
+            <section className="py-12 sm:py-16 md:py-20 px-4 sm:px-6 bg-zinc-950 overflow-hidden">
               <div className="max-w-7xl mx-auto">
                 <motion.div
                   initial="hidden"
@@ -491,7 +491,7 @@ export default function App() {
             </section>
 
             {/* Section 3 – THE SHIFT */}
-            <section className="py-20 sm:py-32 px-4 sm:px-6 relative overflow-hidden">
+            <section className="py-16 sm:py-24 md:py-32 px-4 sm:px-6 relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
                 <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white to-transparent" />
                 <div className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white to-transparent" />
@@ -588,7 +588,7 @@ export default function App() {
             </section>
 
             {/* Section 4 – WHAT THIS ROOM IS */}
-            <section className="py-20 sm:py-32 px-4 sm:px-6 bg-white text-black">
+            <section className="py-16 sm:py-24 md:py-32 px-4 sm:px-6 bg-white text-black">
               <div className="max-w-7xl mx-auto">
                 <motion.div
                   initial="hidden"
@@ -656,7 +656,7 @@ export default function App() {
             </section>
 
             {/* Section: The Cost of Missing Out (StoryBrand Consequence) */}
-            <section className="py-20 sm:py-32 px-4 sm:px-6 bg-zinc-900 relative overflow-hidden">
+            <section className="py-16 sm:py-24 md:py-32 px-4 sm:px-6 bg-zinc-900 relative overflow-hidden">
               <div className="absolute top-0 left-0 w-full h-full opacity-5 pointer-events-none">
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-full h-full bg-[radial-gradient(circle,rgba(227,30,36,0.2)_0%,transparent_70%)]" />
               </div>
