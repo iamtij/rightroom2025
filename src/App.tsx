@@ -360,6 +360,68 @@ export default function App() {
               </div>
             </section>
 
+            {/* Section: THE REAL PROBLEM */}
+            <section className="py-12 sm:py-16 md:py-20 px-4 sm:px-6 bg-zinc-950 overflow-hidden">
+              <div className="max-w-7xl mx-auto">
+                <motion.div
+                  initial="hidden"
+                  whileInView="visible"
+                  viewport={viewport}
+                  variants={scrollRevealScale}
+                  className="border-2 border-brand-red/40 rounded-3xl p-8 sm:p-12 md:p-16 bg-black/50"
+                >
+                  <div className="grid md:grid-cols-2 gap-12 md:gap-20 items-center">
+                    <motion.div
+                      initial="hidden"
+                      whileInView="visible"
+                      viewport={viewport}
+                      variants={scrollRevealLeft}
+                    >
+                      <h2 className="section-eyebrow mb-6">The Problem</h2>
+                      <h3 className="font-display text-[clamp(2.5rem,10vw,6rem)] sm:text-5xl md:text-6xl lg:text-7xl leading-[0.95] uppercase tracking-wide">
+                        Maybe you’re <br />
+                        not missing <br />
+                        <span className="text-brand-red font-bold">effort.</span>
+                      </h3>
+                      <p className="mt-6 text-xl sm:text-2xl md:text-3xl font-light text-brand-red">
+                        Maybe you’re not in a room that accelerates growth.
+                      </p>
+                    </motion.div>
+                    
+                    <motion.div
+                      initial="hidden"
+                      whileInView="visible"
+                      viewport={viewport}
+                      variants={scrollRevealRight}
+                      className="space-y-4 sm:space-y-6"
+                    >
+                      {[
+                        "You’re working hard but growth feels random",
+                        "You’re networking but not progressing",
+                        "You’re meeting people but not decision-makers",
+                        "You’re active but not advancing"
+                        ].map((text, i) => (
+                        <motion.div 
+                          key={i}
+                          initial={{ opacity: 0, x: 20 }}
+                          whileInView={{ opacity: 1, x: 0 }}
+                          transition={{ delay: i * 0.1 }}
+                          viewport={{ once: true }}
+                          className="flex items-start gap-4 group"
+                        >
+                          <div className="mt-1.5 w-2 h-2 rounded-full bg-brand-red group-hover:scale-150 transition-transform shrink-0" />
+                          <p className="text-lg sm:text-xl md:text-2xl font-medium text-white/80">{text}</p>
+                        </motion.div>
+                      ))}
+                      <div className="flex justify-center pt-6 sm:pt-8">
+                        <RegistrationCTA className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center" />
+                      </div>
+                    </motion.div>
+                  </div>
+                </motion.div>
+              </div>
+            </section>
+
             {/* Section: What is IBMC? */}
             <section className="py-16 sm:py-24 md:py-32 px-4 sm:px-6 bg-black border-y border-white/5 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-1/3 h-full bg-brand-red/5 blur-[120px] -z-10" />
@@ -428,65 +490,70 @@ export default function App() {
               </div>
             </section>
 
-            {/* Section 2 – THE REAL PROBLEM */}
-            <section className="py-12 sm:py-16 md:py-20 px-4 sm:px-6 bg-zinc-950 overflow-hidden">
+            {/* Keynote speaker — directly after What is IBMC */}
+            <section className="py-16 sm:py-24 md:py-28 px-4 sm:px-6 bg-zinc-950 border-y border-white/5">
               <div className="max-w-7xl mx-auto">
                 <motion.div
                   initial="hidden"
                   whileInView="visible"
                   viewport={viewport}
-                  variants={scrollRevealScale}
-                  className="border-2 border-brand-red/40 rounded-3xl p-8 sm:p-12 md:p-16 bg-black/50"
+                  variants={scrollReveal}
+                  className="text-center mb-12 md:mb-16"
                 >
-                  <div className="grid md:grid-cols-2 gap-12 md:gap-20 items-center">
-                    <motion.div
-                      initial="hidden"
-                      whileInView="visible"
-                      viewport={viewport}
-                      variants={scrollRevealLeft}
-                    >
-                      <h2 className="section-eyebrow mb-6">The Problem</h2>
-                      <h3 className="font-display text-[clamp(2.5rem,10vw,6rem)] sm:text-5xl md:text-6xl lg:text-7xl leading-[0.95] uppercase tracking-wide">
-                        Maybe you’re <br />
-                        not missing <br />
-                        <span className="text-brand-red font-bold">effort.</span>
-                      </h3>
-                      <p className="mt-6 text-xl sm:text-2xl md:text-3xl font-light text-brand-red">
-                        Maybe you’re not in a room that accelerates growth.
-                      </p>
-                    </motion.div>
-                    
-                    <motion.div
-                      initial="hidden"
-                      whileInView="visible"
-                      viewport={viewport}
-                      variants={scrollRevealRight}
-                      className="space-y-4 sm:space-y-6"
-                    >
-                      {[
-                        "You’re working hard but growth feels random",
-                        "You’re networking but not progressing",
-                        "You’re meeting people but not decision-makers",
-                        "You’re active but not advancing"
-                        ].map((text, i) => (
-                        <motion.div 
-                          key={i}
-                          initial={{ opacity: 0, x: 20 }}
-                          whileInView={{ opacity: 1, x: 0 }}
-                          transition={{ delay: i * 0.1 }}
-                          viewport={{ once: true }}
-                          className="flex items-start gap-4 group"
-                        >
-                          <div className="mt-1.5 w-2 h-2 rounded-full bg-brand-red group-hover:scale-150 transition-transform shrink-0" />
-                          <p className="text-lg sm:text-xl md:text-2xl font-medium text-white/80">{text}</p>
-                        </motion.div>
-                      ))}
-                      <div className="flex justify-center pt-6 sm:pt-8">
-                        <RegistrationCTA className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center" />
-                      </div>
-                    </motion.div>
-                  </div>
+                  <h2 className="section-eyebrow mb-4">Keynote</h2>
+                  <h3 className="section-title-lg">
+                    IBMC <span className="text-brand-red font-bold">Key Speaker</span>
+                  </h3>
                 </motion.div>
+
+                <div className="grid md:grid-cols-2 gap-10 md:gap-14 lg:gap-20 items-center">
+                  <motion.div
+                    initial="hidden"
+                    whileInView="visible"
+                    viewport={viewport}
+                    variants={scrollRevealLeft}
+                    className="text-left space-y-6 md:space-y-8"
+                  >
+                    <div>
+                      <p className="font-display text-4xl sm:text-5xl md:text-6xl font-bold text-white tracking-tight">
+                        Neeraj Shah
+                      </p>
+                      <p className="mt-2 text-xl md:text-2xl text-white/70 italic">
+                        Founder, Titan Masterminds
+                      </p>
+                    </div>
+
+                    <div className="space-y-4 text-lg md:text-xl font-light text-white/80 leading-relaxed">
+                      <p>
+                        Founder of Titan Masterminds, a top 20 mentor and LinkedIn faculty on GeniusU—reaching 1.7 million entrepreneurs.
+                      </p>
+                      <p>
+                        Recognized as a Top 200 Global Thought Leader by PeopleHum (2021). He scaled BNI India to 10,000 entrepreneurs across 28 cities and $450 million in revenue—and is a best-selling author.
+                      </p>
+                    </div>
+
+                    <div className="pt-2 border-t border-white/10">
+                      <p className="section-eyebrow mb-2 text-left">IBMC topic</p>
+                      <p className="text-xl md:text-2xl font-semibold text-white leading-snug">
+                        &ldquo;<span className="italic">Master AI to Save 20+ Hours Per Week &amp; Grow Profits</span>&rdquo;
+                      </p>
+                    </div>
+                  </motion.div>
+
+                  <motion.div
+                    initial="hidden"
+                    whileInView="visible"
+                    viewport={viewport}
+                    variants={scrollRevealRight}
+                    className="relative w-full aspect-[4/5] sm:aspect-[3/4] md:aspect-[5/6] max-h-[520px] md:max-h-none overflow-hidden rounded-3xl bg-black border border-white/10"
+                  >
+                    <img
+                      src="/assets/keynote-neeraj-shah.png"
+                      alt="Neeraj Shah, IBMC keynote speaker"
+                      className="absolute inset-0 h-full w-full object-cover object-center"
+                    />
+                  </motion.div>
+                </div>
               </div>
             </section>
 
