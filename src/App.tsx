@@ -528,6 +528,23 @@ export default function App() {
                   whileInView={{ opacity: 1, y: 0 }}
                   viewport={{ once: true }}
                 >
+                  <div className="mb-12 md:mb-16 max-w-3xl mx-auto">
+                    <div className="relative overflow-hidden rounded-2xl border-2 border-brand-red/55 bg-gradient-to-br from-brand-red/[0.14] via-black/90 to-black px-6 py-10 sm:px-10 sm:py-12 shadow-[0_0_52px_-8px_rgba(227,30,36,0.45)] ring-1 ring-inset ring-white/10">
+                      <div
+                        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_-20%,rgba(227,30,36,0.22),transparent_60%)]"
+                        aria-hidden
+                      />
+                      <p className="relative z-10 text-center">
+                        <span className="block font-display text-xl sm:text-2xl md:text-3xl lg:text-[2.5rem] uppercase tracking-wide text-white leading-[1.18]">
+                          What if your next dream referral is in this{" "}
+                          <span className="text-brand-red drop-shadow-[0_0_24px_rgba(227,30,36,0.55)]">room</span>?
+                        </span>
+                        <span className="mt-3 block font-sans text-lg sm:text-xl md:text-2xl font-semibold text-white tracking-normal normal-case not-italic">
+                          <BoldIBMC text="And this is why IBMC exists." />
+                        </span>
+                      </p>
+                    </div>
+                  </div>
                   <h2 className="section-eyebrow mb-4">Why We Exist</h2>
                     <h3 className="section-title-lg mb-12">
                     What is <span className="text-brand-red font-bold">IBMC?</span>
