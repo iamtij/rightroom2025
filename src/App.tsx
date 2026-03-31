@@ -422,6 +422,103 @@ export default function App() {
               </div>
             </section>
 
+            {/* Section 3 – THE SHIFT */}
+            <section className="py-16 sm:py-24 md:py-32 px-4 sm:px-6 relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
+                <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white to-transparent" />
+                <div className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white to-transparent" />
+              </div>
+
+              <div className="max-w-7xl mx-auto">
+                <motion.div
+                  initial="hidden"
+                  whileInView="visible"
+                  viewport={viewport}
+                  variants={scrollReveal}
+                  className="text-center mb-24"
+                >
+                  <h2 className="section-eyebrow mb-6">The Shift</h2>
+                  <h3 className="section-title-lg mb-8">
+                    Rooms shape <span className="text-brand-red">results.</span>
+                  </h3>
+                  <p className="text-xl md:text-2xl text-white/60 max-w-2xl mx-auto">
+                    The room you sit in determines everything about your trajectory.
+                  </p>
+                </motion.div>
+
+                <div className="grid md:grid-cols-2 gap-12 mb-32 items-stretch">
+                  <motion.div
+                    initial="hidden"
+                    whileInView="visible"
+                    viewport={viewport}
+                    variants={scrollRevealLeft}
+                    className="relative min-h-[400px] md:min-h-[500px] rounded-3xl overflow-hidden order-2 md:order-1"
+                  >
+                    <img
+                      src="/assets/ibmc-strategic-alignment.png"
+                      alt="Strategic alignment at IBMC"
+                      className="w-full h-full object-cover grayscale opacity-50"
+                    />
+                    <div className="absolute inset-0 bg-brand-red/10 mix-blend-overlay" />
+                    <div className="absolute bottom-8 left-8 right-8">
+                      <p className="section-eyebrow mb-2">The Result</p>
+                      <p className="section-title text-xl sm:text-2xl">Strategic Alignment</p>
+                    </div>
+                  </motion.div>
+
+                  <motion.div
+                    initial="hidden"
+                    whileInView="visible"
+                    viewport={viewport}
+                    variants={scrollRevealRight}
+                    className="glass-card p-10 sm:p-14 md:p-16 rounded-3xl order-1 md:order-2 flex flex-col justify-center items-center text-center min-h-[400px] md:min-h-[500px] w-full"
+                  >
+                    <h4 className="section-eyebrow mb-6">The Environment Effect</h4>
+                    <p className="section-title text-white mb-10 md:mb-14 leading-tight max-w-xl">
+                      Rooms Decide <span className="text-brand-red">Results.</span>
+                    </p>
+                    <ul className="grid sm:grid-cols-2 gap-x-12 sm:gap-x-16 md:gap-x-20 gap-y-8 md:gap-y-10 w-full max-w-2xl mx-auto">
+                      {[
+                        "The level of conversations you have.",
+                        "The quality of referrals you receive.",
+                        "The partnerships you form.",
+                        "The ideas you discover."
+                      ].map((item, i) => (
+                        <li key={i} className="flex items-start gap-4 text-lg sm:text-xl font-medium text-left">
+                          <CheckCircle2 className="text-brand-red w-6 h-6 shrink-0 mt-0.5" />
+                          <span>{item}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </motion.div>
+
+                  <div className="flex flex-col justify-center gap-8 md:col-span-2 max-w-2xl md:mx-auto">
+                    {[
+                      { from: "I was chasing leads.", to: "I chose to be in the right room. I found my best client." },
+                      { from: "I was begging for attention.", to: "I stepped into the right room. I found my next partner." },
+                      { from: "I was working in isolation.", to: "I entered the right room. I found my global expansion." }
+                    ].map((quote, i) => (
+                      <motion.div 
+                        key={i}
+                        initial={{ opacity: 0, y: 20 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        transition={{ delay: i * 0.2 }}
+                        viewport={{ once: true }}
+                        className="border-l-2 border-brand-red/30 pl-8"
+                      >
+                        <p className="text-white/40 italic text-lg mb-2">“{quote.from}”</p>
+                        <p className="text-2xl font-semibold leading-tight">“{quote.to}”</p>
+                      </motion.div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-center pt-12">
+                  <RegistrationCTA className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center" />
+                </div>
+              </div>
+            </section>
+
             {/* Section: What is IBMC? */}
             <section className="py-16 sm:py-24 md:py-32 px-4 sm:px-6 bg-black border-y border-white/5 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-1/3 h-full bg-brand-red/5 blur-[120px] -z-10" />
@@ -553,103 +650,6 @@ export default function App() {
                       className="absolute inset-0 h-full w-full object-cover object-center"
                     />
                   </motion.div>
-                </div>
-              </div>
-            </section>
-
-            {/* Section 3 – THE SHIFT */}
-            <section className="py-16 sm:py-24 md:py-32 px-4 sm:px-6 relative overflow-hidden">
-              <div className="absolute top-0 left-0 w-full h-full opacity-10 pointer-events-none">
-                <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white to-transparent" />
-                <div className="absolute bottom-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-white to-transparent" />
-              </div>
-
-              <div className="max-w-7xl mx-auto">
-                <motion.div
-                  initial="hidden"
-                  whileInView="visible"
-                  viewport={viewport}
-                  variants={scrollReveal}
-                  className="text-center mb-24"
-                >
-                  <h2 className="section-eyebrow mb-6">The Shift</h2>
-                  <h3 className="section-title-lg mb-8">
-                    Rooms shape <span className="text-brand-red">results.</span>
-                  </h3>
-                  <p className="text-xl md:text-2xl text-white/60 max-w-2xl mx-auto">
-                    The room you sit in determines everything about your trajectory.
-                  </p>
-                </motion.div>
-
-                <div className="grid md:grid-cols-2 gap-12 mb-32 items-stretch">
-                  <motion.div
-                    initial="hidden"
-                    whileInView="visible"
-                    viewport={viewport}
-                    variants={scrollRevealLeft}
-                    className="relative min-h-[400px] md:min-h-[500px] rounded-3xl overflow-hidden order-2 md:order-1"
-                  >
-                    <img
-                      src="/assets/ibmc-strategic-alignment.png"
-                      alt="Strategic alignment at IBMC"
-                      className="w-full h-full object-cover grayscale opacity-50"
-                    />
-                    <div className="absolute inset-0 bg-brand-red/10 mix-blend-overlay" />
-                    <div className="absolute bottom-8 left-8 right-8">
-                      <p className="section-eyebrow mb-2">The Result</p>
-                      <p className="section-title text-xl sm:text-2xl">Strategic Alignment</p>
-                    </div>
-                  </motion.div>
-
-                  <motion.div
-                    initial="hidden"
-                    whileInView="visible"
-                    viewport={viewport}
-                    variants={scrollRevealRight}
-                    className="glass-card p-10 sm:p-14 md:p-16 rounded-3xl order-1 md:order-2 flex flex-col justify-center items-center text-center min-h-[400px] md:min-h-[500px] w-full"
-                  >
-                    <h4 className="section-eyebrow mb-6">The Environment Effect</h4>
-                    <p className="section-title text-white mb-10 md:mb-14 leading-tight max-w-xl">
-                      Rooms Decide <span className="text-brand-red">Results.</span>
-                    </p>
-                    <ul className="grid sm:grid-cols-2 gap-x-12 sm:gap-x-16 md:gap-x-20 gap-y-8 md:gap-y-10 w-full max-w-2xl mx-auto">
-                      {[
-                        "The level of conversations you have.",
-                        "The quality of referrals you receive.",
-                        "The partnerships you form.",
-                        "The ideas you discover."
-                      ].map((item, i) => (
-                        <li key={i} className="flex items-start gap-4 text-lg sm:text-xl font-medium text-left">
-                          <CheckCircle2 className="text-brand-red w-6 h-6 shrink-0 mt-0.5" />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </motion.div>
-
-                  <div className="flex flex-col justify-center gap-8 md:col-span-2 max-w-2xl md:mx-auto">
-                    {[
-                      { from: "I was chasing leads.", to: "I chose to be in the right room. I found my best client." },
-                      { from: "I was begging for attention.", to: "I stepped into the right room. I found my next partner." },
-                      { from: "I was working in isolation.", to: "I entered the right room. I found my global expansion." }
-                    ].map((quote, i) => (
-                      <motion.div 
-                        key={i}
-                        initial={{ opacity: 0, y: 20 }}
-                        whileInView={{ opacity: 1, y: 0 }}
-                        transition={{ delay: i * 0.2 }}
-                        viewport={{ once: true }}
-                        className="border-l-2 border-brand-red/30 pl-8"
-                      >
-                        <p className="text-white/40 italic text-lg mb-2">“{quote.from}”</p>
-                        <p className="text-2xl font-semibold leading-tight">“{quote.to}”</p>
-                      </motion.div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="flex justify-center pt-12">
-                  <RegistrationCTA className="group relative min-h-[52px] px-8 py-5 sm:px-12 sm:py-5 bg-brand-red text-white font-display text-xl sm:text-2xl uppercase tracking-wider rounded-full overflow-hidden transition-transform hover:scale-105 active:scale-95 cursor-pointer inline-flex items-center justify-center" />
                 </div>
               </div>
             </section>
