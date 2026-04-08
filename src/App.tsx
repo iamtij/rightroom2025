@@ -5,7 +5,7 @@ import { ArrowRight, CheckCircle2, Users, Handshake, Globe, TrendingUp, Lightbul
 const EVENT_DATE = new Date("2026-06-17T00:00:00");
 const REGISTRATION_URL_VISITOR = "https://events.mygrid.club/ibmcvisitor";
 const REGISTRATION_URL_MEMBER = "https://events.mygrid.club/ibmc";
-const REGISTRATION_URL_SPONSOR = "https://cname.mygrid.club/ibmcsponsor";
+const REGISTRATION_URL_SPONSOR = "https://events.mygrid.club/ibmcsponsor";
 
 function BoldIBMC({ text }: { text: string }) {
   const parts = text.split(/(IBMC)/g);
