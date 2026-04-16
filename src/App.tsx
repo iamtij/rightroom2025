@@ -171,9 +171,12 @@ function RegistrationModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
                   href={REGISTRATION_URL_VISITOR}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="block w-full py-4 px-6 bg-brand-red text-white font-sans text-base uppercase tracking-wider rounded-xl hover:bg-brand-red-light transition-colors text-center font-semibold"
+                  className="block w-full py-3.5 px-6 bg-brand-red text-white font-sans rounded-xl hover:bg-brand-red-light transition-colors text-center font-semibold"
                 >
-                  Visitors
+                  <span className="block text-base uppercase tracking-wider">VISITORS</span>
+                  <span className="block mt-0.5 text-xs sm:text-sm font-normal font-sans normal-case tracking-normal text-white/85">
+                    (Non-BNI Members)
+                  </span>
                 </a>
                 <a
                   href={REGISTRATION_URL_MEMBER}
