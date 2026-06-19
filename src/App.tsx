@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { ArrowRight, CheckCircle2, Users, Handshake, Globe, TrendingUp, Lightbulb, ChevronDown } from "lucide-react";
 
 const EVENT_DATE = new Date("2026-06-17T00:00:00");
+const REGISTRATION_OPEN = false;
 const REGISTRATION_URL_MEMBER = "https://events.mygrid.club/ibmc";
 const REGISTRATION_URL_SPONSOR = "https://events.mygrid.club/ibmcsponsor";
 
@@ -139,7 +140,7 @@ const FAQ_ITEMS = [
   { q: "When and where is IBMC 2026?", a: "IBMC 2026 takes place on June 17–18, 2026 in NPAT (Newport Performing Arts Theater), Pasay City." },
   { q: "Who should attend?", a: "Business owners, decision-makers, and professionals who are ready to grow through strategic partnerships, direct access to buyers and sellers, and meaningful connections. If you're tired of random networking and want purposeful growth, IBMC is for you." },
   { q: "How does the business matching work?", a: "Through structured one-to-one matching and curated rooms, you connect directly with decision-makers and strategic partners. No random introductions—every interaction is designed to move your business forward." },
-  { q: "How do I register?", a: "Click 'Secure your slot' anywhere on this page. You'll see two options: BNI Members / Visitors, or Sponsors. Choose the one that applies to you to complete registration. You'll receive a confirmation email with next steps and how to prepare your business profile for matching." },
+  { q: "How do I register?", a: "Registration for IBMC 2026 has closed. The event took place on June 17–18, 2026 at NPAT (Newport Performing Arts Theater), Pasay City." },
 ];
 
 function RegistrationModal({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
@@ -199,6 +200,7 @@ function RegistrationModal({ isOpen, onClose }: { isOpen: boolean; onClose: () =
 
 function RegistrationCTA({ className = "", showArrow = true }: { className?: string; showArrow?: boolean }) {
   const [showModal, setShowModal] = useState(false);
+  if (!REGISTRATION_OPEN) return null;
   return (
     <>
       <button
