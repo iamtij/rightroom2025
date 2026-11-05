@@ -713,10 +713,8 @@ export default function AmplifyHome() {
           <ul className="m-0 flex min-w-0 flex-[999_1_520px] list-none flex-col p-0">
             {[
               "Both days of IBMC 2027 — June 16–17, Newport Performing Arts Theater",
-              "[X] rounds of business matching with owners from [X] industries",
-              "Keynotes from [speaker names]",
-              "A personal invite card to bring one business owner you'd refer",
-              "[Inclusion — confirm with IBMC team]",
+              "Business matching activities",
+              "Monthly online networking, December to May",
             ].map((item, i, arr) => (
               <li key={item} className={`flex items-baseline gap-4 py-[18px] text-lg leading-snug ${i < arr.length - 1 ? "border-b border-[#34343A]" : ""}`}>
                 <span aria-hidden="true" className="h-2 w-2 shrink-0 bg-[#FF4D5A]" />
@@ -767,11 +765,12 @@ export default function AmplifyHome() {
             </a>
             </div>
           </article>
-          <article className="flex flex-col gap-3.5 rounded-[18px] border border-[#D9D5CF] p-5 sm:p-6 xl:p-7">
-            <div className="flex flex-col gap-1">
-              <h3 className="m-0 font-archivo text-[22px] font-extrabold uppercase tracking-[0.04em]">Early Bird</h3>
-              <p className="m-0 text-sm font-bold uppercase tracking-[0.06em] text-[#5C5C63]">Most popular · opens Dec 1</p>
+          <article className="flex flex-col overflow-hidden rounded-[18px] border border-[#D9D5CF]">
+            <div className="flex flex-col gap-1 bg-[#E4E1DC] px-5 py-4 sm:px-6 sm:py-5 xl:px-7">
+              <h3 className="m-0 font-archivo text-[22px] font-extrabold uppercase tracking-[0.04em] text-[#5C5C63]">Early Bird</h3>
+              <p className="m-0 text-sm font-bold uppercase tracking-[0.06em] text-[#6E6E74]">Most popular · opens Dec 1</p>
             </div>
+            <div className="flex flex-col gap-3.5 p-5 sm:p-6 xl:p-7">
             <p className="m-0 text-sm text-[#5C5C63]">Dec 1, 2026 – Jan 31, 2027</p>
             <Price text="₱15,000" className="m-0 block font-archivo text-5xl font-extrabold leading-none font-wide text-[#5C5C63]" />
             <p className="m-0 text-sm font-semibold text-[#5C5C63]">Save ₱3,000 vs Regular</p>
@@ -786,12 +785,14 @@ export default function AmplifyHome() {
             <span className="mt-auto rounded-full border border-[#D9D5CF] px-5 py-[15px] text-center text-base font-semibold text-[#5C5C63]">
               Opens later
             </span>
-            </article>
-          <article className="flex flex-col gap-3.5 rounded-[18px] border border-[#D9D5CF] p-5 sm:p-6 xl:p-7">
-            <div className="flex flex-col gap-1">
-              <h3 className="m-0 font-archivo text-[22px] font-extrabold uppercase tracking-[0.04em]">Regular</h3>
-              <p className="m-0 text-sm font-bold uppercase tracking-[0.06em] text-[#5C5C63]">Opens Feb 1</p>
             </div>
+            </article>
+          <article className="flex flex-col overflow-hidden rounded-[18px] border border-[#D9D5CF]">
+            <div className="flex flex-col gap-1 bg-[#E4E1DC] px-5 py-4 sm:px-6 sm:py-5 xl:px-7">
+              <h3 className="m-0 font-archivo text-[22px] font-extrabold uppercase tracking-[0.04em] text-[#5C5C63]">Regular</h3>
+              <p className="m-0 text-sm font-bold uppercase tracking-[0.06em] text-[#6E6E74]">Opens Feb 1</p>
+            </div>
+            <div className="flex flex-col gap-3.5 p-5 sm:p-6 xl:p-7">
             <p className="m-0 text-sm text-[#5C5C63]">Feb 1 – May 31, 2027</p>
             <Price text="₱18,000" className="m-0 block font-archivo text-5xl font-extrabold leading-none font-wide text-[#5C5C63]" />
             <p className="m-0 text-[15px] text-[#5C5C63]">One-time · no installment</p>
@@ -799,6 +800,7 @@ export default function AmplifyHome() {
             <span className="mt-auto rounded-full border border-[#D9D5CF] px-5 py-[15px] text-center text-base font-semibold text-[#5C5C63]">
               Opens later
             </span>
+            </div>
           </article>
         </div>
 
