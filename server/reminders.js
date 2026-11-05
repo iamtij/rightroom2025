@@ -181,13 +181,23 @@ async function runCustomSchedules(db, clock) {
 function scheduleTargets(db, schedule) {
   if (schedule.trigger === "before_due") {
     return db.prepare(`
-      SELECT i.id AS installment_id, i.due_on, i.amount_cents, i.amount_paid_cents, r.*
+      SELECT i.id AS installment_id, i.sequence AS installment_sequence, i.due_on, i.amount_cents, i.amount_paid_cents,
+        (SELECT COUNT(*) FROM registration_installments c WHERE c.registration_id = i.registration_id) AS installment_count,
+        r.*
       FROM registration_installments i
       JOIN registrations r ON r.id = i.registration_id
       WHERE r.status = 'confirmed' AND i.status = 'due'
     `).all().filter((row) => audienceMatches(schedule.audience, row)).map((row) => targetFrom(row, addDays(row.due_on, -schedule.days_offset), row.due_on));
   }
-  return db.prepare("SELECT * FROM registrations WHERE status = 'confirmed'").all()
+  return db.prepare(`
+    SELECT r.*,
+      (SELECT i.sequence FROM registration_installments i
+        WHERE i.registration_id = r.id AND i.status = 'due' AND i.amount_paid_cents < i.amount_cents
+        ORDER BY i.sequence LIMIT 1) AS installment_sequence,
+      (SELECT COUNT(*) FROM registration_installments i WHERE i.registration_id = r.id) AS installment_count
+    FROM registrations r
+    WHERE r.status = 'confirmed'
+  `).all()
     .filter((row) => audienceMatches(schedule.audience, row))
     .map((row) => targetFrom(row, schedule.trigger === "on_date" ? schedule.start_on : addDays(row.registered_on, schedule.days_offset), null));
 }
@@ -212,6 +222,9 @@ function targetFrom(row, firstOn, dueOn) {
     currency: row.currency,
     fullyPaid: Boolean(row.fully_paid_at),
     qrToken: row.qr_token,
+    installmentLabel: row.payment_plan === "installment" && row.installment_sequence && row.installment_count
+      ? `${row.installment_sequence} of ${row.installment_count}`
+      : "",
   };
 }
 
@@ -249,13 +262,17 @@ function fillScheduleTemplate(schedule, target) {
     pay_url: `${siteUrl()}/pay/${target.reference}`,
     reference: target.reference,
     pass_url: target.fullyPaid && target.qrToken ? `${siteUrl()}/pass/${target.qrToken}` : "",
+    installment: target.installmentLabel || "",
   };
   const apply = (text, escape) => String(text || "").replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (_, key) => {
     const value = values[key] ?? "";
     return escape ? escapeHtml(value) : value;
   });
   const body = apply(schedule.body, false);
-  const subject = apply(schedule.subject || "IBMC 2027", false);
+  let subject = apply(schedule.subject || "IBMC 2027", false);
+  if (schedule.channel === "email" && target.installmentLabel && !subject.includes(target.installmentLabel)) {
+    subject = `${subject} · ${target.installmentLabel}`;
+  }
   return { subject, body, html: `<p>${escapeHtml(body).replaceAll("\n", "<br>")}</p>` };
 }
 

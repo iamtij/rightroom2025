@@ -631,11 +631,16 @@ function Templates({ onError }: { onError: (message: string) => void }) {
               </select>
             </Field>
           </div>
-          {form.channel === "email" ? <Field label="Subject"><input className={field} required value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} /></Field> : null}
+          {form.channel === "email" ? (
+            <Field label="Subject">
+              <input className={field} required placeholder="IBMC 2027 · ₱2,000 due in 3 days · {{installment}}" value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} />
+            </Field>
+          ) : null}
           <Field label="Message">
             <textarea className={`${field} min-h-28`} required value={form.body} onChange={(event) => setForm({ ...form, body: event.target.value })} />
           </Field>
-          <p className="m-0 text-[13px] text-[#5C5C63]">Placeholders: {"{{first_name}}"} {"{{amount}}"} {"{{due_date}}"} {"{{pay_url}}"} {"{{reference}}"} {"{{pass_url}}"}</p>
+          <p className="m-0 text-[13px] text-[#5C5C63]">Placeholders: {"{{first_name}}"} {"{{amount}}"} {"{{due_date}}"} {"{{pay_url}}"} {"{{reference}}"} {"{{pass_url}}"} {"{{installment}}"}</p>
+          <p className="m-0 text-[13px] text-[#5C5C63]">Sample subject, installment: IBMC 2027 · ₱2,000 due in 3 days · 2 of 7. {"{{installment}}"} is the payment number, and only installment plans get it. A paid-in-full subject stays IBMC 2027 · ₱18,000 due today.</p>
           <div className="flex gap-2">
             <button type="submit" className={buttonClass}>{editor === "add" ? "Create template" : "Save template"}</button>
             <button type="button" className={ghostButton} onClick={() => setEditor(null)}>Back</button>

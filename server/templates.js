@@ -57,7 +57,12 @@ export function renderInstallmentReminder({ registration, installment, daysBefor
   const when = daysLabel(daysBefore);
   const name = firstName(registration.full_name);
   const headline = daysBefore === 0 ? "Your payment is due today." : `Your payment is ${when}.`;
-  const subject = `IBMC 2027 · ${amount} ${when}`;
+  const installmentLabel = registration.payment_plan === "installment"
+    ? `${installment.sequence} of ${registration.installment_count}`
+    : "";
+  const subject = installmentLabel
+    ? `IBMC 2027 · ${amount} ${when} · ${installmentLabel}`
+    : `IBMC 2027 · ${amount} ${when}`;
   const text = [
     `IBMC 2027`,
     `Hi ${name}, ${amount} for your ${registration.product_name} seat is ${when} (${due}).`,

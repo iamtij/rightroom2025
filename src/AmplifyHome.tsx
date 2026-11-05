@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
 const FIRST_MOVER_OPENS = new Date("2026-11-11T00:00:00+08:00");
+const FIRST_MOVER_ENDS = new Date("2026-12-01T00:00:00+08:00");
 const CHAPTER_FINDER = "https://bni.com/find-a-chapter";
 
 const ROW_A = ["Accountants", "Architects", "Caterers", "Insurance", "IT services", "Lawyers", "Logistics", "Printing"];
@@ -157,19 +158,58 @@ function Price({ text, className = "" }: { text: string; className?: string }) {
   );
 }
 
-function useCountdown(target: Date) {
+function useNow() {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(id);
   }, []);
+  return now;
+}
+
+function remaining(target: Date, now: Date) {
   const diff = Math.max(0, target.getTime() - now.getTime());
   return {
-    open: diff === 0,
     days: Math.floor(diff / 86400000),
     hours: Math.floor((diff % 86400000) / 3600000),
     minutes: Math.floor((diff % 3600000) / 60000),
+    seconds: Math.floor((diff % 60000) / 1000),
   };
+}
+
+function firstMoverPhase(now: Date) {
+  if (now < FIRST_MOVER_OPENS) return "before" as const;
+  if (now < FIRST_MOVER_ENDS) return "live" as const;
+  return "ended" as const;
+}
+
+function FirstMoverTimer({ now }: { now: Date }) {
+  const phase = firstMoverPhase(now);
+  const left = remaining(phase === "before" ? FIRST_MOVER_OPENS : FIRST_MOVER_ENDS, now);
+  if (phase === "ended") {
+    return <p className="m-0 text-sm font-semibold text-[#5C5C63]">Ended at midnight</p>;
+  }
+  const units = [
+    ["Days", left.days],
+    ["Hrs", left.hours],
+    ["Min", left.minutes],
+    ["Sec", left.seconds],
+  ];
+  return (
+    <div aria-live="polite">
+      <p className="m-0 text-[11px] font-bold uppercase tracking-[0.14em] text-[#A8131F]">
+        {phase === "before" ? "Opens in" : "Ends at midnight in"}
+      </p>
+      <div className="mt-2 grid grid-cols-4 gap-2">
+        {units.map(([label, value]) => (
+          <div key={label} className="flex flex-col items-center rounded-xl bg-[#FBE9EA] py-2.5">
+            <span className="font-archivo text-[22px] font-extrabold leading-none tabular-nums text-[#141416]">{pad(Number(value))}</span>
+            <span className="mt-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#A8131F]">{label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function Marquee({ items, reverse = false, className = "" }: { items: string[]; reverse?: boolean; className?: string }) {
@@ -435,7 +475,9 @@ function FaqList() {
 }
 
 export default function AmplifyHome() {
-  const countdown = useCountdown(FIRST_MOVER_OPENS);
+  const now = useNow();
+  const phase = firstMoverPhase(now);
+  const countdown = remaining(phase === "before" ? FIRST_MOVER_OPENS : FIRST_MOVER_ENDS, now);
 
   return (
     <div className="scroll-wrapper scroll-smooth bg-[#0E0E10] font-sans text-[#F6F4F1]">
@@ -503,13 +545,13 @@ export default function AmplifyHome() {
           </div>
           <p className="m-0 text-[13px] text-[#C9C7C2]">
             From ₱12,000 ·{" "}
-            {countdown.open ? (
-              <strong className="text-white">First Mover is open</strong>
+            {phase === "ended" ? (
+              <strong className="text-white">First Mover has ended</strong>
             ) : (
               <>
-                First Mover opens in{" "}
+                First Mover {phase === "before" ? "opens" : "ends"} in{" "}
                 <strong className="text-white">
-                  {pad(countdown.days)}d {pad(countdown.hours)}h {pad(countdown.minutes)}m
+                  {pad(countdown.days)}d {pad(countdown.hours)}h {pad(countdown.minutes)}m {pad(countdown.seconds)}s
                 </strong>
               </>
             )}
@@ -747,10 +789,13 @@ export default function AmplifyHome() {
           <article className="flex flex-col overflow-hidden rounded-[18px] border-2 border-[#D0202E]">
             <div className="flex flex-col gap-1 bg-[#D0202E] px-5 py-4 sm:px-6 sm:py-5 xl:px-7">
               <h3 className="m-0 font-archivo text-[22px] font-extrabold uppercase tracking-[0.04em] text-white">First Mover</h3>
-              <p className="m-0 text-sm font-bold uppercase tracking-[0.06em] text-[#F6F4F1]">Best price · opens Nov 11</p>
+              <p className="m-0 text-sm font-bold uppercase tracking-[0.06em] text-[#F6F4F1]">
+                {phase === "before" ? "Best price · opens Nov 11" : phase === "live" ? "Best price · ends midnight Nov 30" : "Best price · ended"}
+              </p>
             </div>
             <div className="flex flex-col gap-3.5 p-5 sm:p-6 xl:p-7">
             <p className="m-0 text-sm text-[#5C5C63]">Nov 11–30, 2026</p>
+            <FirstMoverTimer now={now} />
             <Price text="₱12,000" className="m-0 block font-archivo text-5xl font-extrabold leading-none font-wide" />
             <p className="m-0 text-sm font-semibold text-[#A8131F]">Save ₱6,000 vs Regular</p>
             <InstallmentPlan
