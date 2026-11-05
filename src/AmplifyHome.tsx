@@ -755,8 +755,8 @@ export default function AmplifyHome() {
             <h3 className="m-0 text-[22px] font-bold">First Mover</h3>
             <p className="m-0 text-sm text-[#5C5C63]">Nov 11–30, 2026</p>
             <Price text="₱12,000" className="m-0 block font-archivo text-5xl font-extrabold leading-none font-wide" />
-            <p className="m-0 text-[15px] text-[#3A3A40]">or ₱13,000 in installments</p>
             <p className="m-0 text-sm font-semibold text-[#A8131F]">Save ₱6,000 vs Regular</p>
+            <p className="m-0 text-[15px] text-[#3A3A40]">or ₱13,000 in installments</p>
             <InstallmentPlan
               label="First Mover"
               total="₱13,000"
@@ -775,8 +775,8 @@ export default function AmplifyHome() {
             <h3 className="m-0 text-[22px] font-bold">Early Bird</h3>
             <p className="m-0 text-sm text-[#5C5C63]">Dec 1, 2026 – Jan 31, 2027</p>
             <Price text="₱15,000" className="m-0 block font-archivo text-5xl font-extrabold leading-none font-wide text-[#5C5C63]" />
-            <p className="m-0 text-[15px] text-[#5C5C63]">or ₱16,000 in installments</p>
             <p className="m-0 text-sm font-semibold text-[#5C5C63]">Save ₱3,000 vs Regular</p>
+            <p className="m-0 text-[15px] text-[#5C5C63]">or ₱16,000 in installments</p>
             <InstallmentPlan
               label="Early Bird"
               total="₱16,000"

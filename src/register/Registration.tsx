@@ -133,7 +133,7 @@ function Frame({
         </header>
         {step ? <Steps step={step} /> : null}
         <main className="flex flex-1 flex-col gap-4 px-5 py-5">{children}</main>
-        {footer ? <div className="border-t border-[#E4E1DC] bg-[#FDFCFA] px-5 pt-4 pb-7">{footer}</div> : null}
+        {footer ? <div className="px-5 pt-2 pb-7">{footer}</div> : null}
       </div>
     </div>
   );
@@ -577,18 +577,20 @@ export default function Registration() {
             <p className="mt-1.5 mb-0 text-sm leading-normal text-[#5C5C63]">Check the email or mobile on your BNI profile. Non-BNI registration opens February 1, 2027.</p>
           </div>
         ) : null}
-        <p className="m-0 text-sm text-[#5C5C63]">
-          {othersOpen ? (
-            <>
-              Not a member?{" "}
-              <button type="button" className="font-semibold text-[#A8131F]" onClick={() => choose("guest")}>
-                Register as a non-BNI member
-              </button>
-            </>
-          ) : (
-            "Non-BNI registration opens February 1, 2027."
-          )}
-        </p>
+        {member ? null : (
+          <p className="m-0 text-sm text-[#5C5C63]">
+            {othersOpen ? (
+              <>
+                Not a member?{" "}
+                <button type="button" className="font-semibold text-[#A8131F]" onClick={() => choose("guest")}>
+                  Register as a non-BNI member
+                </button>
+              </>
+            ) : (
+              "Non-BNI registration opens February 1, 2027."
+            )}
+          </p>
+        )}
       </Frame>
     );
   }
