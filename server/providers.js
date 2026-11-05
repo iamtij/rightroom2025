@@ -1,0 +1,74 @@
+import { Resend } from "resend";
+
+const SEMAPHORE_URL = "https://api.semaphore.co/api/v4/messages";
+
+export function philippineMobile(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  const local = digits.startsWith("63") ? `0${digits.slice(2)}` : digits.length === 10 ? `0${digits}` : digits;
+  return /^09\d{9}$/.test(local) ? local : null;
+}
+
+function senderName() {
+  const name = (process.env.SMS_SENDER_NAME || "").trim();
+  if (!/^[A-Za-z0-9]{1,11}$/.test(name)) return null;
+  return name;
+}
+
+async function pause(ms) {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function sendEmail({ to, subject, html, text, idempotencyKey }) {
+  if (!process.env.RESEND_API_KEY) return { status: "skipped", error: "provider_not_configured" };
+  const resend = new Resend(process.env.RESEND_API_KEY);
+  const payload = {
+    from: process.env.EMAIL_FROM || "IBMC 2027 <tickets@ibmcph.com>",
+    to: [to],
+    subject,
+    html,
+    text,
+  };
+  if (process.env.EMAIL_REPLY_TO) payload.replyTo = process.env.EMAIL_REPLY_TO;
+
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const { data, error } = await resend.emails.send(payload, { idempotencyKey });
+    if (!error) return { status: "sent", providerId: data?.id || null };
+    lastError = error;
+    const statusCode = error.statusCode || 0;
+    if (statusCode !== 429 && statusCode < 500) break;
+    await pause(300 * (attempt + 1));
+  }
+  return { status: "failed", error: lastError?.message || "email_failed" };
+}
+
+export async function sendSms({ to, message }) {
+  if (!process.env.SEMAPHORE_API_KEY) return { status: "skipped", error: "provider_not_configured" };
+  const number = philippineMobile(to);
+  if (!number) return { status: "failed", error: "mobile_not_philippine" };
+  if (/^\s*test\b/i.test(message)) return { status: "failed", error: "sms_starts_with_test" };
+
+  const body = new URLSearchParams({
+    apikey: process.env.SEMAPHORE_API_KEY,
+    number,
+    message,
+  });
+  const from = senderName();
+  if (from) body.set("sendername", from);
+
+  let response;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    response = await fetch(SEMAPHORE_URL, { method: "POST", body });
+    if (response.status !== 429) break;
+    const wait = Number(response.headers.get("retry-after")) || 1;
+    await pause(Math.min(wait, 2) * 1000);
+  }
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const detail = payload.message || payload.sendername?.[0] || payload.apikey?.[0] || `sms ${response.status}`;
+    return { status: "failed", error: detail };
+  }
+  const messageRow = Array.isArray(payload) ? payload[0] : payload;
+  if (!messageRow?.message_id) return { status: "failed", error: "sms_missing_id" };
+  return { status: "sent", providerId: String(messageRow.message_id) };
+}

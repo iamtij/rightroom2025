@@ -1,0 +1,603 @@
+import "dotenv/config";
+import express from "express";
+import { openDatabase } from "./db.js";
+import { clearSessionCookie, cookieValue, readSession, seedAdmin, sessionCookie, signSession, verifyPassword } from "./auth.js";
+import { createRegistration, cancelRegistration, findRegistrationByContact, getRegistration, recordPayment, updateRegistration } from "./registrations.js";
+import { dashboardStats } from "./dashboard.js";
+import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
+import { listMembers, lookupMember, parseMemberCsv, saveMember, updateMemberProfile } from "./members.js";
+import { presentCoupon, priceCoupon } from "./coupons.js";
+import { maskEmail, readMemberEditToken, sendMemberOtp, sendRegistrationOtp, verifyMemberOtp, verifyRegistrationOtp } from "./otp.js";
+import { rateLimit } from "./limits.js";
+import { formatLongDate, manilaParts } from "./time.js";
+
+let database;
+
+function db() {
+  if (!database) {
+    database = openDatabase();
+    seedAdmin(database);
+  }
+  return database;
+}
+
+function present(registration) {
+  let opened = false;
+  const payments = registration.installments.map((item) => {
+    let status = "upcoming";
+    if (item.status === "paid") status = "paid";
+    else if (!opened) {
+      status = "due";
+      opened = true;
+    }
+    const slot = item.kind === "on_registration" || item.kind === "full";
+    return {
+      id: item.id,
+      label: slot ? "Today · secure your seat" : formatLongDate(item.due_on),
+      dueOn: item.due_on,
+      amountCents: item.amount_cents,
+      amountPaidCents: item.amount_paid_cents,
+      status,
+    };
+  });
+  return {
+    reference: registration.reference,
+    attendee: {
+      fullName: registration.full_name,
+      email: registration.email,
+      mobile: registration.mobile,
+      business: registration.business,
+      industry: registration.industry,
+      chapter: registration.chapter,
+      type: registration.attendee_type,
+    },
+    tierName: registration.product_name,
+    plan: registration.payment_plan,
+    currency: registration.currency,
+    totalCents: registration.amount_due_cents,
+    balanceCents: registration.balance_cents,
+    status: registration.status,
+    planStatus: registration.status === "cancelled" ? "cancelled" : registration.balance_cents === 0 ? "fully_paid" : registration.plan_status || "active",
+    qrReady: registration.balance_cents === 0 && Boolean(registration.qr_token),
+    registeredOn: registration.registered_on,
+    payments,
+  };
+}
+
+function readCoupon(body) {
+  const code = String(body.code || "").trim().toUpperCase();
+  const discountType = body.discountType === "fixed" ? "fixed" : "percent";
+  const discountValue = Number(body.discountValue);
+  if (!code || !Number.isFinite(discountValue) || discountValue <= 0) return { error: "Add a code and a discount" };
+  if (discountType === "percent" && discountValue > 100) return { error: "Percent discount cannot pass 100" };
+  return {
+    code,
+    discountType,
+    discountValue: Math.round(discountValue),
+    currency: body.currency || null,
+    ticketCode: body.ticketCode || null,
+    email: body.email ? String(body.email).trim().toLowerCase() : null,
+    usageLimit: body.usageLimit ? Number(body.usageLimit) : null,
+    expiresOn: body.expiresOn || null,
+  };
+}
+
+function readTemplate(body) {
+  const channel = body.channel === "sms" ? "sms" : "email";
+  const name = String(body.name || "").trim();
+  const message = String(body.body || "").trim();
+  const subject = String(body.subject || "").trim();
+  if (!name || !message) return { error: "Add a name and a message" };
+  if (channel === "email" && !subject) return { error: "Email templates need a subject" };
+  return { name, channel, subject: channel === "email" ? subject : null, body: message };
+}
+
+function readSchedule(database, body) {
+  const template = database.prepare("SELECT id FROM message_templates WHERE id = ?").get(Number(body.templateId));
+  if (!template) return { error: "Choose a template" };
+  const name = String(body.name || "").trim();
+  if (!name) return { error: "Add a schedule name" };
+  return {
+    name,
+    templateId: template.id,
+    trigger: ["before_due", "on_date", "after_registration"].includes(body.trigger) ? body.trigger : "before_due",
+    frequency: ["once", "daily", "weekly"].includes(body.frequency) ? body.frequency : "once",
+    audience: ["unpaid", "all", "fully_paid"].includes(body.audience) ? body.audience : "unpaid",
+    daysOffset: Number(body.daysOffset) || 0,
+    startOn: body.startOn || null,
+    sendTime: body.sendTime || "09:00",
+    endsOn: body.endsOn || null,
+    endsAfter: body.endsAfter ? Number(body.endsAfter) : null,
+    enabled: body.enabled === false ? 0 : 1,
+  };
+}
+
+const scheduleQuery = `
+  SELECT s.*, t.name AS template_name, t.channel
+  FROM message_schedules s
+  JOIN message_templates t ON t.id = s.template_id
+`;
+
+function clientError(error, fallback) {
+  const message = String(error?.message || "");
+  console.error(message);
+  if (message.includes("UNIQUE")) return "That already exists";
+  const safe = [
+    "Unknown ticket",
+    "is not on sale",
+    "This ticket is paid in full",
+    "This ticket has no installment schedule",
+    "Add a code",
+    "Percent discount",
+    "Add a name",
+    "Email templates",
+    "Choose a template",
+    "Add a schedule",
+    "Registration is not payable",
+    "No installment is due",
+    "Payment does not match",
+    "Nothing is due",
+    "That coupon",
+  ];
+  return safe.find((item) => message.includes(item)) ? message : fallback;
+}
+
+function requireAdmin(req, res, next) {
+  const token = cookieValue(req.headers.cookie, "ibmc_admin");
+  const session = readSession(token);
+  const admin = session && db().prepare("SELECT id, email FROM admin_users WHERE id = ?").get(session.id);
+  if (!admin) {
+    res.status(401).json({ error: "Sign in required" });
+    return;
+  }
+  req.admin = admin;
+  next();
+}
+
+export function createApi() {
+  const app = express();
+  const router = express.Router();
+  app.set("trust proxy", 1);
+  app.use(express.json({ limit: "2mb" }));
+  const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 8 });
+  const registerLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 10 });
+  const lookupLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
+  const memberLookupLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
+  const otpLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 8 });
+
+  router.get("/chapters", (_req, res) => {
+    res.json(listChapters(db()));
+  });
+
+  router.get("/members/lookup", memberLookupLimit, (req, res) => {
+    const member = lookupMember(db(), req.query.q);
+    if (!member) {
+      res.status(404).json({ error: "We couldn't find that membership" });
+      return;
+    }
+    res.json(member);
+  });
+
+  router.post("/members/otp", otpLimit, async (req, res) => {
+    const result = await sendMemberOtp(db(), req.body?.email);
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.json({ maskedEmail: result.maskedEmail });
+  });
+
+  router.post("/members/otp/verify", otpLimit, (req, res) => {
+    const result = verifyMemberOtp(db(), req.body?.email, req.body?.code);
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.json({ ok: true, editToken: result.editToken });
+  });
+
+  router.post("/members/details", otpLimit, (req, res) => {
+    const email = readMemberEditToken(req.body?.editToken);
+    if (!email) {
+      res.status(401).json({ error: "Confirm your code again before saving." });
+      return;
+    }
+    const result = updateMemberProfile(db(), email, req.body || {});
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.json(result.member);
+  });
+
+  router.post("/coupons/quote", lookupLimit, (req, res) => {
+    const body = req.body || {};
+    const priced = priceCoupon(db(), {
+      code: body.code,
+      productCode: body.productCode,
+      paymentPlan: body.paymentPlan,
+      email: body.email,
+      today: manilaParts().date,
+    });
+    if (priced.error) {
+      res.status(priced.status || 400).json({ error: priced.error });
+      return;
+    }
+    if (!priced.code) {
+      res.status(400).json({ error: "That coupon code isn't valid." });
+      return;
+    }
+    res.json(presentCoupon(priced));
+  });
+
+  router.post("/registrations", registerLimit, (req, res) => {
+    try {
+      const body = req.body || {};
+      const today = manilaParts().date;
+      const product = db().prepare("SELECT * FROM ticket_products WHERE code = ? AND active = 1").get(body.productCode);
+      if (!product) {
+        res.status(400).json({ error: "Unknown ticket" });
+        return;
+      }
+      if (today < product.sales_start || today > product.sales_end) {
+        res.status(400).json({ error: `${product.name} is not on sale today` });
+        return;
+      }
+      if ((body.attendeeType === "guest" || body.attendeeType === "international") && today < "2027-02-01") {
+        res.status(400).json({ error: "That registration opens February 1, 2027" });
+        return;
+      }
+      const registration = createRegistration(db(), {
+        productCode: body.productCode,
+        paymentPlan: body.paymentPlan,
+        fullName: body.fullName || "",
+        email: body.email || "",
+        mobile: body.mobile || "",
+        registeredOn: today,
+        attendeeType: body.attendeeType,
+        business: body.business,
+        industry: body.industry,
+        chapter: body.chapter,
+        invitedBy: body.invitedBy,
+        couponCode: body.couponCode,
+      });
+      res.status(201).json(present(registration));
+    } catch (error) {
+      res.status(400).json({ error: clientError(error, "Registration was not saved") });
+    }
+  });
+
+  router.get("/registrations/lookup", lookupLimit, (req, res) => {
+    const registration = findRegistrationByContact(db(), req.query.q);
+    if (!registration) {
+      res.status(404).json({ error: "We couldn't find a registration with that email or mobile." });
+      return;
+    }
+    res.json({
+      fullName: registration.full_name,
+      tierName: registration.product_name,
+      maskedEmail: maskEmail(registration.email),
+    });
+  });
+
+  router.post("/registrations/otp", otpLimit, async (req, res) => {
+    const query = String(req.body?.query || "").trim();
+    if (!query) {
+      res.status(400).json({ error: "Add your email or mobile number." });
+      return;
+    }
+    const result = await sendRegistrationOtp(db(), query);
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.json({ maskedEmail: result.maskedEmail });
+  });
+
+  router.post("/registrations/otp/verify", otpLimit, (req, res) => {
+    const query = String(req.body?.query || "").trim();
+    const result = verifyRegistrationOtp(db(), query, req.body?.code);
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.json(present(result.registration));
+  });
+
+  router.get("/registrations/:reference", lookupLimit, (req, res) => {
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    res.json(present(getRegistration(db(), row.id)));
+  });
+
+  router.post("/admin/login", loginLimit, (req, res) => {
+    const email = String(req.body?.email || "").trim().toLowerCase();
+    const password = String(req.body?.password || "");
+    const admin = db().prepare("SELECT * FROM admin_users WHERE email = ?").get(email);
+    if (!admin || !verifyPassword(password, admin.password_hash)) {
+      res.status(401).json({ error: "Email or password is wrong" });
+      return;
+    }
+    res.setHeader("Set-Cookie", sessionCookie(signSession(admin.id)));
+    res.json({ email: admin.email });
+  });
+
+  router.post("/admin/logout", (_req, res) => {
+    res.setHeader("Set-Cookie", clearSessionCookie());
+    res.json({ ok: true });
+  });
+
+  router.get("/admin/me", requireAdmin, (req, res) => {
+    res.json({ email: req.admin.email });
+  });
+
+  router.get("/admin/dashboard", requireAdmin, (_req, res) => {
+    res.json(dashboardStats(db()));
+  });
+
+  router.get("/admin/registrations", requireAdmin, (_req, res) => {
+    const rows = db().prepare(`
+      SELECT r.id
+      FROM registrations r
+      ORDER BY r.created_at DESC, r.id DESC
+    `).all();
+    res.json(rows.map((row) => present(getRegistration(db(), row.id))));
+  });
+
+  router.post("/admin/registrations/:reference/payments", requireAdmin, (req, res) => {
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    const registration = getRegistration(db(), row.id);
+    const due = registration.installments.find((item) => item.status === "due");
+    if (!due) {
+      res.status(400).json({ error: "Nothing is due" });
+      return;
+    }
+    const updated = recordPayment(db(), {
+      registrationId: registration.id,
+      installmentId: due.id,
+      amountCents: due.amount_cents - due.amount_paid_cents,
+      method: "admin",
+    });
+    res.json(present(updated));
+  });
+
+  router.post("/admin/registrations", requireAdmin, (req, res) => {
+    try {
+      const body = req.body || {};
+      const registration = createRegistration(db(), {
+        productCode: body.productCode,
+        paymentPlan: body.paymentPlan === "installment" ? "installment" : "full",
+        fullName: body.fullName || "",
+        email: body.email || "",
+        mobile: body.mobile || "",
+        registeredOn: manilaParts().date,
+        attendeeType: body.attendeeType || "guest",
+        business: body.business,
+        industry: body.industry,
+        chapter: body.chapter,
+      });
+      res.status(201).json(present(registration));
+    } catch (error) {
+      res.status(400).json({ error: clientError(error, "Registration was not saved") });
+    }
+  });
+
+  router.patch("/admin/registrations/:reference", requireAdmin, (req, res) => {
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    try {
+      res.json(present(updateRegistration(db(), row.id, req.body || {})));
+    } catch (error) {
+      res.status(400).json({ error: clientError(error, "Registration was not saved") });
+    }
+  });
+
+  router.post("/admin/registrations/:reference/cancel", requireAdmin, (req, res) => {
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    res.json(present(cancelRegistration(db(), row.id)));
+  });
+
+  router.get("/admin/products", requireAdmin, (_req, res) => {
+    res.json(db().prepare("SELECT code, name, allows_installment, currency FROM ticket_products WHERE active = 1 ORDER BY sales_start").all());
+  });
+
+  router.get("/admin/coupons", requireAdmin, (_req, res) => {
+    res.json(db().prepare("SELECT * FROM coupons ORDER BY id DESC").all());
+  });
+
+  router.post("/admin/coupons", requireAdmin, (req, res) => {
+    const coupon = readCoupon(req.body || {});
+    if (coupon.error) {
+      res.status(400).json({ error: coupon.error });
+      return;
+    }
+    try {
+      const result = db().prepare(`
+        INSERT INTO coupons (code, discount_type, discount_value, currency, ticket_code, email, usage_limit, expires_on)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(coupon.code, coupon.discountType, coupon.discountValue, coupon.currency, coupon.ticketCode, coupon.email, coupon.usageLimit, coupon.expiresOn);
+      res.status(201).json(db().prepare("SELECT * FROM coupons WHERE id = ?").get(result.lastInsertRowid));
+    } catch (error) {
+      res.status(400).json({ error: clientError(error, "Coupon was not saved") });
+    }
+  });
+
+  router.patch("/admin/coupons/:id", requireAdmin, (req, res) => {
+    const existing = db().prepare("SELECT id FROM coupons WHERE id = ?").get(req.params.id);
+    if (!existing) {
+      res.status(404).json({ error: "Coupon not found" });
+      return;
+    }
+    const coupon = readCoupon(req.body || {});
+    if (coupon.error) {
+      res.status(400).json({ error: coupon.error });
+      return;
+    }
+    try {
+      db().prepare(`
+        UPDATE coupons
+        SET code = ?, discount_type = ?, discount_value = ?, currency = ?, ticket_code = ?, email = ?, usage_limit = ?, expires_on = ?
+        WHERE id = ?
+      `).run(coupon.code, coupon.discountType, coupon.discountValue, coupon.currency, coupon.ticketCode, coupon.email, coupon.usageLimit, coupon.expiresOn, existing.id);
+      res.json(db().prepare("SELECT * FROM coupons WHERE id = ?").get(existing.id));
+    } catch (error) {
+      res.status(400).json({ error: clientError(error, "Coupon was not saved") });
+    }
+  });
+
+  router.get("/admin/templates", requireAdmin, (_req, res) => {
+    res.json(db().prepare("SELECT * FROM message_templates ORDER BY id DESC").all());
+  });
+
+  router.post("/admin/templates", requireAdmin, (req, res) => {
+    const template = readTemplate(req.body || {});
+    if (template.error) {
+      res.status(400).json({ error: template.error });
+      return;
+    }
+    const result = db().prepare(`
+      INSERT INTO message_templates (name, channel, subject, body) VALUES (?, ?, ?, ?)
+    `).run(template.name, template.channel, template.subject, template.body);
+    res.status(201).json(db().prepare("SELECT * FROM message_templates WHERE id = ?").get(result.lastInsertRowid));
+  });
+
+  router.patch("/admin/templates/:id", requireAdmin, (req, res) => {
+    const existing = db().prepare("SELECT id FROM message_templates WHERE id = ?").get(req.params.id);
+    if (!existing) {
+      res.status(404).json({ error: "Template not found" });
+      return;
+    }
+    const template = readTemplate(req.body || {});
+    if (template.error) {
+      res.status(400).json({ error: template.error });
+      return;
+    }
+    db().prepare(`
+      UPDATE message_templates SET name = ?, channel = ?, subject = ?, body = ? WHERE id = ?
+    `).run(template.name, template.channel, template.subject, template.body, existing.id);
+    res.json(db().prepare("SELECT * FROM message_templates WHERE id = ?").get(existing.id));
+  });
+
+  router.get("/admin/schedules", requireAdmin, (_req, res) => {
+    res.json(db().prepare(`${scheduleQuery} ORDER BY s.id DESC`).all());
+  });
+
+  router.post("/admin/schedules", requireAdmin, (req, res) => {
+    const schedule = readSchedule(db(), req.body || {});
+    if (schedule.error) {
+      res.status(400).json({ error: schedule.error });
+      return;
+    }
+    const result = db().prepare(`
+      INSERT INTO message_schedules (
+        name, template_id, trigger, days_offset, start_on, send_time, frequency, ends_on, ends_after, audience, enabled
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(schedule.name, schedule.templateId, schedule.trigger, schedule.daysOffset, schedule.startOn, schedule.sendTime, schedule.frequency, schedule.endsOn, schedule.endsAfter, schedule.audience, schedule.enabled);
+    res.status(201).json(db().prepare(`${scheduleQuery} WHERE s.id = ?`).get(result.lastInsertRowid));
+  });
+
+  router.patch("/admin/schedules/:id", requireAdmin, (req, res) => {
+    const existing = db().prepare("SELECT id FROM message_schedules WHERE id = ?").get(req.params.id);
+    if (!existing) {
+      res.status(404).json({ error: "Schedule not found" });
+      return;
+    }
+    const schedule = readSchedule(db(), req.body || {});
+    if (schedule.error) {
+      res.status(400).json({ error: schedule.error });
+      return;
+    }
+    db().prepare(`
+      UPDATE message_schedules
+      SET name = ?, template_id = ?, trigger = ?, days_offset = ?, start_on = ?, send_time = ?, frequency = ?, ends_on = ?, ends_after = ?, audience = ?, enabled = ?
+      WHERE id = ?
+    `).run(schedule.name, schedule.templateId, schedule.trigger, schedule.daysOffset, schedule.startOn, schedule.sendTime, schedule.frequency, schedule.endsOn, schedule.endsAfter, schedule.audience, schedule.enabled, existing.id);
+    res.json(db().prepare(`${scheduleQuery} WHERE s.id = ?`).get(existing.id));
+  });
+
+  router.get("/admin/chapters", requireAdmin, (_req, res) => {
+    res.json(listChapters(db()));
+  });
+
+  router.post("/admin/chapters", requireAdmin, (req, res) => {
+    const result = saveChapter(db(), req.body || {});
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.status(201).json(result.chapter);
+  });
+
+  router.patch("/admin/chapters/:id", requireAdmin, (req, res) => {
+    const result = saveChapter(db(), { ...req.body, id: req.params.id });
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.json(result.chapter);
+  });
+
+  router.post("/admin/chapters/upload", requireAdmin, (req, res) => {
+    const names = parseChapterCsv(req.body?.csv || "");
+    if (names.length === 0) {
+      res.status(400).json({ error: "No chapters found. Use one chapter name per line." });
+      return;
+    }
+    const saved = importChapters(db(), names);
+    res.json({ saved, chapters: listChapters(db()) });
+  });
+
+  router.get("/admin/members", requireAdmin, (_req, res) => {
+    res.json(listMembers(db()));
+  });
+
+  router.post("/admin/members", requireAdmin, (req, res) => {
+    const body = req.body || {};
+    if (!body.fullName || !body.email || !body.mobile) {
+      res.status(400).json({ error: "Name, email, and mobile are required" });
+      return;
+    }
+    saveMember(db(), body);
+    res.status(201).json(listMembers(db()).find((member) => member.email === String(body.email).trim().toLowerCase()));
+  });
+
+  router.post("/admin/members/upload", requireAdmin, (req, res) => {
+    const members = parseMemberCsv(req.body?.csv || "");
+    if (members.length === 0) {
+      res.status(400).json({ error: "No member rows found. Include name, email, and mobile." });
+      return;
+    }
+    const saveAll = db().transaction((rows) => {
+      for (const member of rows) saveMember(db(), member);
+    });
+    saveAll(members);
+    res.json({ saved: members.length, members: listMembers(db()) });
+  });
+
+  router.patch("/admin/members/:id", requireAdmin, (req, res) => {
+    const existing = db().prepare("SELECT email FROM members WHERE id = ?").get(req.params.id);
+    if (!existing) {
+      res.status(404).json({ error: "Member not found" });
+      return;
+    }
+    saveMember(db(), { ...req.body, email: existing.email });
+    res.json(listMembers(db()).find((member) => member.email === existing.email));
+  });
+
+  app.use("/api", router);
+  return app;
+}

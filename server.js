@@ -1,10 +1,32 @@
+import 'dotenv/config';
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+const sessionSecret = process.env.ADMIN_SESSION_SECRET || "";
+if (process.env.NODE_ENV === "production" && (sessionSecret.length < 32 || sessionSecret === "ibmc-dev-session")) {
+  console.error("ADMIN_SESSION_SECRET must be a random value of at least 32 characters");
+  process.exit(1);
+}
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+app.set("trust proxy", 1);
+app.use((_req, res, next) => {
+  res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  next();
+});
+
+const { createApi } = await import('./server/api.js');
+const api = createApi();
+app.use((req, res, next) => {
+  if (!req.url.startsWith('/api')) return next();
+  api(req, res, next);
+});
 
 app.use(express.static(path.join(__dirname, 'dist')));
 
@@ -15,3 +37,16 @@ app.get('*', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+
+try {
+  const { openDatabase } = await import('./server/db.js');
+  const { startBackupLoop } = await import('./server/backup.js');
+  const db = openDatabase();
+  startBackupLoop(db);
+  if (process.env.REMINDERS_ENABLED !== 'false') {
+    const { startReminderLoop } = await import('./server/reminders.js');
+    startReminderLoop(db);
+  }
+} catch (error) {
+  console.error('Reminder database was not started:', error.message);
+}
