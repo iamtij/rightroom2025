@@ -81,14 +81,12 @@ const EARLY_BIRD_PLAN = [
 ];
 
 function InstallmentPlan({
-  label,
   total,
   summary,
   rows,
   note,
   tone,
 }: {
-  label: string;
   total: string;
   summary: string;
   rows: string[][];
@@ -99,10 +97,9 @@ function InstallmentPlan({
   const head = tone === "red" ? "border-[#E7B4B8] bg-[#FBE9EA]" : "border-[#E4E1DC] bg-[#F6F4F1]";
   return (
     <div className="overflow-hidden rounded-xl border border-[#E4E1DC] text-left text-sm text-[#141416]">
-      <div className={`flex items-start gap-3 border-l-4 px-3 py-2.5 ${head} ${tone === "red" ? "border-l-[#D0202E]" : "border-l-[#141416]"} ${open ? "border-b" : ""}`}>
+      <div className={`flex items-center gap-3 border-l-4 px-3 py-2.5 ${head} ${tone === "red" ? "border-l-[#D0202E]" : "border-l-[#141416]"} ${open ? "border-b" : ""}`}>
         <div className="min-w-0 flex-1">
-          <p className="m-0 font-bold tracking-wide">{label} · {total} total</p>
-          <p className="m-0 mt-1 text-[13px] font-medium text-[#3A3A40]">{summary}</p>
+          <p className="m-0 font-bold">Installment Plan at {total}</p>
         </div>
         <button
           type="button"
@@ -118,6 +115,7 @@ function InstallmentPlan({
       </div>
       {open && (
         <>
+          <p className="m-0 border-b border-[#E4E1DC] px-3 py-2.5 text-[13px] font-medium text-[#3A3A40]">{summary}</p>
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-[#141416] text-left text-[13px] text-white">
@@ -747,7 +745,7 @@ export default function AmplifyHome() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid grid-cols-1 items-start gap-5 sm:grid-cols-2 xl:grid-cols-3">
           <article className="flex flex-col gap-3.5 rounded-[18px] border-2 border-[#D0202E] p-5 sm:p-6 xl:p-7">
             <span className="inline-flex max-w-full items-center self-start whitespace-nowrap rounded-full bg-[#D0202E] px-3 py-1.5 text-[11px] font-bold uppercase leading-none tracking-[0.04em] text-white xl:text-xs xl:tracking-[0.08em]">
               Best price · opens Nov 11
@@ -756,9 +754,8 @@ export default function AmplifyHome() {
             <p className="m-0 text-sm text-[#5C5C63]">Nov 11–30, 2026</p>
             <Price text="₱12,000" className="m-0 block font-archivo text-5xl font-extrabold leading-none font-wide" />
             <p className="m-0 text-sm font-semibold text-[#A8131F]">Save ₱6,000 vs Regular</p>
-            <p className="m-0 text-[15px] text-[#3A3A40]">or ₱13,000 in installments</p>
             <InstallmentPlan
-              label="First Mover"
+              key="first-mover"
               total="₱13,000"
               summary="₱1,000 upon registration + six payments of ₱2,000"
               rows={FIRST_MOVER_PLAN}
@@ -776,9 +773,8 @@ export default function AmplifyHome() {
             <p className="m-0 text-sm text-[#5C5C63]">Dec 1, 2026 – Jan 31, 2027</p>
             <Price text="₱15,000" className="m-0 block font-archivo text-5xl font-extrabold leading-none font-wide text-[#5C5C63]" />
             <p className="m-0 text-sm font-semibold text-[#5C5C63]">Save ₱3,000 vs Regular</p>
-            <p className="m-0 text-[15px] text-[#5C5C63]">or ₱16,000 in installments</p>
             <InstallmentPlan
-              label="Early Bird"
+              key="early-bird"
               total="₱16,000"
               summary="₱4,000 upon registration + four payments of ₱3,000"
               rows={EARLY_BIRD_PLAN}
