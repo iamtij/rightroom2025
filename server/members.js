@@ -32,7 +32,6 @@ function memberFromRecord(record) {
     regStatus: STATUSES.has(status) ? status : "updated",
     country: pick(record, ["country"]),
     goldClub: ["1", "true", "yes", "y"].includes(gold),
-    registeredAt: pick(record, ["registered at", "registered_at", "registered"]) || new Date().toISOString().slice(0, 16),
   };
 }
 
@@ -95,7 +94,7 @@ export function saveMember(db, input) {
     status,
     blank(input.country),
     input.goldClub ? 1 : 0,
-    input.registeredAt || new Date().toISOString().slice(0, 16),
+    "",
   );
 }
 
@@ -142,7 +141,7 @@ export function updateMemberRecord(db, id, input) {
     status,
     blank(input.country),
     input.goldClub ? 1 : 0,
-    input.registeredAt || existing.registered_at,
+    "",
     existing.id,
   );
   return { member: listMembers(db).find((member) => member.id === existing.id) };

@@ -46,7 +46,6 @@ type Member = {
   regStatus: "updated" | "delayed" | "cancelled";
   country: string;
   goldClub: boolean;
-  registeredAt: string;
 };
 type Payment = { label: string; dueOn: string; amountCents: number; status: "paid" | "due" | "upcoming" };
 type Registration = {
@@ -780,7 +779,7 @@ function Schedules({ onError }: { onError: (message: string) => void }) {
   );
 }
 
-const emptyMember = { fullName: "", email: "", mobile: "", chapter: "", category: "", businessName: "", ticketType: "", regStatus: "updated" as Member["regStatus"], country: "", goldClub: false, registeredAt: "" };
+const emptyMember = { fullName: "", email: "", mobile: "", chapter: "", category: "", businessName: "", ticketType: "", regStatus: "updated" as Member["regStatus"], country: "", goldClub: false };
 
 type Chapter = { id: number; name: string };
 
@@ -847,12 +846,15 @@ function Chapters({ onError }: { onError: (message: string) => void }) {
   );
 }
 
+const memberPageSize = 20;
+
 function Members({ onError }: { onError: (message: string) => void }) {
   const [rows, setRows] = useState<Member[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [form, setForm] = useState(emptyMember);
   const [editor, setEditor] = useState<null | "add" | number>(null);
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
   async function load() {
     const [members, chapterRows] = await Promise.all([api("/api/admin/members"), api("/api/admin/chapters")]);
     setRows(members);
@@ -884,6 +886,10 @@ function Members({ onError }: { onError: (message: string) => void }) {
   }
 
   const visible = rows.filter((row) => matches(query, [row.fullName, row.email, row.mobile, row.chapter, row.category, row.businessName, row.ticketType, row.regStatus, row.country]));
+  const pageCount = Math.max(1, Math.ceil(visible.length / memberPageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pageStart = (currentPage - 1) * memberPageSize;
+  const pageRows = visible.slice(pageStart, pageStart + memberPageSize);
   const empty = rows.length === 0 ? "No members yet." : visible.length === 0 ? "No members match that search." : "";
 
   return (
@@ -898,7 +904,17 @@ function Members({ onError }: { onError: (message: string) => void }) {
           <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setForm(emptyMember); }}>Add</button>
         </div>
       </div>
-      <SearchBox value={query} onChange={setQuery} placeholder="Search name, email, mobile, chapter, or business" />
+      <SearchBox value={query} onChange={(value) => { setQuery(value); setPage(1); }} placeholder="Search name, email, mobile, chapter, or business" />
+      {visible.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="m-0 text-sm text-[#5C5C63]">{pageStart + 1}–{pageStart + pageRows.length} of {visible.length}</p>
+          <div className="flex items-center gap-2">
+            <button type="button" className={`${ghostButton} px-3 py-2 disabled:opacity-40`} disabled={currentPage <= 1} onClick={() => setPage(currentPage - 1)}>Previous</button>
+            <span className="text-sm text-[#5C5C63]">Page {currentPage} of {pageCount}</span>
+            <button type="button" className={`${ghostButton} px-3 py-2 disabled:opacity-40`} disabled={currentPage >= pageCount} onClick={() => setPage(currentPage + 1)}>Next</button>
+          </div>
+        </div>
+      ) : null}
       {editor !== null ? (
         <form className="grid gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4 sm:grid-cols-2" onSubmit={save}>
           <Field label="Name"><input className={field} required value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} /></Field>
@@ -922,20 +938,19 @@ function Members({ onError }: { onError: (message: string) => void }) {
             </select>
           </Field>
           <Field label="Country"><input className={field} value={form.country} onChange={(event) => setForm({ ...form, country: event.target.value })} /></Field>
-          <Field label="Registered at"><input className={field} type="datetime-local" value={form.registeredAt} onChange={(event) => setForm({ ...form, registeredAt: event.target.value })} /></Field>
           <label className="flex items-center gap-2 text-sm font-semibold sm:col-span-2">
             <input type="checkbox" className="h-5 w-5 accent-[#D0202E]" checked={form.goldClub} onChange={(event) => setForm({ ...form, goldClub: event.target.checked })} />
             Gold club member
           </label>
-          <p className="m-0 text-[13px] text-[#5C5C63] sm:col-span-2">CSV columns: name, email, mobile, chapter, category, business name, ticket type, reg status, country, gold club member, registered at.</p>
+          <p className="m-0 text-[13px] text-[#5C5C63] sm:col-span-2">CSV columns: name, email, mobile, chapter, category, business name, ticket type, reg status, country, gold club member.</p>
           <div className="flex gap-2 sm:col-span-2">
             <button type="submit" className={buttonClass}>{editor === "add" ? "Add member" : "Save member"}</button>
             <button type="button" className={ghostButton} onClick={() => setEditor(null)}>Back</button>
           </div>
         </form>
       ) : null}
-      <DataTable columns={["Name", "Email", "Mobile", "Chapter", "Category", "Business", "Ticket", "Status", "Country", "Gold club", "Registered at", ""]} empty={empty}>
-        {visible.map((row) => (
+      <DataTable columns={["Name", "Email", "Mobile", "Chapter", "Category", "Business", "Ticket", "Status", "Country", "Gold club", ""]} empty={empty}>
+        {pageRows.map((row) => (
           <tr key={row.id}>
             <td className={`${tdClass} font-semibold`}>{row.fullName}</td>
             <td className={tdClass}>{row.email}</td>
@@ -947,7 +962,6 @@ function Members({ onError }: { onError: (message: string) => void }) {
             <td className={tdClass}>{titleCase(row.regStatus)}</td>
             <td className={tdClass}>{row.country}</td>
             <td className={tdClass}>{row.goldClub ? "Yes" : ""}</td>
-            <td className={`${tdClass} whitespace-nowrap`}>{row.registeredAt.replace("T", " ")}</td>
             <td className={`${tdClass} text-right`}><button type="button" className={linkButton} onClick={() => { setEditor(row.id); setForm(row); }}>Edit</button></td>
           </tr>
         ))}
