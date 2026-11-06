@@ -101,6 +101,24 @@ export function testTier(): Tier {
   };
 }
 
+export function testPaymentTier(): Tier {
+  return {
+    code: "test_50",
+    name: "Test Payment",
+    currency: "PHP",
+    fullCents: 5_000,
+    installmentCents: null,
+    windowLabel: "today",
+    nextLabel: "₱50 test charge. Payment is open.",
+    onSale: true,
+    opensLabel: null,
+    rows: [],
+    saveLabel: "One payment of ₱50.",
+    installmentSummary: null,
+    note: null,
+  };
+}
+
 export function tierFor(today: string, international: boolean): Tier | null {
   if (today > "2027-05-31") return null;
   if (international) {

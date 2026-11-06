@@ -1,0 +1,15 @@
+---
+description: After merging to main, watch the Railway production deploy until it passes or fails
+alwaysApply: true
+---
+
+# Merge to main, then check Railway
+
+When the user asks to merge to main, push to main, or ship this app:
+
+1. Commit only the intended changes. Leave secrets, `.env` files, and unrelated untracked files out.
+2. Push to `origin/main`. Railway deploys production from that branch.
+3. Do not stop after the push. Watch the production deploy until it finishes.
+4. Project: IBMC 2026 (`7ba83253-d554-4d65-85e2-2f2d00c4e472`). Service: `rightroom2025` (`9c5e52fc-4149-4976-830c-b0d815a6d0b1`). Environment: production (`0de3647e-4df4-46ee-82f9-8879b001e6b9`).
+5. Poll the latest deployment for that service until the status is `SUCCESS`, `FAILED`, or `CRASHED`.
+6. Report the status, deployment id, and commit. On `SUCCESS`, say the deploy passed. On `FAILED` or `CRASHED`, read the build and deploy logs and report what failed.

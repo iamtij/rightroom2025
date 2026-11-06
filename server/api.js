@@ -266,7 +266,7 @@ export function createApi() {
       error.status = 400;
       throw error;
     }
-    if (body.productCode !== "test" && (body.attendeeType === "guest" || body.attendeeType === "international") && today < "2027-02-01") {
+    if (body.productCode !== "test" && body.productCode !== "test_50" && (body.attendeeType === "guest" || body.attendeeType === "international") && today < "2027-02-01") {
       const error = new Error("That registration opens February 1, 2027");
       error.status = 400;
       throw error;

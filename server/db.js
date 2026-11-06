@@ -353,6 +353,7 @@ export function openDatabase(file = process.env.IBMC_DB_PATH) {
   db.exec(SCHEMA);
   migrate(db);
   seed(db);
+  ensureTestPayment(db);
   return db;
 }
 
@@ -388,6 +389,17 @@ function ensureTestTicket(db) {
       code, name, audience, currency, full_price_cents, installment_total_cents,
       sales_start, sales_end, allows_installment
     ) VALUES ('test', 'Test', 'local', 'PHP', 1000, NULL, '2026-01-01', '2027-05-31', 0)
+  `).run();
+}
+
+function ensureTestPayment(db) {
+  const existing = db.prepare("SELECT id FROM ticket_products WHERE code = 'test_50'").get();
+  if (existing) return;
+  db.prepare(`
+    INSERT INTO ticket_products (
+      code, name, audience, currency, full_price_cents, installment_total_cents,
+      sales_start, sales_end, allows_installment
+    ) VALUES ('test_50', 'Test Payment', 'local', 'PHP', 5000, NULL, '2026-01-01', '2027-05-31', 0)
   `).run();
 }
 

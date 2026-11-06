@@ -6,6 +6,7 @@ import {
   formatMonthDate,
   manilaDate,
   money,
+  testPaymentTier,
   testTier,
   tierFor,
   type Currency,
@@ -14,6 +15,7 @@ import {
 } from "./plans";
 
 type Audience = "member" | "guest" | "international";
+type CheckoutPlan = PayPlan | "test";
 type Step = "start" | "member" | "guest" | "confirm" | "ticket" | "pay" | "paying" | "done" | "manage";
 type UpayMethod = "instapay" | "paygate" | "UB Online";
 
@@ -348,7 +350,8 @@ function RegistrationWizard() {
   const [otpError, setOtpError] = useState("");
   const [otpBusy, setOtpBusy] = useState(false);
   const [editToken, setEditToken] = useState("");
-  const [plan, setPlan] = useState<PayPlan>("full");
+  const [plan, setPlan] = useState<CheckoutPlan>("full");
+  const [memberTest, setMemberTest] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [method, setMethod] = useState<UpayMethod>("instapay");
   const { channels, channel, setChannel } = usePaymentChannels();
@@ -470,6 +473,7 @@ function RegistrationWizard() {
 
   function choose(audience: Audience) {
     setTestMode(false);
+    setMemberTest(false);
     if (audience === "member") {
       setStep("member");
       return;
@@ -481,10 +485,26 @@ function RegistrationWizard() {
 
   function startTest() {
     setTestMode(true);
+    setMemberTest(false);
     setAttendee(emptyGuest(false));
     setPlan("full");
     setAgreed(false);
     setStep("guest");
+  }
+
+  function startMemberTest() {
+    setTestMode(false);
+    setMemberTest(true);
+    setMember(null);
+    setLookup("");
+    setLookedUp(false);
+    setLookupError("");
+    clearOtp();
+    setStep("member");
+  }
+
+  function checkoutTier() {
+    return plan === "test" ? testPaymentTier() : tier;
   }
 
   function detailsReady(person: Attendee) {
@@ -542,7 +562,7 @@ function RegistrationWizard() {
   }
 
   function continueTicket() {
-    if (!tier) return;
+    if (!checkoutTier()) return;
     if (plan === "installment" && !agreed) {
       setTicketError("Tick the 15-day agreement to pay in installments.");
       return;
@@ -552,16 +572,17 @@ function RegistrationWizard() {
   }
 
   async function pay() {
-    if (!attendee || !tier || saving || !tier.onSale) return;
-    const useInstallment = plan === "installment" && Boolean(tier.installmentCents) && tier.rows.length > 0;
-    const peso = tier.currency === "PHP";
+    const charging = checkoutTier();
+    if (!attendee || !charging || saving || !charging.onSale) return;
+    const useInstallment = plan === "installment" && Boolean(charging.installmentCents) && charging.rows.length > 0;
+    const peso = charging.currency === "PHP";
     if (peso && !channel) return;
     const hitpay = peso && channel ? hitpayApiChannel(channel) : "";
     setSaving(true);
     setPayError("");
     try {
       const registrationBody = {
-        productCode: tier.code,
+        productCode: charging.code,
         paymentPlan: useInstallment ? "installment" : "full",
         fullName: attendee.fullName,
         email: attendee.email,
@@ -571,7 +592,7 @@ function RegistrationWizard() {
         chapter: attendee.chapter,
         invitedBy: attendee.invitedBy,
         attendeeType: attendee.audience,
-        couponCode: useInstallment ? "" : coupon?.code || "",
+        couponCode: plan === "full" ? coupon?.code || "" : "",
       };
       const path = !peso
         ? "/api/registrations"
@@ -627,6 +648,7 @@ function RegistrationWizard() {
         <h2 className="m-0 mt-1.5 text-[17px] font-bold">Who's registering?</h2>
         {import.meta.env.DEV ? <Choice title="Test ticket · ₱10" body="Available now, for a local payment test." emphasis onClick={startTest} /> : null}
         <Choice title="I'm a BNI Philippines Member" body="Quick registration. We'll fill in your details." emphasis onClick={() => choose("member")} />
+        <Choice title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." emphasis onClick={startMemberTest} />
         <Choice title="Non-BNI Philippines member" body={othersOpen ? "New to BNI? You're welcome here." : "Available February 1, 2027"} disabled={!othersOpen} onClick={() => choose("guest")} />
         <Choice title="International delegate" body={othersOpen ? "Joining from outside the Philippines. Priced in USD." : "Available February 1, 2027"} disabled={!othersOpen} onClick={() => choose("international")} />
         <p className="m-0 mt-auto text-center text-sm text-[#5C5C63]">
@@ -644,12 +666,12 @@ function RegistrationWizard() {
       <Frame
         label="Step 1 of 4"
         step={1}
-        footer={<PrimaryButton disabled={!member || !detailsReady(memberAttendee(member))} onClick={() => { if (!member || !detailsReady(memberAttendee(member))) return; setAttendee(memberAttendee(member)); setPlan("full"); setStep("ticket"); }}>Continue</PrimaryButton>}
+        footer={<PrimaryButton disabled={!member || !detailsReady(memberAttendee(member))} onClick={() => { if (!member || !detailsReady(memberAttendee(member))) return; setAttendee(memberAttendee(member)); setPlan(memberTest ? "test" : "full"); setStep("ticket"); }}>Continue</PrimaryButton>}
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep("start")}>← Back</button>
         <div className="flex flex-col gap-1.5">
           <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Find your membership</h1>
-          <p className="m-0 text-[15px] leading-normal text-[#5C5C63]">Use the email or mobile number registered with BNI Philippines.</p>
+          <p className="m-0 text-[15px] leading-normal text-[#5C5C63]">{memberTest ? "Testing registration. Use the email or mobile number registered with BNI Philippines. Payment is open." : "Use the email or mobile number registered with BNI Philippines."}</p>
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-[13px] font-semibold text-[#3A3A40]" htmlFor="member-lookup">BNI member email or mobile</label>
@@ -830,22 +852,23 @@ function RegistrationWizard() {
   }
 
   if (step === "ticket" && attendee && tier) {
-    const dueToday = plan === "installment" && tier.rows[0] ? tier.rows[0].amountCents : tier.fullCents;
+    const charging = checkoutTier();
+    const dueToday = plan === "installment" && tier.rows[0] ? tier.rows[0].amountCents : charging ? charging.fullCents : tier.fullCents;
     return (
       <Frame
         label="Step 2 of 4"
         step={2}
-        footer={<PrimaryButton onClick={continueTicket}>Continue to payment · {money(dueToday, tier.currency)} today</PrimaryButton>}
+        footer={<PrimaryButton onClick={continueTicket}>Continue to payment · {money(dueToday, charging?.currency || tier.currency)} today</PrimaryButton>}
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep(attendee.audience === "member" ? "member" : "guest")}>← Back</button>
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Your ticket</h1>
         <div className="flex flex-col gap-1.5 rounded-[14px] bg-[#141416] p-4 text-[#F6F4F1]">
           <div className="flex items-center justify-between gap-3">
-            <span className="font-archivo text-xl font-extrabold">{tier.name}</span>
-            <span className="rounded-full bg-[#D0202E] px-2.5 py-1 text-[11px] font-bold tracking-[0.1em] text-white uppercase">{tier.onSale ? "Best price" : "Opens soon"}</span>
+            <span className="font-archivo text-xl font-extrabold">{charging?.name}</span>
+            <span className="rounded-full bg-[#D0202E] px-2.5 py-1 text-[11px] font-bold tracking-[0.1em] text-white uppercase">{charging?.code === "test_50" ? "Test" : charging?.onSale ? "Best price" : "Opens soon"}</span>
           </div>
-          <span className="text-sm text-[#C9C7C2]">{tier.onSale ? `Register by ${tier.windowLabel.replace("until ", "")}` : `Registration opens ${tier.opensLabel}`}</span>
-          <span className="text-[13px] text-[#8E8E96]">{tier.nextLabel}</span>
+          <span className="text-sm text-[#C9C7C2]">{charging?.code === "test_50" ? "Payment is open" : charging?.onSale ? `Register by ${charging.windowLabel.replace("until ", "")}` : `Registration opens ${charging?.opensLabel}`}</span>
+          <span className="text-[13px] text-[#8E8E96]">{charging?.nextLabel}</span>
         </div>
         <h2 className="m-0 mt-1 text-[17px] font-bold">How would you like to pay?</h2>
         <PayChoice
@@ -855,6 +878,15 @@ function RegistrationWizard() {
           amount={money(tier.fullCents, tier.currency)}
           body={tier.saveLabel || "One payment today."}
         />
+        {memberTest ? (
+          <PayChoice
+            selected={plan === "test"}
+            onSelect={() => { setPlan("test"); clearCoupon(); }}
+            title="Test Payment"
+            amount={money(testPaymentTier().fullCents, "PHP")}
+            body="One payment of ₱50. Payment is open."
+          />
+        ) : null}
         {tier.installmentCents && tier.rows.length > 0 ? (
           <PayChoice
             selected={plan === "installment"}
@@ -889,7 +921,7 @@ function RegistrationWizard() {
           </p>
         ) : null}
         {ticketError ? <p className="m-0 text-sm text-[#A8131F]">{ticketError}</p> : null}
-        {tier.opensLabel ? <p className="m-0 text-[13px] text-[#5C5C63]">Sales open {tier.opensLabel}. This screen shows the price. No card is charged.</p> : null}
+        {plan !== "test" && tier.opensLabel ? <p className="m-0 text-[13px] text-[#5C5C63]">Sales open {tier.opensLabel}. This screen shows the price. No card is charged.</p> : null}
       </Frame>
     );
   }
@@ -930,9 +962,10 @@ function RegistrationWizard() {
   }
 
   if (step === "pay" && attendee && tier) {
+    const charging = checkoutTier() || tier;
     const applied = plan === "full" ? coupon : null;
-    const listTotal = plan === "installment" && tier.installmentCents ? tier.installmentCents : tier.fullCents;
-    const dueToday = applied ? applied.dueTodayCents : plan === "installment" && tier.rows[0] ? tier.rows[0].amountCents : tier.fullCents;
+    const listTotal = plan === "installment" && tier.installmentCents ? tier.installmentCents : charging.fullCents;
+    const dueToday = applied ? applied.dueTodayCents : plan === "installment" && tier.rows[0] ? tier.rows[0].amountCents : charging.fullCents;
     const later = plan === "installment" ? tier.rows.slice(1) : [];
     const laterCount = applied ? applied.laterCount : later.length;
     const laterEach = applied ? applied.laterEachCents : later[0]?.amountCents ?? null;
@@ -943,15 +976,15 @@ function RegistrationWizard() {
         step={3}
         footer={
           <div className="flex flex-col gap-2.5">
-            <PrimaryButton disabled={!tier.onSale || saving || (tier.currency === "PHP" && !channel)} onClick={pay}>
-              {tier.onSale
-                ? tier.currency === "PHP"
-                  ? payActionLabel(channel, money(dueToday, tier.currency), saving)
-                  : `Submit registration · ${money(dueToday, tier.currency)} due`
-                : `Opens ${tier.opensLabel}`}
+            <PrimaryButton disabled={!charging.onSale || saving || (charging.currency === "PHP" && !channel)} onClick={pay}>
+              {charging.onSale
+                ? charging.currency === "PHP"
+                  ? payActionLabel(channel, money(dueToday, charging.currency), saving)
+                  : `Submit registration · ${money(dueToday, charging.currency)} due`
+                : `Opens ${charging.opensLabel}`}
             </PrimaryButton>
             <span className="text-center text-xs text-[#5C5C63]">
-              {tier.currency === "PHP" ? (channel && channel !== "upay" ? "HitPay · secure payment" : "UnionBank UPay · secure payment") : "Secure payment"}
+              {charging.currency === "PHP" ? (channel && channel !== "upay" ? "HitPay · secure payment" : "UnionBank UPay · secure payment") : "Secure payment"}
             </span>
           </div>
         }
@@ -960,12 +993,12 @@ function RegistrationWizard() {
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Payment</h1>
         <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-2">
           <Row label="Attendee" value={attendee.fullName} />
-          <Row label={`${tier.name} · ${plan === "installment" ? "installment" : "paid in full"}`} value={`${money(listTotal, tier.currency)} total`} />
+          <Row label={`${charging.name} · ${plan === "installment" ? "installment" : "paid in full"}`} value={`${money(listTotal, charging.currency)} total`} />
           {laterCount > 0 ? <Row label={`Then, ${laterCount} payments`} value={laterEach ? `${laterCount} × ${money(laterEach, tier.currency)}` : money(laterCents, tier.currency)} /> : null}
-          {applied ? <Row label={`Coupon ${applied.code}`} value={`${applied.label} · −${money(applied.discountCents, tier.currency)}`} /> : null}
+          {applied ? <Row label={`Coupon ${applied.code}`} value={`${applied.label} · −${money(applied.discountCents, charging.currency)}`} /> : null}
           <div className="flex items-center justify-between gap-3 border-t-2 border-[#141416] py-3">
             <span className="text-[15px] font-bold">{plan === "installment" ? "Due today · secure your seat" : "Due today"}</span>
-            <MoneyText text={money(dueToday, tier.currency)} className="font-archivo text-2xl font-extrabold text-[#A8131F]" />
+            <MoneyText text={money(dueToday, charging.currency)} className="font-archivo text-2xl font-extrabold text-[#A8131F]" />
           </div>
         </div>
         {plan === "full" ? (
@@ -1005,7 +1038,7 @@ function RegistrationWizard() {
           </div>
         ) : null}
         <h2 className="m-0 mt-1 text-[17px] font-bold">Pay with</h2>
-        {tier.currency === "PHP" ? (
+        {charging.currency === "PHP" ? (
           <>
             <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} />
             <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
