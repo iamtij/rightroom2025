@@ -196,7 +196,11 @@ export function createApi() {
       res.status(404).json({ error: "We couldn't find that membership" });
       return;
     }
-    res.json(member);
+    const registered = [member.email, member.mobile].some((contact) => {
+      const registration = findRegistrationByContact(db(), contact);
+      return Boolean(registration && registration.status === "confirmed");
+    });
+    res.json({ ...member, registered });
   });
 
   router.post("/members/otp", otpLimit, async (req, res) => {

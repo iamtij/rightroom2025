@@ -126,6 +126,7 @@ type FoundMember = {
   email: string;
   mobile: string;
   mobileMasked: string;
+  registered?: boolean;
 };
 
 type StoredPayment = {
@@ -654,7 +655,7 @@ function RegistrationWizard() {
         <Choice title="International delegate" body={othersOpen ? "Joining from outside the Philippines. Priced in USD." : "Available February 1, 2027"} disabled={!othersOpen} onClick={() => choose("international")} />
         <p className="m-0 mt-auto text-center text-sm text-[#5C5C63]">
           Already registered?{" "}
-          <button type="button" className="font-semibold text-[#A8131F]" onClick={() => setStep("manage")}>
+          <button type="button" className="font-semibold text-[#A8131F]" onClick={() => { setLookup(""); setStep("manage"); }}>
             Manage my registration
           </button>
         </p>
@@ -667,7 +668,13 @@ function RegistrationWizard() {
       <Frame
         label="Step 1 of 4"
         step={1}
-        footer={<PrimaryButton disabled={!member || !detailsReady(memberAttendee(member))} onClick={() => { if (!member || !detailsReady(memberAttendee(member))) return; setAttendee(memberAttendee(member)); setPlan(memberTest ? "test" : "full"); setStep("ticket"); }}>Continue</PrimaryButton>}
+        footer={member?.registered ? (
+          <button type="button" className="block w-full text-center text-base font-bold text-[#A8131F]" onClick={() => setStep("manage")}>
+            Manage my registration
+          </button>
+        ) : (
+          <PrimaryButton disabled={!member || !detailsReady(memberAttendee(member))} onClick={() => { if (!member || !detailsReady(memberAttendee(member))) return; setAttendee(memberAttendee(member)); setPlan(memberTest ? "test" : "full"); setStep("ticket"); }}>Continue</PrimaryButton>
+        )}
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep("start")}>← Back</button>
         <div className="flex flex-col gap-1.5">
@@ -711,6 +718,7 @@ function RegistrationWizard() {
             <Detail label="Category" value={member.industry} />
             <Detail label="Chapter" value={member.chapter} />
             <Detail label="Mobile" value={member.mobileMasked} />
+            {member.registered ? <p className="m-0 text-sm text-[#5C5C63]">You're already registered.</p> : null}
             {otpSentTo ? (
               <div className="flex flex-col gap-2 border-t border-[#F0EDE8] pt-3">
                 <p className="m-0 text-sm text-[#5C5C63]">We sent a code to {otpSentTo}. Enter it to edit your details.</p>
@@ -1088,7 +1096,7 @@ function RegistrationWizard() {
     );
   }
   if (step === "done" && saved) return <Confirmed record={saved} onManage={() => setStep("manage")} />;
-  if (step === "manage") return <Manage onStart={() => setStep("start")} />;
+  if (step === "manage") return <Manage initialQuery={lookup} onStart={() => setStep("start")} />;
   return null;
 }
 
@@ -1555,9 +1563,9 @@ function Confirmed({ record, onManage }: { record: StoredRegistration; onManage:
   );
 }
 
-function Manage({ onStart }: { onStart: () => void }) {
+function Manage({ onStart, initialQuery = "" }: { onStart: () => void; initialQuery?: string }) {
   const [record, setRecord] = useState<StoredRegistration | null>(null);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(initialQuery);
   const [found, setFound] = useState<{ fullName: string; tierName: string; maskedEmail: string } | null>(null);
   const [lookedUp, setLookedUp] = useState(false);
   const [maskedEmail, setMaskedEmail] = useState("");
