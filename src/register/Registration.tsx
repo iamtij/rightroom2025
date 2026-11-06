@@ -525,6 +525,8 @@ function RegistrationWizard() {
   }
 
   const guestsOpen = today >= "2027-02-01";
+  const liveCopy = !import.meta.env.DEV && !(typeof window !== "undefined" && window.location.hostname.includes("staging"));
+  const internationalOpen = !liveCopy || (today >= "2027-01-01" && today <= "2027-05-31");
 
   function choose(audience: Audience) {
     setTestMode(false);
@@ -535,6 +537,7 @@ function RegistrationWizard() {
       return;
     }
     if (audience === "guest" && !guestsOpen) return;
+    if (audience === "international" && !internationalOpen) return;
     setAttendee(emptyGuest(audience === "international"));
     setStep("guest");
   }
@@ -720,14 +723,18 @@ function RegistrationWizard() {
         <h2 className="m-0 mt-1.5 text-[17px] font-bold">Who's registering?</h2>
         {import.meta.env.DEV && testsOpen ? <Choice title="Test ticket · ₱10" body="Available now, for a local payment test." emphasis onClick={startTest} /> : null}
         {testsOpen ? <Choice title="Test installment · ₱200" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." emphasis onClick={startInstallmentTest} /> : null}
-        <Choice title="I'm a BNI member" body="Quick registration. We'll fill in your details." emphasis onClick={() => choose("member")} />
+        <Choice title={liveCopy ? "I'm a BNI Philippines Member" : "I'm a BNI member"} body="Quick registration. We'll fill in your details." emphasis onClick={() => choose("member")} />
         {testsOpen ? <Choice title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." emphasis onClick={startMemberTest} /> : null}
         {guestsOpen ? (
-          <Choice title="I'm a guest" body="New to BNI? You're welcome here." onClick={() => choose("guest")} />
+          <Choice title={liveCopy ? "I'm a Guest (Non BNI Member)" : "I'm a guest"} body="New to BNI? You're welcome here." onClick={() => choose("guest")} />
         ) : (
-          <ClosedChoice title="I'm a guest" body="Opens February 1, 2027" />
+          <ClosedChoice title={liveCopy ? "I'm a Guest (Non BNI Member)" : "I'm a guest"} body="Opens February 1, 2027" />
         )}
-        <Choice title="International delegate" body="Joining from outside the Philippines. Priced in USD." onClick={() => choose("international")} />
+        {internationalOpen ? (
+          <Choice title={liveCopy ? "International Delegate" : "International delegate"} body="Joining from outside the Philippines. Priced in USD." onClick={() => choose("international")} />
+        ) : (
+          <ClosedChoice title="International Delegate" body="Opens January 1, 2027" />
+        )}
         <p className="m-0 mt-auto text-center text-sm text-[#5C5C63]">
           Already registered?{" "}
           <button type="button" className="font-semibold text-[#A8131F]" onClick={() => { setLookup(""); setStep("manage"); }}>
