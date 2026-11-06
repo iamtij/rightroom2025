@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 
 const FIRST_MOVER_OPENS = new Date("2026-11-11T00:00:00+08:00");
 const FIRST_MOVER_ENDS = new Date("2026-12-01T00:00:00+08:00");
-const CHAPTER_FINDER = "https://bni.com/find-a-chapter";
+const CHAPTER_FINDER = "https://growwithbniph.com/";
 
 const ROW_A = ["Accountants", "Architects", "Caterers", "Insurance", "IT services", "Lawyers", "Logistics", "Printing"];
 const ROW_B = ["Real estate", "Events", "Dentists", "Interior design", "Photography", "Marketing", "Construction", "Travel"];
