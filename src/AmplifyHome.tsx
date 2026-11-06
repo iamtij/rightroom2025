@@ -893,26 +893,31 @@ export default function AmplifyHome() {
         </div>
       </section>
 
-      <footer className="flex flex-wrap justify-between gap-10 bg-[#0E0E10] px-4 py-14 text-sm text-[#A8A8B0] sm:px-8 lg:px-24">
-        <div className="flex max-w-[320px] flex-col gap-2.5">
-          <span className="font-archivo text-lg font-extrabold text-[#F6F4F1]">
-            IBMC <span className="text-[#FF4D5A]">2027</span> · AMPLIFY
-          </span>
-          <span>Amplify others. Get amplified.</span>
-          <span>Hosted by BNI Philippines. Event photos from ibmcph.com.</span>
+      <footer className="flex flex-col gap-10 bg-[#0E0E10] px-4 py-14 text-sm text-[#A8A8B0] sm:px-8 lg:px-24">
+        <div className="flex flex-wrap justify-between gap-10">
+          <div className="flex max-w-[320px] flex-col gap-2.5">
+            <span className="font-archivo text-lg font-extrabold text-[#F6F4F1]">
+              IBMC <span className="text-[#FF4D5A]">2027</span> · AMPLIFY
+            </span>
+            <span>Amplify others. Get amplified.</span>
+            <span>Hosted by BNI Philippines. Event photos from ibmcph.com.</span>
+          </div>
+          <div className="flex flex-col gap-2.5">
+            <span className="font-semibold text-[#F6F4F1]">Explore</span>
+            <a href="#why" className="text-[#A8A8B0] no-underline">Why IBMC</a>
+            <a href="#new" className="text-[#A8A8B0] no-underline">New to BNI?</a>
+            <a href="#pricing" className="text-[#A8A8B0] no-underline">Tickets</a>
+          </div>
+          <div className="flex flex-col gap-2.5">
+            <span className="font-semibold text-[#F6F4F1]">Event</span>
+            <a href="#faq" className="text-[#A8A8B0] no-underline">FAQ</a>
+            <span>BNI Philippines</span>
+            <span>ibmcph.com</span>
+          </div>
         </div>
-        <div className="flex flex-col gap-2.5">
-          <span className="font-semibold text-[#F6F4F1]">Explore</span>
-          <a href="#why" className="text-[#A8A8B0] no-underline">Why IBMC</a>
-          <a href="#new" className="text-[#A8A8B0] no-underline">New to BNI?</a>
-          <a href="#pricing" className="text-[#A8A8B0] no-underline">Tickets</a>
-        </div>
-        <div className="flex flex-col gap-2.5">
-          <span className="font-semibold text-[#F6F4F1]">Event</span>
-          <a href="#faq" className="text-[#A8A8B0] no-underline">FAQ</a>
-          <span>BNI Philippines</span>
-          <span>ibmcph.com</span>
-        </div>
+        <a href="http://eventixph.com/" target="_blank" rel="noreferrer" className="w-fit text-[#F6F4F1] underline">
+          Powered by EventixPH
+        </a>
       </footer>
     </div>
   );
