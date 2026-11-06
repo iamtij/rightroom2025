@@ -182,10 +182,109 @@ button, a, [role="button"] {
   }
 }
 
+@keyframes lev-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes lev-blink {
+  0%, 90%, 100% { transform: scaleY(1); }
+  94% { transform: scaleY(0.1); }
+}
+
+@keyframes lev-bar {
+  0% { opacity: 0.15; }
+  100% { opacity: 1; }
+}
+
+@keyframes lev-swing-l {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(12deg); }
+}
+
+@keyframes lev-swing-r {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-12deg); }
+}
+
+@keyframes lev-thumb {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-8deg); }
+}
+
+@keyframes lev-hold {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+@keyframes lev-ping {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+}
+
+@keyframes lev-spark {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
+.lev {
+  overflow: visible;
+  animation: lev-bob 2.6s ease-in-out infinite;
+}
+
+.lev .eye {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lev-blink 4.5s ease-in-out infinite;
+}
+
+.lev .bar-lit {
+  animation: lev-bar 0.35s ease-out both;
+}
+
+.lev .arm-l,
+.lev .arm-r,
+.lev .thumb {
+  transform-box: view-box;
+}
+
+.lev .arm-l {
+  animation: lev-swing-l 1.8s ease-in-out infinite;
+}
+
+.lev .arm-r {
+  animation: lev-swing-r 1.8s ease-in-out infinite;
+  animation-delay: 0.9s;
+}
+
+.lev .thumb {
+  animation: lev-thumb 1.4s ease-in-out infinite;
+}
+
+.lev .hold {
+  animation: lev-hold 1.6s ease-in-out infinite;
+}
+
+.lev .ping {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lev-ping 1.2s ease-in-out infinite;
+}
+
+.lev .spark {
+  animation: lev-spark 1.6s ease-in-out infinite;
+}
+
+.lev .spark:nth-of-type(2n) {
+  animation-delay: 0.5s;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mq,
   .meter-bar,
-  .quiet-bar {
+  .quiet-bar,
+  .lev,
+  .lev * {
     animation: none;
   }
 

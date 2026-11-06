@@ -211,7 +211,7 @@ export function tierFor(today: string, international: boolean): Tier | null {
       opensLabel: null,
       rows: EARLY_BIRD_ROWS,
       saveLabel: "One payment today. Save ₱3,000 against Regular.",
-      installmentSummary: "₱4,000 today to secure your slot, then ₱3,000 a month.",
+      installmentSummary: "₱4,000 today, then ₱3,000 a month, Feb to May.",
       note: "Phase 2 payments begin in February for all Early Bird registrants.",
     };
   }
@@ -245,7 +245,7 @@ function firstMover(windowLabel: string, onSale: boolean, opensLabel: string | n
     opensLabel,
     rows: FIRST_MOVER_ROWS,
     saveLabel: "One payment today. Save ₱6,000 against Regular.",
-    installmentSummary: "₱1,000 today to secure your slot, then ₱2,000 a month.",
+    installmentSummary: "₱1,000 today, then ₱2,000 a month, Dec to May.",
     note: null,
   };
 }

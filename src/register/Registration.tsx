@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { LevNote, type LevPose } from "./Lev";
 import {
   INDUSTRIES,
   addDays,
@@ -300,6 +301,17 @@ function Choice({
   );
 }
 
+function ClosedChoice({ title, body }: { title: string; body: string }) {
+  return (
+    <div aria-disabled="true" className="flex items-center gap-3 rounded-[14px] border border-dashed border-[#D9D5CF] bg-[#EFECE7] p-4 text-[#8E8E96]">
+      <span className="flex flex-col gap-1">
+        <span className="text-base font-bold">{title}</span>
+        <span className="text-sm leading-snug">{body}</span>
+      </span>
+    </div>
+  );
+}
+
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="flex flex-col gap-1.5 text-[13px] font-semibold text-[#3A3A40]">
@@ -339,6 +351,26 @@ function memberAttendee(member: FoundMember, audience: Audience = "member"): Att
   };
 }
 
+function membershipHoldNote(member: FoundMember, editing: boolean) {
+  const person = memberAttendee(member);
+  const checks: Array<[string, string]> = [
+    [person.fullName, "name"],
+    [person.business, "business name"],
+    [person.industry, "category"],
+    [person.chapter, "chapter"],
+    [person.email, "email"],
+    [person.mobile, "mobile number"],
+  ];
+  const missing = checks.filter(([value]) => !value.trim()).map(([, label]) => label);
+  if (!missing.length) return "";
+  const listed = missing.length === 1 ? `your ${missing[0]}` : `your ${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]}`;
+  const add = missing.length === 1 ? "add it" : "add them";
+  const next = editing
+    ? `Enter the code, then ${add}.`
+    : `Tap Edit my details, enter the code we email you, and ${add}.`;
+  return `We can't continue yet. Your membership is missing ${listed}. ${next}`;
+}
+
 function RegistrationWizard() {
   const today = manilaDate();
   const [step, setStep] = useState<Step>("start");
@@ -364,6 +396,7 @@ function RegistrationWizard() {
   const [ticketError, setTicketError] = useState("");
   const [guestError, setGuestError] = useState("");
   const [showTerms, setShowTerms] = useState(false);
+  const [datesOpen, setDatesOpen] = useState(false);
   const [payError, setPayError] = useState("");
   const [couponCode, setCouponCode] = useState("");
   const [coupon, setCoupon] = useState<AppliedCoupon | null>(null);
@@ -491,7 +524,7 @@ function RegistrationWizard() {
     }
   }
 
-  const othersOpen = today >= "2027-02-01";
+  const guestsOpen = today >= "2027-02-01";
 
   function choose(audience: Audience) {
     setTestMode(false);
@@ -501,7 +534,7 @@ function RegistrationWizard() {
       setStep("member");
       return;
     }
-    if (!othersOpen) return;
+    if (audience === "guest" && !guestsOpen) return;
     setAttendee(emptyGuest(audience === "international"));
     setStep("guest");
   }
@@ -554,6 +587,10 @@ function RegistrationWizard() {
       setGuestError(attendee.audience === "member"
         ? "Add your name, business, industry, chapter, email, and mobile number."
         : "Add your name, business, industry, email, and mobile number.");
+      return;
+    }
+    if (attendee.audience === "guest" && !testMode && !installmentTest && today < "2027-02-01") {
+      setGuestError("Guest registration opens February 1, 2027.");
       return;
     }
     setGuestError("");
@@ -683,10 +720,14 @@ function RegistrationWizard() {
         <h2 className="m-0 mt-1.5 text-[17px] font-bold">Who's registering?</h2>
         {import.meta.env.DEV && testsOpen ? <Choice title="Test ticket · ₱10" body="Available now, for a local payment test." emphasis onClick={startTest} /> : null}
         {testsOpen ? <Choice title="Test installment · ₱200" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." emphasis onClick={startInstallmentTest} /> : null}
-        <Choice title="I'm a BNI Philippines Member" body="Quick registration. We'll fill in your details." emphasis onClick={() => choose("member")} />
+        <Choice title="I'm a BNI member" body="Quick registration. We'll fill in your details." emphasis onClick={() => choose("member")} />
         {testsOpen ? <Choice title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." emphasis onClick={startMemberTest} /> : null}
-        <Choice title="Non-BNI Philippines member" body={othersOpen ? "New to BNI? You're welcome here." : "Available February 1, 2027"} disabled={!othersOpen} onClick={() => choose("guest")} />
-        <Choice title="International delegate" body={othersOpen ? "Joining from outside the Philippines. Priced in USD." : "Available February 1, 2027"} disabled={!othersOpen} onClick={() => choose("international")} />
+        {guestsOpen ? (
+          <Choice title="I'm a guest" body="New to BNI? You're welcome here." onClick={() => choose("guest")} />
+        ) : (
+          <ClosedChoice title="I'm a guest" body="Opens February 1, 2027" />
+        )}
+        <Choice title="International delegate" body="Joining from outside the Philippines. Priced in USD." onClick={() => choose("international")} />
         <p className="m-0 mt-auto text-center text-sm text-[#5C5C63]">
           Already registered?{" "}
           <button type="button" className="font-semibold text-[#A8131F]" onClick={() => { setLookup(""); setStep("manage"); }}>
@@ -698,6 +739,21 @@ function RegistrationWizard() {
   }
 
   if (step === "member") {
+    const holdNote = member && !member.registered ? membershipHoldNote(member, Boolean(otpSentTo)) : "";
+    const first = member?.fullName.trim().split(/\s+/)[0];
+    const memberLev: { pose: LevPose; label: string; text: string } = member?.registered
+      ? { pose: "smile", label: "Lev, already registered", text: `You're already registered, ${first}.` }
+      : member
+        ? { pose: "smile", label: "Lev smiling, found your membership", text: `Found you, ${first}!` }
+        : lookedUp && lookup.trim()
+          ? { pose: "alert", label: "Lev, membership not found", text: "I couldn't find that membership. Check the email or mobile on your BNI profile." }
+          : {
+              pose: "smile",
+              label: "Lev smiling",
+              text: memberTest
+                ? "Testing registration. Use the email or mobile on your BNI Connect profile. Payment is open."
+                : "Use the email or mobile number saved in your BNI Connect profile.",
+            };
     return (
       <Frame
         label="Step 1 of 4"
@@ -706,43 +762,39 @@ function RegistrationWizard() {
           <button type="button" className="block w-full text-center text-base font-bold text-[#A8131F]" onClick={() => setStep("manage")}>
             Manage my registration
           </button>
-        ) : (
-          <PrimaryButton disabled={!member || !detailsReady(memberAttendee(member))} onClick={() => { if (!member || !detailsReady(memberAttendee(member))) return; setAttendee(memberAttendee(member)); setPlan(memberTest ? "test" : "full"); setStep("ticket"); }}>Continue</PrimaryButton>
-        )}
+        ) : member ? (
+          <PrimaryButton disabled={!detailsReady(memberAttendee(member))} onClick={() => { if (!detailsReady(memberAttendee(member))) return; setAttendee(memberAttendee(member)); setPlan(memberTest ? "test" : "full"); setStep("ticket"); }}>Continue</PrimaryButton>
+        ) : null}
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep("start")}>← Back</button>
-        <div className="flex flex-col gap-1.5">
-          <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Find your membership</h1>
-          <p className="m-0 text-[15px] leading-normal text-[#5C5C63]">{memberTest ? "Testing registration. Use the email or mobile number registered with BNI Philippines. Payment is open." : "Use the email or mobile number registered with BNI Philippines."}</p>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <label className="text-[13px] font-semibold text-[#3A3A40]" htmlFor="member-lookup">BNI member email or mobile</label>
-          <div className="flex gap-2">
-            <input
-              id="member-lookup"
-              className={`${inputClass} min-w-0 flex-1`}
-              value={lookup}
-              placeholder="Email or mobile"
-              onChange={(event) => {
-                setLookup(event.target.value);
-                setLookedUp(false);
-                setLookupError("");
-                setMember(null);
-                clearOtp();
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") searchMember();
-              }}
-            />
-            <button
-              type="button"
-              disabled={!lookup.trim() || searching}
-              onClick={searchMember}
-              className="shrink-0 rounded-full bg-[#141416] px-4 text-sm font-bold text-white disabled:bg-[#C8C4BE]"
-            >
-              {searching ? "Finding" : "Find"}
-            </button>
-          </div>
+        <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Find your membership</h1>
+        <LevNote pose={memberLev.pose} label={memberLev.label}>{memberLev.text}</LevNote>
+        <div className="flex gap-2">
+          <input
+            id="member-lookup"
+            aria-label="BNI member email or mobile"
+            className={`${inputClass} min-w-0 flex-1 rounded-xl py-3.5`}
+            value={lookup}
+            placeholder="name@business.com or 0917…"
+            onChange={(event) => {
+              setLookup(event.target.value);
+              setLookedUp(false);
+              setLookupError("");
+              setMember(null);
+              clearOtp();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") searchMember();
+            }}
+          />
+          <button
+            type="button"
+            disabled={!lookup.trim() || searching}
+            onClick={searchMember}
+            className="shrink-0 rounded-full bg-[#D0202E] px-5 text-base font-bold text-white disabled:bg-[#E4A0A6]"
+          >
+            {searching ? "Finding" : "Find"}
+          </button>
         </div>
         {member ? (
           <div className="flex flex-col gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
@@ -751,8 +803,9 @@ function RegistrationWizard() {
             <Detail label="Business" value={member.business} />
             <Detail label="Category" value={member.industry} />
             <Detail label="Chapter" value={member.chapter} />
-            <Detail label="Mobile" value={member.mobileMasked} />
+            <Detail label="Mobile" value={member.mobileMasked || "Not on file"} muted={!member.mobileMasked} />
             {member.registered ? <p className="m-0 text-sm text-[#5C5C63]">You're already registered.</p> : null}
+            {holdNote ? <p className="m-0 text-sm leading-normal text-[#3A3A40]">{holdNote}</p> : null}
             {otpSentTo ? (
               <div className="flex flex-col gap-2 border-t border-[#F0EDE8] pt-3">
                 <p className="m-0 text-sm text-[#5C5C63]">We sent a code to {otpSentTo}. Enter it to edit your details.</p>
@@ -786,20 +839,20 @@ function RegistrationWizard() {
         {lookedUp && lookup.trim() && !member ? (
           <div className="rounded-[14px] border border-[#E4E1DC] bg-white p-4">
             <p className="m-0 text-base font-bold">We couldn't find that membership</p>
-            <p className="mt-1.5 mb-0 text-sm leading-normal text-[#5C5C63]">Check the email or mobile on your BNI profile. Non-BNI registration opens February 1, 2027.</p>
+            <p className="mt-1.5 mb-0 text-sm leading-normal text-[#5C5C63]">Check the email or mobile on your BNI Connect profile. Guest registration opens February 1, 2027.</p>
           </div>
         ) : null}
         {member ? null : (
           <p className="m-0 text-sm text-[#5C5C63]">
-            {othersOpen ? (
+            {guestsOpen ? (
               <>
                 Not a member?{" "}
                 <button type="button" className="font-semibold text-[#A8131F]" onClick={() => choose("guest")}>
-                  Register as a non-BNI member
+                  Register as a guest
                 </button>
               </>
             ) : (
-              "Non-BNI registration opens February 1, 2027."
+              "Not a member? Guest registration opens Feb 1."
             )}
           </p>
         )}
@@ -809,13 +862,20 @@ function RegistrationWizard() {
 
   if (step === "guest" && attendee) {
     const memberPath = attendee.audience === "member";
+    const guestLine = memberPath
+      ? "Check the details from your BNI membership."
+      : installmentTest
+        ? "Test installment · ₱200. Dates start the day you pay."
+        : testMode
+          ? "Test ticket · ₱10. This does not open the real sale."
+          : attendee.international
+            ? "Joining from outside the Philippines. Your ticket is priced in USD."
+            : "New to BNI? You're welcome here.";
     return (
       <Frame label="Step 1 of 4" step={1} footer={<PrimaryButton disabled={!detailsReady(attendee)} onClick={continueGuest}>Continue</PrimaryButton>}>
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => { if (!memberPath) { setTestMode(false); setInstallmentTest(false); } setStep(memberPath ? "member" : "start"); }}>← Back</button>
-        <div className="flex flex-col gap-1.5">
-          <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Your details</h1>
-          <p className="m-0 text-[15px] leading-normal text-[#5C5C63]">{memberPath ? "Check the details from your BNI membership." : installmentTest ? "Test installment · ₱200. Dates start the day you pay." : testMode ? "Test ticket · ₱10. This does not open the real sale." : "About 3 minutes. Guests are welcome."}</p>
-        </div>
+        <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Your details</h1>
+        <LevNote pose="smile" label="Lev smiling">{guestLine}</LevNote>
         <Field label="Full name">
           <input required className={inputClass} placeholder="As it should appear on your badge" value={attendee.fullName} onChange={(event) => setAttendee({ ...attendee, fullName: event.target.value })} />
         </Field>
@@ -850,7 +910,7 @@ function RegistrationWizard() {
         </Field>
         {memberPath || testMode || installmentTest ? null : (
           <>
-            <Field label="Who invited you?" hint="Optional, so the member gets credit">
+            <Field label="Who invited you?" hint="(optional)">
               <input className={inputClass} placeholder="Member name or chapter" value={attendee.invitedBy} onChange={(event) => setAttendee({ ...attendee, invitedBy: event.target.value })} />
             </Field>
             <label className="flex items-start gap-2.5 text-sm leading-snug text-[#2A2A2E]">
@@ -897,6 +957,8 @@ function RegistrationWizard() {
   if (step === "ticket" && attendee && tier) {
     const charging = checkoutTier();
     const dueToday = plan === "installment" && tier.rows[0] ? tier.rows[0].amountCents : charging ? charging.fullCents : tier.fullCents;
+    const premium = tier.installmentCents && tier.installmentCents > tier.fullCents ? tier.installmentCents - tier.fullCents : 0;
+    const realTier = tier.code !== "test" && tier.code !== "test_50" && tier.code !== "test_200";
     return (
       <Frame
         label="Step 2 of 4"
@@ -905,13 +967,21 @@ function RegistrationWizard() {
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep(attendee.audience === "member" ? "member" : "guest")}>← Back</button>
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Your ticket</h1>
+        <LevNote pose="wink" label="Lev with a tip">
+          {premium > 0 ? (
+            <>Pay in full and save <MoneyText text={money(premium, tier.currency)} />.</>
+          ) : plan === "installment" ? (
+            <>Tip: <MoneyText text={money(dueToday, charging?.currency || tier.currency)} /> today locks your slot.</>
+          ) : (
+            <>One payment of <MoneyText text={money(dueToday, charging?.currency || tier.currency)} /> covers your seat.</>
+          )}
+        </LevNote>
         <div className="flex flex-col gap-1.5 rounded-[14px] bg-[#141416] p-4 text-[#F6F4F1]">
           <div className="flex items-center justify-between gap-3">
             <span className="font-archivo text-xl font-extrabold">{charging?.name}</span>
             <span className="rounded-full bg-[#D0202E] px-2.5 py-1 text-[11px] font-bold tracking-[0.1em] text-white uppercase">{charging?.code === "test_50" || charging?.code === "test_200" ? "Test" : charging?.onSale ? "Best price" : "Opens soon"}</span>
           </div>
           <span className="text-sm text-[#C9C7C2]">{charging?.code === "test_50" || charging?.code === "test_200" ? "Payment is open" : charging?.onSale ? `Register by ${charging.windowLabel.replace("until ", "")}` : `Registration opens ${charging?.opensLabel}`}</span>
-          <span className="text-[13px] text-[#8E8E96]">{charging?.nextLabel}</span>
         </div>
         <h2 className="m-0 mt-1 text-[17px] font-bold">How would you like to pay?</h2>
         <PayChoice
@@ -919,7 +989,7 @@ function RegistrationWizard() {
           onSelect={() => { setPlan("full"); clearCoupon(); }}
           title="Pay in full"
           amount={money(tier.fullCents, tier.currency)}
-          body={tier.saveLabel || "One payment today."}
+          body={realTier ? "One payment today." : tier.saveLabel || "One payment today."}
         />
         {memberTest ? (
           <PayChoice
@@ -938,14 +1008,27 @@ function RegistrationWizard() {
             amount={money(tier.installmentCents, tier.currency)}
             body={tier.installmentSummary || ""}
           >
-            <div className="flex flex-col text-[13px]">
-              {tier.rows.map((row) => (
-                <span key={row.label} className="flex justify-between border-t border-[#F0EDE8] py-1.5 first:border-t-0">
-                  <span className={row.kind === "on_registration" ? "font-bold text-[#A8131F]" : "text-[#3A3A40]"}>{row.label}</span>
-                  <span className={row.kind === "on_registration" ? "font-bold text-[#A8131F]" : ""}>{money(row.amountCents, tier.currency)}</span>
-                </span>
-              ))}
-            </div>
+            <button
+              type="button"
+              className="self-start text-[13px] font-semibold text-[#A8131F]"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setDatesOpen((open) => !open);
+              }}
+            >
+              {datesOpen ? "Hide payment dates" : "See payment dates"}
+            </button>
+            {datesOpen ? (
+              <div className="flex flex-col text-[13px]">
+                {tier.rows.map((row) => (
+                  <span key={row.label} className="flex justify-between border-t border-[#F0EDE8] py-1.5 first:border-t-0">
+                    <span className={row.kind === "on_registration" ? "font-bold text-[#A8131F]" : "text-[#3A3A40]"}>{row.label}</span>
+                    <span className={row.kind === "on_registration" ? "font-bold text-[#A8131F]" : ""}>{money(row.amountCents, tier.currency)}</span>
+                  </span>
+                ))}
+              </div>
+            ) : null}
             {tier.note ? <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">{tier.note}</p> : null}
           </PayChoice>
         ) : null}
@@ -958,7 +1041,7 @@ function RegistrationWizard() {
           <label className="flex items-start gap-2.5 rounded-xl bg-[#FBE9EA] p-3.5 text-[13px] leading-normal text-[#2A2A2E]">
             <input type="checkbox" className="mt-0.5 h-5 w-5 accent-[#D0202E]" checked={agreed} onChange={(event) => { setAgreed(event.target.checked); setTicketError(""); }} />
             <span>
-              I understand that if a payment is 15 or more days late, my installment plan ends and my ticket moves to the Regular rate of ₱18,000. Everything I've paid is credited, and the balance is due by May 31, 2027.{" "}
+              I understand: if a payment is 15+ days late, my ticket moves to the Regular rate (₱18,000). What I've paid is kept.{" "}
               <button type="button" className="font-semibold text-[#A8131F]" onClick={() => setShowTerms((open) => !open)}>Terms</button>
             </span>
           </label>
@@ -1031,14 +1114,12 @@ function RegistrationWizard() {
                   : `Submit registration · ${money(dueToday, charging.currency)} due`
                 : `Opens ${charging.opensLabel}`}
             </PrimaryButton>
-            <span className="text-center text-xs text-[#5C5C63]">
-              {charging.currency === "PHP" ? (channel && channel !== "upay" ? "HitPay · secure payment" : "UnionBank UPay · secure payment") : "Secure payment"}
-            </span>
           </div>
         }
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep("ticket")}>← Back</button>
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Payment</h1>
+        <LevNote pose="focus" label="Lev holding a card">Secure payment. I've got this.</LevNote>
         <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-2">
           <Row label="Attendee" value={attendee.fullName} />
           <Row label={`${charging.name} · ${plan === "installment" ? "installment" : "paid in full"}`} value={`${money(listTotal, charging.currency)} total`} />
@@ -1090,12 +1171,12 @@ function RegistrationWizard() {
           <>
             <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} />
             <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
-              Your receipt goes to {attendee.email} and {attendee.mobile}.
+              Receipt goes to {attendee.email} and {attendee.mobile}.
             </p>
           </>
         ) : (
           <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
-            UnionBank UPay collects peso payments. This ticket is in US dollars, so the seat is held and IBMC records the payment separately. Your receipt goes to {attendee.email} and {attendee.mobile}.
+            UnionBank UPay collects peso payments. This ticket is in US dollars, so the seat is held and IBMC records the payment separately. Receipt goes to {attendee.email} and {attendee.mobile}.
           </p>
         )}
         {payError ? <p className="m-0 text-sm text-[#A8131F]">{payError}</p> : null}
@@ -1158,11 +1239,11 @@ function PriceStrip({ tier }: { tier: Tier }) {
   );
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
+function Detail({ label, value, muted = false }: { label: string; value: string; muted?: boolean }) {
   return (
     <div className="flex justify-between gap-3 border-t border-[#F0EDE8] py-2 text-sm">
       <span className="text-[#5C5C63]">{label}</span>
-      <span className="text-right font-semibold">{value}</span>
+      <span className={`text-right ${muted ? "font-medium text-[#A8131F]" : "font-semibold"}`}>{value}</span>
     </div>
   );
 }
@@ -1571,9 +1652,18 @@ function Confirmed({ record, onManage }: { record: StoredRegistration; onManage:
         <p className="m-0 text-[15px] leading-snug text-[#FFE3E5]">
           {savedOnly
             ? `Your ${record.tierName} seat is held. The amount due stays open until IBMC records the payment.`
-            : `Your ${record.tierName} slot for IBMC 2027 is secured. June 16–17, 2027 · Newport Performing Arts Theater.`}
+            : "June 16–17, 2027 · Newport Performing Arts Theater"}
         </p>
       </div>
+      <LevNote pose={savedOnly ? "smile" : "thumb"} bars={savedOnly ? 2 : Math.min(5, Math.max(paidCount, 1))} label={savedOnly ? "Lev smiling" : "Lev giving a thumbs up"}>
+        {savedOnly
+          ? "Your seat is held. Payment is still open."
+          : record.planStatus === "fully_paid"
+            ? "You're all paid up."
+            : paidCount <= 1
+              ? "That's bar one. More with each payment."
+              : `That's payment ${paidCount}. More with each payment.`}
+      </LevNote>
       <div className="flex flex-col gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
         <div className="flex items-baseline justify-between gap-3">
           <span className="text-sm text-[#5C5C63]">Paid so far</span>
@@ -1591,7 +1681,7 @@ function Confirmed({ record, onManage }: { record: StoredRegistration; onManage:
         <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
           {record.planStatus === "fully_paid"
             ? "Your QR ticket is on its way by email and SMS. Bring it on both days."
-            : "We'll remind you by email and SMS before each unpaid payment. Your QR ticket arrives once you're fully paid."}
+            : "Reminders come by email and SMS. Your QR ticket unlocks when you're fully paid."}
         </p>
       </div>
       <div className="flex justify-center gap-6 text-sm">
@@ -1626,19 +1716,11 @@ function Manage({
   const [payingInstallment, setPayingInstallment] = useState(false);
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
-  const [badgeName, setBadgeName] = useState("");
-  const [badgeCompany, setBadgeCompany] = useState("");
-  const [badgeNote, setBadgeNote] = useState("");
-  const [badgeError, setBadgeError] = useState("");
   const payIntent = Boolean(payReference || openPayOnLoad);
 
   function openRecord(payload: StoredRegistration, options: { openPay?: boolean } = {}) {
     rememberRegistration(payload);
     setRecord(payload);
-    setBadgeName(payload.attendee?.fullName || "");
-    setBadgeCompany(payload.attendee?.business || "");
-    setBadgeNote("");
-    setBadgeError("");
     const shouldOpenPay =
       options.openPay &&
       payload.currency === "PHP" &&
@@ -1765,14 +1847,12 @@ function Manage({
     return (
       <Frame label={payIntent ? "Pay installment" : "My registration"}>
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={onStart}>← Back</button>
-        <div className="flex flex-col gap-1.5">
-          <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">{payIntent ? "Pay your installment" : "My registration"}</h1>
-          <p className="m-0 text-[15px] leading-normal text-[#5C5C63]">
-            {payIntent
-              ? "Confirm it's you to pay. We'll send a code to the email on your registration."
-              : "Use the email or mobile number on your registration."}
-          </p>
-        </div>
+        <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">{payIntent ? "Pay your installment" : "My registration"}</h1>
+        <LevNote pose="smile" label="Lev smiling">
+          {payIntent
+            ? "Confirm it's you to pay. I'll send a code to the email on your registration."
+            : "Use the email or mobile on your registration."}
+        </LevNote>
         <div className="flex flex-col gap-1.5">
           <label className="text-[13px] font-semibold text-[#3A3A40]" htmlFor="registration-lookup">Email or mobile</label>
           <div className="flex gap-2">
@@ -1841,35 +1921,6 @@ function Manage({
         {error && !maskedEmail ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
       </Frame>
     );
-  }
-
-  async function saveBadge() {
-    if (!record?.resumeToken || busy) return;
-    const fullName = badgeName.trim();
-    const business = badgeCompany.trim();
-    if (!fullName || !business) {
-      setBadgeNote("");
-      setBadgeError("Add the name and company name for your badge.");
-      return;
-    }
-    setBusy(true);
-    setBadgeError("");
-    setBadgeNote("");
-    try {
-      const response = await fetch(`/api/registrations/${record.reference}/badge`, {
-        method: "PATCH",
-        headers: resumeHeaders({ "Content-Type": "application/json" }, record.resumeToken),
-        body: JSON.stringify({ fullName, business }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Badge was not saved");
-      openRecord({ ...payload, resumeToken: payload.resumeToken || record.resumeToken });
-      setBadgeNote("Saved. Your badge will use this name and company.");
-    } catch (badgeError) {
-      setBadgeError(badgeError instanceof Error ? badgeError.message : "Badge was not saved");
-    } finally {
-      setBusy(false);
-    }
   }
 
   async function startPayment() {
@@ -1955,6 +2006,113 @@ function Manage({
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Hi {first}</h1>
         <p className="m-0 text-[15px] text-[#5C5C63]">{record.tierName} · {record.plan === "installment" ? "installment plan" : "paid in full"}</p>
       </div>
+      <LevNote
+        pose={record.planStatus === "fully_paid" ? "thumb" : due ? "alert" : "smile"}
+        bars={record.planStatus === "fully_paid" ? 5 : due ? 2 : Math.min(5, Math.max(paid.length, 1))}
+        label={due ? "Lev with a payment reminder" : "Lev"}
+      >
+        {record.planStatus === "fully_paid"
+          ? "You're all paid up. Your QR ticket is ready."
+          : due && keepUntil && record.currency === "PHP" && record.plan === "installment"
+            ? `Pay by ${formatLongDate(keepUntil)} to keep your ${money(record.totalCents, record.currency)} rate.`
+            : due
+              ? `Payment ${record.payments.indexOf(due) + 1} is due ${due.dueOn === "on-registration" ? "today" : formatLongDate(due.dueOn)}.`
+              : "Nothing is due right now."}
+      </LevNote>
+      <div className="flex flex-col gap-2.5 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="text-[15px]"><b className="font-archivo text-[22px]">{money(paidCents, record.currency)}</b> paid</span>
+          <span className="text-sm text-[#5C5C63]">of {money(record.totalCents, record.currency)}</span>
+        </div>
+        <Progress payments={record.payments} label={`${paid.length} of ${record.payments.length} payments made${due ? `, payment ${record.payments.indexOf(due) + 1} due` : ""}`} />
+        <span className="text-[13px] text-[#5C5C63]">{paid.length} of {record.payments.length} payments made · {money(remaining, record.currency)} remaining</span>
+      </div>
+      {due ? (
+        <div className="flex flex-col gap-3 rounded-[14px] border-2 border-[#D0202E] bg-white p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-xs font-bold tracking-[0.12em] text-[#A8131F] uppercase">
+                Due {/^\d{4}-\d{2}-\d{2}$/.test(due.dueOn) ? formatMonthDate(due.dueOn) : "today"}
+              </span>
+              <span className="text-sm font-normal text-[#5C5C63]">Payment {record.payments.indexOf(due) + 1} of {record.payments.length}</span>
+            </div>
+            <span className="font-archivo text-[26px] font-extrabold">{money(due.amountCents, record.currency)}</span>
+          </div>
+          {record.currency === "PHP" && record.planStatus !== "fully_paid" ? (
+            payingInstallment ? (
+              <>
+                <h2 className="m-0 text-[17px] font-bold">Choose how to pay</h2>
+                <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} />
+                <button
+                  type="button"
+                  disabled={busy || !channel}
+                  onClick={startPayment}
+                  className="rounded-full bg-[#D0202E] px-4 py-3.5 text-base font-bold text-white disabled:bg-[#E4A0A6]"
+                >
+                  {payActionLabel(channel, money(due.amountCents, record.currency), busy)}
+                </button>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setPayingInstallment(false);
+                    setError("");
+                  }}
+                  className="text-sm font-semibold text-[#5C5C63]"
+                >
+                  Cancel
+                </button>
+                {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
+              </>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => {
+                  setError("");
+                  setPayingInstallment(true);
+                }}
+                className="rounded-full bg-[#D0202E] px-4 py-3.5 text-base font-bold text-white disabled:bg-[#E4A0A6]"
+              >
+                Pay {money(due.amountCents, record.currency)} now
+              </button>
+            )
+          ) : (
+            <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">UnionBank UPay collects peso payments. IBMC records this dollar payment separately.</p>
+          )}
+          {keepUntil && record.currency === "PHP" ? (
+            <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">
+              After {formatLongDate(keepUntil)}, your ticket moves to the Regular rate (₱18,000).
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+      <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-1 text-sm">
+        {record.payments.map((item) => {
+          const dated = /^\d{4}-\d{2}-\d{2}$/.test(item.dueOn);
+          const slot = item.dueOn === "on-registration" || item.label.includes("secure your seat");
+          const when = slot
+            ? `${dated ? formatLongDate(item.dueOn).split(",")[0] : "Today"} · slot fee`
+            : item.label;
+          const status = item.status === "paid" ? "Paid" : item.status === "due" ? "Due" : "Upcoming";
+          return (
+            <div
+              key={`${item.dueOn}-${item.label}`}
+              className={`flex justify-between gap-2 border-t border-[#F0EDE8] py-2.5 first:border-t-0 ${item.status === "due" ? "font-bold text-[#A8131F]" : item.status === "upcoming" ? "text-[#5C5C63]" : ""}`}
+            >
+              <span>{when}</span>
+              <span>
+                {item.status === "due" ? `Due · ${money(item.amountCents, record.currency)}` : (
+                  <>
+                    <span className="text-[#5C5C63]">{status} · </span>
+                    {money(item.amountCents, record.currency)}
+                  </>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
       {record.planStatus === "fully_paid" && record.qrToken ? (
         <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-5">
           <span className="self-start text-[15px] font-bold">QR ticket</span>
@@ -1971,111 +2129,6 @@ function Manage({
           <span className="text-xs font-bold tracking-[0.1em] text-[#3A3A40] uppercase">Locked</span>
         </div>
       )}
-      <div className="flex flex-col gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
-        <div className="flex flex-col gap-1">
-          <h2 className="m-0 text-[17px] font-bold">Conference badge</h2>
-          <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">This name and company name appear on your badge.</p>
-        </div>
-        <Field label="Name">
-          <input className={inputClass} value={badgeName} onChange={(event) => { setBadgeName(event.target.value); setBadgeNote(""); setBadgeError(""); }} />
-        </Field>
-        <Field label="Company name">
-          <input className={inputClass} value={badgeCompany} onChange={(event) => { setBadgeCompany(event.target.value); setBadgeNote(""); setBadgeError(""); }} />
-        </Field>
-        {badgeNote ? <p className="m-0 text-sm text-[#3A3A40]">{badgeNote}</p> : null}
-        {badgeError ? <p className="m-0 text-sm text-[#A8131F]">{badgeError}</p> : null}
-        <button type="button" disabled={busy} onClick={saveBadge} className="self-start rounded-full bg-[#141416] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#C8C4BE]">
-          {busy ? "Saving" : "Save badge"}
-        </button>
-      </div>
-      <div className="flex flex-col gap-2.5 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
-        <div className="flex items-baseline justify-between gap-3">
-          <span className="text-[15px]"><b className="font-archivo text-[22px]">{money(paidCents, record.currency)}</b> paid</span>
-          <span className="text-sm text-[#5C5C63]">of {money(record.totalCents, record.currency)}</span>
-        </div>
-        <Progress payments={record.payments} label={`${paid.length} of ${record.payments.length} payments made${due ? `, payment ${record.payments.indexOf(due) + 1} due` : ""}`} />
-        <span className="text-[13px] text-[#5C5C63]">{paid.length} of {record.payments.length} payments made · {money(remaining, record.currency)} remaining</span>
-      </div>
-      <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-1 text-sm">
-        {record.payments.map((item) => (
-          <div
-            key={`${item.dueOn}-${item.label}`}
-            className={`flex flex-wrap items-center justify-between gap-2 border-t border-[#F0EDE8] py-2.5 first:border-t-0 ${item.status === "due" ? "font-bold text-[#A8131F]" : item.status === "upcoming" ? "text-[#5C5C63]" : ""}`}
-          >
-            <span className="min-w-0 flex-1">
-              {item.status === "paid" && item.label.includes("secure your seat")
-                ? formatLongDate(item.dueOn).replace(",", "") + " · secure your seat"
-                : item.label}
-            </span>
-            <span className="flex shrink-0 items-center gap-2">
-              <span className={item.status === "due" ? "" : "text-[#5C5C63]"}>
-                {item.status === "paid" ? "Paid" : item.status === "due" ? "Due" : "Upcoming"} · {money(item.amountCents, record.currency)}
-              </span>
-              {item.status === "due" && record.currency === "PHP" && record.planStatus !== "fully_paid" ? (
-                payingInstallment ? null : (
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => {
-                      setError("");
-                      setPayingInstallment(true);
-                    }}
-                    className="rounded-full bg-[#D0202E] px-3 py-1.5 text-xs font-bold text-white disabled:bg-[#E4A0A6]"
-                  >
-                    Pay
-                  </button>
-                )
-              ) : null}
-              {item.status === "upcoming" ? (
-                <span className="rounded-full border border-[#D9D5CF] px-2 py-0.5 text-[11px] font-semibold tracking-wide text-[#5C5C63] uppercase">Locked</span>
-              ) : null}
-            </span>
-          </div>
-        ))}
-      </div>
-      {due && payingInstallment ? (
-        <div className="flex flex-col gap-3 rounded-[14px] border-2 border-[#D0202E] bg-white p-4">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex flex-col gap-0.5">
-              <span className="text-xs font-bold tracking-[0.12em] text-[#A8131F] uppercase">Payment {record.payments.indexOf(due) + 1} of {record.payments.length}</span>
-              <span className="text-sm font-normal text-[#5C5C63]">Due {formatMonthDate(due.dueOn)}</span>
-            </div>
-            <span className="font-archivo text-[26px] font-extrabold">{money(due.amountCents, record.currency)}</span>
-          </div>
-          <h2 className="m-0 text-[17px] font-bold">Choose how to pay</h2>
-          <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} />
-          <div className="flex flex-wrap gap-2">
-            <button
-              type="button"
-              disabled={busy || !channel}
-              onClick={startPayment}
-              className="rounded-full bg-[#D0202E] px-4 py-3 text-sm font-bold text-white disabled:bg-[#E4A0A6]"
-            >
-              {payActionLabel(channel, money(due.amountCents, record.currency), busy)}
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                setPayingInstallment(false);
-                setError("");
-              }}
-              className="rounded-full border border-[#D9D5CF] px-4 py-3 text-sm font-semibold"
-            >
-              Cancel
-            </button>
-          </div>
-          {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
-          {keepUntil ? (
-            <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">
-              Pay by {formatMonthDate(keepUntil)} to keep your {money(record.totalCents, record.currency)} rate. After that, your ticket moves to the Regular rate of ₱18,000.
-            </p>
-          ) : null}
-        </div>
-      ) : null}
-      {due && record.currency !== "PHP" ? (
-        <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">UnionBank UPay collects peso payments. IBMC records this dollar payment separately.</p>
-      ) : null}
     </Frame>
   );
 }
