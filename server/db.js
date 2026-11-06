@@ -364,6 +364,13 @@ export function testTicketEnabled() {
   return String(process.env.ALLOW_TEST_TICKET || "").trim().toLowerCase() === "true";
 }
 
+export function testRegistrationEnabled() {
+  const override = String(process.env.ALLOW_TEST_REGISTRATION || "").trim().toLowerCase();
+  if (override === "true") return true;
+  if (override === "false") return false;
+  return String(process.env.RAILWAY_ENVIRONMENT_NAME || "").trim().toLowerCase() !== "production";
+}
+
 function migrate(db) {
   migrateInstallmentDays(db);
   if (testTicketEnabled()) ensureTestTicket(db);

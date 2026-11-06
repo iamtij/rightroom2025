@@ -374,6 +374,21 @@ function RegistrationWizard() {
   const [chapters, setChapters] = useState<string[]>([]);
   const [testMode, setTestMode] = useState(false);
   const [installmentTest, setInstallmentTest] = useState(false);
+  const [testsOpen, setTestsOpen] = useState(() => import.meta.env.DEV || (typeof window !== "undefined" && window.location.hostname.includes("staging")));
+
+  useEffect(() => {
+    let stop = false;
+    fetch("/api/registration-options")
+      .then(async (response) => {
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (!stop) setTestsOpen(Boolean(payload.tests));
+      })
+      .catch(() => undefined);
+    return () => {
+      stop = true;
+    };
+  }, []);
 
   useEffect(() => {
     fetch("/api/chapters")
@@ -666,10 +681,10 @@ function RegistrationWizard() {
         </div>
         {localTier ? <PriceStrip tier={localTier} /> : <p className="m-0 text-[15px]">Registration closed on May 31, 2027.</p>}
         <h2 className="m-0 mt-1.5 text-[17px] font-bold">Who's registering?</h2>
-        {import.meta.env.DEV ? <Choice title="Test ticket · ₱10" body="Available now, for a local payment test." emphasis onClick={startTest} /> : null}
-        <Choice title="Test installment · ₱200" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." emphasis onClick={startInstallmentTest} />
+        {import.meta.env.DEV && testsOpen ? <Choice title="Test ticket · ₱10" body="Available now, for a local payment test." emphasis onClick={startTest} /> : null}
+        {testsOpen ? <Choice title="Test installment · ₱200" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." emphasis onClick={startInstallmentTest} /> : null}
         <Choice title="I'm a BNI Philippines Member" body="Quick registration. We'll fill in your details." emphasis onClick={() => choose("member")} />
-        <Choice title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." emphasis onClick={startMemberTest} />
+        {testsOpen ? <Choice title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." emphasis onClick={startMemberTest} /> : null}
         <Choice title="Non-BNI Philippines member" body={othersOpen ? "New to BNI? You're welcome here." : "Available February 1, 2027"} disabled={!othersOpen} onClick={() => choose("guest")} />
         <Choice title="International delegate" body={othersOpen ? "Joining from outside the Philippines. Priced in USD." : "Available February 1, 2027"} disabled={!othersOpen} onClick={() => choose("international")} />
         <p className="m-0 mt-auto text-center text-sm text-[#5C5C63]">

@@ -1,6 +1,6 @@
 import "dotenv/config";
 import express from "express";
-import { openDatabase, testTicketEnabled } from "./db.js";
+import { openDatabase, testRegistrationEnabled, testTicketEnabled } from "./db.js";
 import { clearSessionCookie, cookieValue, readSession, seedAdmin, sessionCookie, signSession, verifyPassword } from "./auth.js";
 import { createRegistration, cancelRegistration, ensureResumeToken, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
 import { dashboardStats } from "./dashboard.js";
@@ -193,6 +193,10 @@ export function createApi() {
     });
   });
 
+  router.get("/registration-options", (_req, res) => {
+    res.json({ tests: testRegistrationEnabled() });
+  });
+
   router.get("/members/lookup", memberLookupLimit, (req, res) => {
     const member = lookupMember(db(), req.query.q);
     if (!member) {
@@ -260,7 +264,8 @@ export function createApi() {
 
   function createPublicRegistration(body) {
     const today = manilaParts().date;
-    if (body.productCode === "test" && !testTicketEnabled()) {
+    const testProduct = body.productCode === "test" || body.productCode === "test_50" || body.productCode === "test_200";
+    if (testProduct && !(body.productCode === "test" ? testTicketEnabled() : testRegistrationEnabled())) {
       const error = new Error("Unknown ticket");
       error.status = 400;
       throw error;
