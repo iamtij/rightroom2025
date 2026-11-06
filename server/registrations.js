@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { claimCoupon, priceCoupon } from "./coupons.js";
-import { registrationBalance } from "./db.js";
+import { registrationBalance, testTicketEnabled } from "./db.js";
 
 function reference() {
   return `IBMC27-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
@@ -47,8 +47,40 @@ export function getRegistration(db, id) {
   };
 }
 
+export function resumeTokenMatches(registration, token) {
+  const given = String(token || "");
+  const expected = String(registration?.resume_token || "");
+  if (!given || !expected || given.length !== expected.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+}
+
+export function ensureResumeToken(db, registration) {
+  if (!registration) return null;
+  if (registration.resume_token) return registration;
+  const value = token();
+  db.prepare("UPDATE registrations SET resume_token = ? WHERE id = ? AND resume_token IS NULL").run(value, registration.id);
+  return getRegistration(db, registration.id);
+}
+
+export function getEntryPass(db, qrToken) {
+  const value = String(qrToken || "").trim();
+  if (!value) return null;
+  const row = db.prepare("SELECT id FROM registrations WHERE qr_token = ?").get(value);
+  if (!row) return null;
+  const registration = getRegistration(db, row.id);
+  if (!registration || registration.status !== "confirmed" || !registration.fully_paid_at) return null;
+  if (registration.balance_cents !== 0) return null;
+  return {
+    fullName: registration.full_name,
+    tierName: registration.product_name,
+    reference: registration.reference,
+    event: "June 16–17, 2027 · Newport Performing Arts Theater, Pasay City",
+  };
+}
+
 export function createRegistration(db, input) {
   const run = db.transaction(() => {
+    if (input.productCode === "test" && !testTicketEnabled()) throw new Error("Unknown ticket");
     const product = db.prepare("SELECT * FROM ticket_products WHERE code = ? AND active = 1").get(input.productCode);
     if (!product) throw new Error("Unknown ticket");
     if (input.paymentPlan === "installment" && !product.allows_installment) {
@@ -79,8 +111,8 @@ export function createRegistration(db, input) {
       INSERT INTO registrations (
         reference, product_id, payment_plan, full_name, email, mobile,
         amount_due_cents, currency, status, registered_on,
-        attendee_type, business, industry, chapter, invited_by, plan_status, coupon_code
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, 'active', ?)
+        attendee_type, business, industry, chapter, invited_by, plan_status, coupon_code, resume_token
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, 'active', ?, ?)
     `).run(
       reference(),
       product.id,
@@ -97,6 +129,7 @@ export function createRegistration(db, input) {
       input.chapter?.trim() || null,
       input.invitedBy?.trim() || null,
       priced.code || null,
+      token(),
     );
     const insertItem = db.prepare(`
       INSERT INTO registration_installments (registration_id, sequence, kind, due_on, amount_cents)

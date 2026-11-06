@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS registrations (
   invited_by TEXT,
   coupon_code TEXT,
   plan_status TEXT NOT NULL DEFAULT 'active',
+  resume_token TEXT,
   qr_token TEXT UNIQUE,
   fully_paid_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -355,8 +356,12 @@ export function openDatabase(file = process.env.IBMC_DB_PATH) {
   return db;
 }
 
+export function testTicketEnabled() {
+  return String(process.env.ALLOW_TEST_TICKET || "").trim().toLowerCase() === "true";
+}
+
 function migrate(db) {
-  if (process.env.NODE_ENV !== "production") ensureTestTicket(db);
+  if (testTicketEnabled()) ensureTestTicket(db);
   const names = new Set(db.prepare("PRAGMA table_info(registrations)").all().map((column) => column.name));
   const columns = [
     ["attendee_type", "TEXT NOT NULL DEFAULT 'guest'"],
@@ -366,11 +371,13 @@ function migrate(db) {
     ["invited_by", "TEXT"],
     ["coupon_code", "TEXT"],
     ["plan_status", "TEXT NOT NULL DEFAULT 'active'"],
+    ["resume_token", "TEXT"],
   ];
   for (const [name, type] of columns) {
     if (!names.has(name)) db.exec(`ALTER TABLE registrations ADD COLUMN ${name} ${type}`);
   }
   seedPaymentChannels(db);
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_registrations_resume ON registrations(resume_token) WHERE resume_token IS NOT NULL");
 }
 
 function ensureTestTicket(db) {

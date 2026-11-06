@@ -197,6 +197,39 @@ export function upayOutcome(body) {
   return "pending";
 }
 
+function centsFrom(value) {
+  const text = typeof value === "string" ? value.replace(/,/g, "").trim() : value;
+  const number = Number(text);
+  if (!Number.isFinite(number)) return null;
+  return Math.round(number * 100);
+}
+
+const COLLECTED_AMOUNT_KEYS = ["amount", "paidAmount", "transactionAmount", "paid_amount"];
+
+export function upayCollectedCents(body) {
+  const rows = Array.isArray(body?.data) ? body.data : [];
+  const latest = rows.length ? rows[rows.length - 1] : null;
+  const source = latest || (body && typeof body === "object" ? body : null);
+  if (!source) return null;
+  const found = [];
+  for (const key of COLLECTED_AMOUNT_KEYS) {
+    if (source[key] == null || source[key] === "") continue;
+    const cents = centsFrom(source[key]);
+    if (cents == null) return null;
+    found.push(cents);
+  }
+  if (!found.length) return null;
+  return found.every((value) => value === found[0]) ? found[0] : null;
+}
+
+export function upaySettlement(body, expectedCents) {
+  const outcome = upayOutcome(body);
+  if (outcome !== "paid") return outcome;
+  const collected = upayCollectedCents(body);
+  if (collected == null || collected !== expectedCents) return "pending";
+  return "paid";
+}
+
 async function presentUpay(row) {
   let qrDataUrl = "";
   if (row.qr) {
@@ -328,6 +361,10 @@ export async function startUpayPayment(db, registration, paymentMethod) {
       return { error: unionbankMessage(created.body, created.status), status: created.status === 400 ? 400 : 502, registration };
     }
     const outcome = upayOutcome(created.body);
+    const settlement = upaySettlement(created.body, amountCents);
+    if (outcome === "paid" && settlement !== "paid") {
+      console.error(`UPay amount was not confirmed for ${sender}`);
+    }
     const result = db.prepare(`
       INSERT INTO upay_payments (
         registration_id, installment_id, sender_ref_id, amount_cents, currency, payment_method,
@@ -340,7 +377,7 @@ export async function startUpayPayment(db, registration, paymentMethod) {
       amountCents,
       registration.currency,
       paymentMethod,
-      outcome === "paid" ? "pending" : outcome,
+      settlement === "failed" ? "failed" : "pending",
       created.body.code || null,
       created.body.state || null,
       created.body.transactionId || null,
@@ -350,10 +387,10 @@ export async function startUpayPayment(db, registration, paymentMethod) {
     );
     let row = db.prepare("SELECT * FROM upay_payments WHERE id = ?").get(result.lastInsertRowid);
     let current = registration;
-    if (outcome === "paid") {
+    if (settlement === "paid") {
       current = settle(db, row);
       row = saveUpay(db, row, { status: "paid" });
-    } else if (outcome === "failed") {
+    } else if (settlement === "failed") {
       row = saveUpay(db, row, { status: "failed" });
       return { error: created.body.state || "UnionBank declined the payment.", status: 402, registration: current, upay: await presentUpay(row) };
     }
@@ -382,9 +419,13 @@ export async function refreshUpayPayment(db, senderRefIdValue) {
       };
     }
     const outcome = upayOutcome(response.body);
+    const settlement = upaySettlement(response.body, row.amount_cents);
+    if (outcome === "paid" && settlement !== "paid") {
+      console.error(`UPay amount was not confirmed for ${row.sender_ref_id}`);
+    }
     let current = getRegistration(db, row.registration_id);
     const next = saveUpay(db, row, {
-      status: outcome,
+      status: settlement,
       code: response.body.code || row.unionbank_code,
       state: response.body.state || row.unionbank_state,
       transactionId: response.body.transactionId || row.transaction_id,
@@ -392,7 +433,7 @@ export async function refreshUpayPayment(db, senderRefIdValue) {
       qr: qrText(response.body) || row.qr,
       paymentUrl: paymentLink(response.body) || row.payment_url,
     });
-    if (outcome === "paid") current = settle(db, next);
+    if (settlement === "paid") current = settle(db, next);
     return { registration: current, upay: await presentUpay(next) };
   } catch (error) {
     return {

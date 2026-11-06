@@ -1,8 +1,8 @@
 import "dotenv/config";
 import express from "express";
-import { openDatabase } from "./db.js";
+import { openDatabase, testTicketEnabled } from "./db.js";
 import { clearSessionCookie, cookieValue, readSession, seedAdmin, sessionCookie, signSession, verifyPassword } from "./auth.js";
-import { createRegistration, cancelRegistration, findRegistrationByContact, getRegistration, recordPayment, updateRegistration } from "./registrations.js";
+import { createRegistration, cancelRegistration, ensureResumeToken, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateRegistration } from "./registrations.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
 import { listMembers, lookupMember, memberContactClash, parseMemberCsv, saveMember, updateMemberProfile, updateMemberRecord } from "./members.js";
@@ -24,7 +24,8 @@ function db() {
   return database;
 }
 
-function present(registration) {
+function present(registration, options = {}) {
+  const contact = options.contact !== false;
   let opened = false;
   const payments = registration.installments.map((item) => {
     let status = "upcoming";
@@ -46,12 +47,12 @@ function present(registration) {
   return {
     reference: registration.reference,
     attendee: {
-      fullName: registration.full_name,
-      email: registration.email,
-      mobile: registration.mobile,
-      business: registration.business,
-      industry: registration.industry,
-      chapter: registration.chapter,
+      fullName: contact ? registration.full_name : "",
+      email: contact ? registration.email : "",
+      mobile: contact ? registration.mobile : "",
+      business: contact ? registration.business || "" : "",
+      industry: contact ? registration.industry || "" : "",
+      chapter: contact ? registration.chapter || "" : "",
       type: registration.attendee_type,
     },
     tierName: registration.product_name,
@@ -64,6 +65,7 @@ function present(registration) {
     qrReady: registration.balance_cents === 0 && Boolean(registration.qr_token),
     registeredOn: registration.registered_on,
     payments,
+    ...(options.resume && registration.resume_token ? { resumeToken: registration.resume_token } : {}),
   };
 }
 
@@ -173,6 +175,7 @@ export function createApi() {
   const lookupLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
   const memberLookupLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
   const otpLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 8 });
+  const passLimit = rateLimit({ windowMs: 60 * 1000, max: 120 });
 
   router.get("/chapters", (_req, res) => {
     res.json(listChapters(db()));
@@ -247,6 +250,11 @@ export function createApi() {
 
   function createPublicRegistration(body) {
     const today = manilaParts().date;
+    if (body.productCode === "test" && !testTicketEnabled()) {
+      const error = new Error("Unknown ticket");
+      error.status = 400;
+      throw error;
+    }
     const product = db().prepare("SELECT * FROM ticket_products WHERE code = ? AND active = 1").get(body.productCode);
     if (!product) {
       const error = new Error("Unknown ticket");
@@ -282,7 +290,7 @@ export function createApi() {
   function sendHitpay(res, result, created) {
     const body = {
       error: result.error,
-      registration: result.registration ? present(result.registration) : undefined,
+      registration: result.registration ? present(result.registration, { contact: result.contact !== false, resume: result.resume === true }) : undefined,
       hitpay: result.hitpay || undefined,
     };
     if (result.error) {
@@ -296,21 +304,26 @@ export function createApi() {
     if (result.error) {
       res.status(result.status || 502).json({
         error: result.error,
-        registration: result.registration ? present(result.registration) : undefined,
+        registration: result.registration ? present(result.registration, { contact: result.contact !== false, resume: result.resume === true }) : undefined,
         upay: result.upay || undefined,
       });
       return;
     }
     res.status(created ? 201 : 200).json({
-      registration: present(result.registration),
+      registration: present(result.registration, { contact: result.contact !== false, resume: result.resume === true }),
       upay: result.upay,
     });
+  }
+
+  function ownerAccess(registration, token) {
+    const allowed = resumeTokenMatches(registration, token);
+    return { contact: allowed, resume: allowed };
   }
 
   router.post("/registrations", registerLimit, (req, res) => {
     try {
       const registration = createPublicRegistration(req.body || {});
-      res.status(201).json(present(registration));
+      res.status(201).json(present(registration, { resume: true }));
     } catch (error) {
       res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
     }
@@ -320,7 +333,7 @@ export function createApi() {
     try {
       const registration = createPublicRegistration(req.body || {});
       const result = await startUpayPayment(db(), registration, req.body?.paymentMethod);
-      sendUpay(res, result, true);
+      sendUpay(res, { ...result, resume: true }, true);
     } catch (error) {
       res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
     }
@@ -335,7 +348,7 @@ export function createApi() {
     try {
       const registration = createPublicRegistration(req.body || {});
       const result = await startHitpayPayment(db(), registration, channel);
-      sendHitpay(res, result, true);
+      sendHitpay(res, { ...result, resume: true }, true);
     } catch (error) {
       res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
     }
@@ -358,7 +371,7 @@ export function createApi() {
       return;
     }
     const result = await startHitpayPayment(db(), registration, channel);
-    sendHitpay(res, result, false);
+    sendHitpay(res, { ...result, ...ownerAccess(registration, req.get("x-resume-token")) }, false);
   });
 
   router.post("/registrations/:reference/upay", registerLimit, async (req, res) => {
@@ -373,7 +386,7 @@ export function createApi() {
       return;
     }
     const result = await startUpayPayment(db(), registration, req.body?.paymentMethod);
-    sendUpay(res, result, false);
+    sendUpay(res, { ...result, ...ownerAccess(registration, req.get("x-resume-token")) }, false);
   });
 
   const upayPollLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 240 });
@@ -471,7 +484,17 @@ export function createApi() {
       res.status(result.status || 400).json({ error: result.error });
       return;
     }
-    res.json(present(result.registration));
+    const registration = ensureResumeToken(db(), result.registration);
+    res.json(present(registration, { resume: true }));
+  });
+
+  router.get("/passes/:token", passLimit, (req, res) => {
+    const pass = getEntryPass(db(), req.params.token);
+    if (!pass) {
+      res.status(404).json({ error: "This pass isn't valid." });
+      return;
+    }
+    res.json(pass);
   });
 
   router.get("/registrations/:reference", lookupLimit, (req, res) => {
@@ -480,7 +503,8 @@ export function createApi() {
       res.status(404).json({ error: "Registration not found" });
       return;
     }
-    res.json(present(getRegistration(db(), row.id)));
+    const registration = getRegistration(db(), row.id);
+    res.json(present(registration, ownerAccess(registration, req.get("x-resume-token"))));
   });
 
   router.post("/admin/login", loginLimit, (req, res) => {

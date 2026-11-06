@@ -267,7 +267,41 @@ function requestBody(registration, sessionId, amountCents, channel) {
   return body;
 }
 
+async function retirePreviousHitpay(db, previousId) {
+  if (!previousId) return null;
+  const previous = db.prepare("SELECT * FROM hitpay_payments WHERE id = ?").get(previousId);
+  if (!previous || previous.status === "paid" || previous.status === "failed" || !previous.gateway_ref) return null;
+  let removed;
+  try {
+    removed = await hitpayFetch(`/v1/payment-requests/${encodeURIComponent(previous.gateway_ref)}`, { method: "DELETE" });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "HitPay could not cancel the previous QR.";
+    return { error: message, status: 502 };
+  }
+  if (removed.ok || removed.status === 404) return null;
+  try {
+    const remote = await hitpayFetch(`/v1/payment-requests/${encodeURIComponent(previous.gateway_ref)}`);
+    if (remote.ok) {
+      await applyHitpayPayload(db, remote.body);
+      const current = db.prepare("SELECT * FROM hitpay_payments WHERE id = ?").get(previous.id);
+      if (current?.status === "paid") {
+        return view(db, getRegistration(db, current.registration_id), current);
+      }
+    }
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+  }
+  return {
+    error: "The current payment is still open, so a new QR was not created.",
+    status: 409,
+    registration: getRegistration(db, previous.registration_id),
+    hitpay: await presentHitpay(db, previous),
+  };
+}
+
 async function createHitpaySession(db, registration, due, amountCents, channel, previousId) {
+  const retired = await retirePreviousHitpay(db, previousId);
+  if (retired) return retired;
   const sessionId = crypto.randomUUID();
   let created;
   try {

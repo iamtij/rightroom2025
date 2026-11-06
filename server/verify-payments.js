@@ -1,0 +1,129 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { openDatabase } from "./db.js";
+import { createRegistration, getEntryPass, recordPayment, resumeTokenMatches } from "./registrations.js";
+import { upaySettlement } from "./upay.js";
+
+delete process.env.ALLOW_TEST_TICKET;
+
+const db = openDatabase(":memory:");
+db.prepare("UPDATE ticket_products SET sales_start = '2020-01-01'").run();
+
+assert.equal(db.prepare("SELECT id FROM ticket_products WHERE code = 'test'").get(), undefined);
+db.prepare(`
+  INSERT INTO ticket_products (
+    code, name, audience, currency, full_price_cents, installment_total_cents,
+    sales_start, sales_end, allows_installment
+  ) VALUES ('test', 'Test', 'local', 'PHP', 1000, NULL, '2020-01-01', '2027-05-31', 0)
+`).run();
+assert.throws(
+  () => createRegistration(db, {
+    productCode: "test",
+    paymentPlan: "full",
+    fullName: "Test Person",
+    email: "test@example.com",
+    mobile: "09170000000",
+    registeredOn: "2026-11-06",
+  }),
+  /Unknown ticket/,
+);
+
+assert.equal(upaySettlement({ code: "TS", amount: 1000 }, 100_000), "paid");
+assert.equal(upaySettlement({ code: "TS", amount: "1,000.00" }, 100_000), "paid");
+assert.equal(upaySettlement({ code: "TS", amount: 1 }, 100_000), "pending");
+assert.equal(upaySettlement({ code: "TS" }, 100_000), "pending");
+assert.equal(upaySettlement({ code: "TF", amount: 1000 }, 100_000), "failed");
+assert.equal(upaySettlement({ code: "SP", amount: 1000 }, 100_000), "pending");
+assert.equal(upaySettlement({ data: [{ status: "SUCCESS", amount: "1000.00" }] }, 100_000), "paid");
+assert.equal(upaySettlement({ data: [{ status: "SUCCESS", amount: "10.00" }], amount: 1000 }, 100_000), "pending");
+
+const registration = createRegistration(db, {
+  productCode: "first_mover",
+  paymentPlan: "full",
+  fullName: "Amina Cruz",
+  email: "amina@example.com",
+  mobile: "09171234567",
+  registeredOn: "2026-11-12",
+});
+assert.ok(registration.resume_token);
+assert.equal(resumeTokenMatches(registration, registration.resume_token), true);
+assert.equal(resumeTokenMatches(registration, "not-the-token"), false);
+assert.equal(getEntryPass(db, registration.qr_token), null);
+
+const paid = recordPayment(db, { registrationId: registration.id, amountCents: registration.amount_due_cents, method: "manual" });
+const pass = getEntryPass(db, paid.qr_token);
+assert.equal(pass.fullName, "Amina Cruz");
+assert.equal(pass.reference, registration.reference);
+assert.equal(getEntryPass(db, "made-up-token"), null);
+
+const file = path.join(os.tmpdir(), `ibmc-verify-${process.pid}.sqlite`);
+fs.rmSync(file, { force: true });
+process.env.IBMC_DB_PATH = file;
+process.env.ALLOW_TEST_TICKET = "";
+const { createApi } = await import("./api.js");
+const seeded = openDatabase(file);
+seeded.prepare("UPDATE ticket_products SET sales_start = '2020-01-01'").run();
+seeded.close();
+
+const server = createApi().listen(0);
+const base = `http://127.0.0.1:${server.address().port}`;
+try {
+  const blocked = await fetch(`${base}/api/registrations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      productCode: "test",
+      paymentPlan: "full",
+      fullName: "Test Person",
+      email: "test@example.com",
+      mobile: "09170000000",
+    }),
+  });
+  assert.equal(blocked.status, 400);
+
+  const created = await fetch(`${base}/api/registrations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      productCode: "first_mover",
+      paymentPlan: "full",
+      fullName: "Amina Cruz",
+      email: "amina@example.com",
+      mobile: "09171234567",
+      attendeeType: "member",
+    }),
+  });
+  const body = await created.json();
+  assert.equal(created.status, 201);
+  assert.equal(body.attendee.email, "amina@example.com");
+  assert.ok(body.resumeToken);
+
+  const hidden = await fetch(`${base}/api/registrations/${body.reference}`);
+  const hiddenBody = await hidden.json();
+  assert.equal(hidden.status, 200);
+  assert.equal(hiddenBody.attendee.fullName, "");
+  assert.equal(hiddenBody.attendee.email, "");
+  assert.equal(hiddenBody.attendee.mobile, "");
+  assert.equal(hiddenBody.resumeToken, undefined);
+  assert.equal(hiddenBody.reference, body.reference);
+
+  const shown = await fetch(`${base}/api/registrations/${body.reference}`, {
+    headers: { "X-Resume-Token": body.resumeToken },
+  });
+  const shownBody = await shown.json();
+  assert.equal(shownBody.attendee.fullName, "Amina Cruz");
+  assert.equal(shownBody.attendee.email, "amina@example.com");
+  assert.equal(shownBody.resumeToken, body.resumeToken);
+
+  const missing = await fetch(`${base}/api/passes/not-a-real-pass`);
+  assert.equal(missing.status, 404);
+} finally {
+  await new Promise((resolve) => server.close(resolve));
+  fs.rmSync(file, { force: true });
+  fs.rmSync(`${file}-wal`, { force: true });
+  fs.rmSync(`${file}-shm`, { force: true });
+}
+
+console.log("Payment checks passed.");

@@ -148,6 +148,7 @@ type AppliedCoupon = {
 
 type StoredRegistration = {
   reference: string;
+  resumeToken?: string;
   attendee: Attendee;
   tierName: string;
   plan: PayPlan;
@@ -158,6 +159,20 @@ type StoredRegistration = {
 };
 
 const STORAGE_KEY = "ibmc2027-registration";
+const RESUME_KEY = "ibmc2027-resume";
+
+function rememberRegistration(record: { reference?: string; resumeToken?: string } | null) {
+  if (!record?.reference || record.reference.startsWith("{")) return;
+  localStorage.setItem(STORAGE_KEY, record.reference);
+  if (record.resumeToken) localStorage.setItem(RESUME_KEY, record.resumeToken);
+}
+
+function resumeHeaders(extra: Record<string, string> = {}, token = "") {
+  const headers = { ...extra };
+  const resume = token || localStorage.getItem(RESUME_KEY) || "";
+  if (resume) headers["X-Resume-Token"] = resume;
+  return headers;
+}
 const CALENDAR_URL =
   "https://calendar.google.com/calendar/render?action=TEMPLATE&text=IBMC%202027&dates=20270616/20270618&location=Newport%20Performing%20Arts%20Theater%2C%20Pasay%20City&details=IBMC%202027%20%C2%B7%20June%2016%E2%80%9317";
 
@@ -367,7 +382,7 @@ function RegistrationWizard() {
   useEffect(() => {
     const reference = localStorage.getItem(STORAGE_KEY);
     if (!reference || reference.startsWith("{")) return;
-    fetch(`/api/registrations/${reference}`)
+    fetch(`/api/registrations/${reference}`, { headers: resumeHeaders() })
       .then(async (response) => {
         if (response.ok) setSaved(await response.json());
       })
@@ -566,13 +581,13 @@ function RegistrationWizard() {
       const paymentBody = hitpay ? { channel: hitpay } : { paymentMethod: method };
       const response = await fetch(path, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: resumeHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify(peso && checkoutReference ? paymentBody : peso ? { ...registrationBody, ...paymentBody } : registrationBody),
       });
       const payload = await response.json();
       const record = payload.registration || (payload.reference ? payload : null);
       if (record?.reference) {
-        localStorage.setItem(STORAGE_KEY, record.reference);
+        rememberRegistration(record);
         setSaved(record);
         setCheckoutReference(record.reference);
       }
@@ -1588,6 +1603,7 @@ function Manage({ onStart }: { onStart: () => void }) {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "That code is wrong.");
+      rememberRegistration(payload);
       setRecord(payload);
     } catch (confirmError) {
       setError(confirmError instanceof Error ? confirmError.message : "That code is wrong.");
@@ -1679,7 +1695,7 @@ function Manage({ onStart }: { onStart: () => void }) {
     try {
       const response = await fetch(hitpay ? `/api/registrations/${record.reference}/hitpay` : `/api/registrations/${record.reference}/upay`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: resumeHeaders({ "Content-Type": "application/json" }, record.resumeToken),
         body: JSON.stringify(hitpay ? { channel: hitpay } : { paymentMethod: method }),
       });
       const payload = await response.json();
