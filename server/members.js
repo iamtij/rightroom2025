@@ -4,7 +4,11 @@ const STATUSES = new Set(["updated", "delayed", "cancelled"]);
 const PROOF_WINDOW = 2 * 60 * 60 * 1000;
 
 function proofSecret() {
-  return process.env.ADMIN_SESSION_SECRET || "ibmc-dev-session";
+  const dedicated = String(process.env.MEMBER_EDIT_SECRET || "").trim();
+  if (dedicated) return dedicated;
+  const root = String(process.env.ADMIN_SESSION_SECRET || "").trim();
+  if (root) return createHmac("sha256", root).update("ibmc-member-lookup-v1").digest("hex");
+  return "ibmc-dev-session";
 }
 
 function phoneKey(value) {

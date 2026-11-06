@@ -94,6 +94,17 @@ seeded.close();
 
 const server = createApi().listen(0);
 const base = `http://127.0.0.1:${server.address().port}`;
+const realFetch = global.fetch;
+global.fetch = async (url, options = {}) => {
+  const target = String(url);
+  if (target.endsWith("/api/registrations") && options.method === "POST") {
+    const challenge = await realFetch(`${base}/api/challenge`);
+    const token = (await challenge.json()).token;
+    const body = JSON.parse(options.body || "{}");
+    options = { ...options, body: JSON.stringify({ ...body, challenge: body.challenge || token, companyWebsite: body.companyWebsite || "" }) };
+  }
+  return realFetch(url, options);
+};
 try {
   const blocked = await fetch(`${base}/api/registrations`, {
     method: "POST",
@@ -182,14 +193,25 @@ try {
   `).run(registrationId, installmentId);
   side.close();
 
-  const lookedUp = await fetch(`${base}/api/members/lookup?q=${encodeURIComponent("member.one@example.com")}`);
-  const looked = await lookedUp.json();
-  assert.equal(lookedUp.status, 200);
-  assert.equal(looked.fullName, "Member One");
-  assert.equal(looked.email, undefined);
-  assert.equal(looked.mobile, undefined);
-  assert.equal(looked.profileReady, true);
-  assert.ok(looked.memberToken);
+  const knownLookup = await fetch(`${base}/api/members/lookup?q=${encodeURIComponent("member.one@example.com")}`);
+  const unknownLookup = await fetch(`${base}/api/members/lookup?q=${encodeURIComponent("missing.person@example.com")}`);
+  assert.equal(knownLookup.status, 200);
+  assert.equal(unknownLookup.status, 200);
+  assert.deepEqual(await knownLookup.json(), { ok: true });
+  assert.deepEqual(await unknownLookup.json(), { ok: true });
+  const { issueMemberOtp } = await import("./otp.js");
+  const otpDb = openDatabase(file);
+  const issued = issueMemberOtp(otpDb, "member.one@example.com");
+  otpDb.close();
+  const verified = await fetch(`${base}/api/members/otp/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "member.one@example.com", code: issued.code }),
+  });
+  const looked = await verified.json();
+  assert.equal(verified.status, 200);
+  assert.equal(looked.member.email, "member.one@example.com");
+  assert.ok(looked.member.memberToken);
 
   const proved = await fetch(`${base}/api/registrations`, {
     method: "POST",
@@ -201,7 +223,7 @@ try {
       email: "attacker@example.com",
       mobile: "09170000999",
       attendeeType: "member",
-      memberToken: looked.memberToken,
+      memberToken: looked.member.memberToken,
       business: "One Co",
       industry: "Consulting",
       chapter: "Makati",
@@ -333,6 +355,7 @@ try {
   fs.rmSync(file, { force: true });
   fs.rmSync(`${file}-wal`, { force: true });
   fs.rmSync(`${file}-shm`, { force: true });
+  global.fetch = realFetch;
 }
 
 console.log("Payment checks passed.");

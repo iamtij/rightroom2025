@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import { randomBytes } from "crypto";
 import { openDatabase, testRegistrationEnabled, testTicketEnabled } from "./db.js";
 import { beginMfaSetup, clearSessionCookie, cookieValue, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
 import { admitPass, cancelRegistration, compRegistration, createRegistration, ensureResumeToken, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
@@ -14,6 +15,7 @@ import { handleUpayCallback, refreshUpayPayment, startUpayPayment } from "./upay
 import { handleHitpayWebhook, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
 import { hitpayConfigured, listPaymentChannels, savePaymentChannels } from "./payment-channels.js";
 import { entryQrPng } from "./templates.js";
+import { recordSecurityEvent } from "./alerts.js";
 
 let database;
 
@@ -201,12 +203,12 @@ export function createApi() {
     if (url.includes("/payments/upay/callback") || url.includes("/webhooks/hitpay")) return next();
     express.json({ limit: "2mb" })(req, res, next);
   });
-  const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 8 });
-  const registerLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 10 });
-  const lookupLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
-  const memberLookupLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
-  const otpLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 8 });
-  const passLimit = rateLimit({ windowMs: 60 * 1000, max: 120 });
+  const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, bucket: "login", db });
+  const registerLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 10, bucket: "register", db });
+  const lookupLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, bucket: "lookup", db });
+  const memberLookupLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30, bucket: "member-lookup", db });
+  const otpLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, bucket: "otp", db });
+  const passLimit = rateLimit({ windowMs: 60 * 1000, max: 120, bucket: "pass", db });
 
   router.get("/chapters", (_req, res) => {
     res.json(listChapters(db()));
@@ -222,37 +224,50 @@ export function createApi() {
     res.json({ tests: testRegistrationEnabled(), testTicket: testTicketEnabled() });
   });
 
-  router.get("/members/lookup", memberLookupLimit, (req, res) => {
-    const member = lookupMember(db(), req.query.q);
-    if (!member) {
-      res.status(404).json({ error: "We couldn't find that membership" });
-      return;
+  router.get("/challenge", (_req, res) => {
+    const token = randomBytes(24).toString("base64url");
+    db().prepare("INSERT INTO form_challenges (token, expires_at) VALUES (?, ?)").run(token, Date.now() + 15 * 60 * 1000);
+    res.json({ token });
+  });
+
+  function rejectBot(req, res) {
+    if (String(req.body?.companyWebsite || "").trim()) {
+      res.status(400).json({ error: "Registration was not saved" });
+      return true;
     }
-    const registered = [member.email, member.mobile].some((contact) => {
-      const registration = findRegistrationByContact(db(), contact);
-      return Boolean(registration && registration.status === "confirmed");
-    });
-    res.json(toPublicMember(member, registered));
+    const token = String(req.body?.challenge || "");
+    const row = token ? db().prepare("SELECT expires_at FROM form_challenges WHERE token = ?").get(token) : null;
+    if (!row || row.expires_at < Date.now()) {
+      res.status(400).json({ error: "Refresh the page and try again." });
+      return true;
+    }
+    db().prepare("DELETE FROM form_challenges WHERE token = ?").run(token);
+    return false;
+  }
+
+  router.get("/members/lookup", memberLookupLimit, (_req, res) => {
+    res.json({ ok: true });
   });
 
   router.post("/members/otp", otpLimit, async (req, res) => {
     const result = await sendMemberOtp(db(), req.body?.query || req.body?.email);
-    if (result.error) {
-      res.status(result.status || 400).json({ error: result.error });
-      return;
-    }
-    res.json({ maskedEmail: result.maskedEmail });
+    if (result.error && result.status !== 404) console.error("Member code was not sent");
+    res.json({ ok: true });
   });
 
   router.post("/members/otp/verify", otpLimit, (req, res) => {
     const result = verifyMemberOtp(db(), req.body?.query || req.body?.email, req.body?.code);
     if (result.error) {
-      res.status(result.status || 400).json({ error: result.error });
+      res.status(400).json({ error: "That code is wrong." });
       return;
     }
     const member = lookupMember(db(), result.email);
     const { id, ...visible } = member || {};
-    res.json({ ok: true, editToken: result.editToken, member: member ? visible : undefined });
+    res.json({
+      ok: true,
+      editToken: result.editToken,
+      member: member ? { ...visible, memberToken: toPublicMember(member, false).memberToken } : undefined,
+    });
   });
 
   router.post("/members/details", otpLimit, (req, res) => {
@@ -370,6 +385,7 @@ export function createApi() {
   }
 
   router.post("/registrations", registerLimit, (req, res) => {
+    if (rejectBot(req, res)) return;
     try {
       const registration = createPublicRegistration(req.body || {});
       attachResume(res, registration);
@@ -380,6 +396,7 @@ export function createApi() {
   });
 
   router.post("/registrations/upay", registerLimit, async (req, res) => {
+    if (rejectBot(req, res)) return;
     try {
       const registration = createPublicRegistration(req.body || {});
       const result = await startUpayPayment(db(), registration, req.body?.paymentMethod);
@@ -390,6 +407,7 @@ export function createApi() {
   });
 
   router.post("/registrations/hitpay", registerLimit, async (req, res) => {
+    if (rejectBot(req, res)) return;
     const channel = req.body?.channel === "online" ? "online" : req.body?.channel === "qr" ? "qr" : "";
     if (!channel) {
       res.status(400).json({ error: "Choose a payment option." });
@@ -439,7 +457,7 @@ export function createApi() {
     sendUpay(res, { ...result, ...ownerAccess(registration, resumeCredential(req)) }, false);
   });
 
-  const upayPollLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 240 });
+  const upayPollLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 240, bucket: "upay-poll", db });
 
   router.get("/payments/upay/:senderRefId", upayPollLimit, async (req, res) => {
     const result = await refreshUpayPayment(db(), req.params.senderRefId);
@@ -454,8 +472,8 @@ export function createApi() {
     });
   });
 
-  const hitpayPollLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 240 });
-  const hitpayRefreshLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 12 });
+  const hitpayPollLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 240, bucket: "hitpay-poll", db });
+  const hitpayRefreshLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 12, bucket: "hitpay-refresh", db });
 
   router.get("/payments/hitpay/:sessionId", hitpayPollLimit, async (req, res) => {
     const result = await refreshHitpayPayment(db(), req.params.sessionId);
@@ -487,7 +505,7 @@ export function createApi() {
     res.status(result.status).json(result.body);
   });
 
-  const upayCallbackLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 60 });
+  const upayCallbackLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, bucket: "upay-callback", db });
 
   router.post("/payments/upay/callback", upayCallbackLimit, express.text({ type: "*/*", limit: "2mb" }), async (req, res) => {
     let body = req.body;
@@ -499,20 +517,12 @@ export function createApi() {
       }
     }
     const result = await handleUpayCallback(db(), body);
+    recordSecurityEvent(db(), "upay.callback", result.ok ? "accepted" : "rejected");
     res.status(result.status || 200).json({ ok: result.ok });
   });
 
-  router.get("/registrations/lookup", lookupLimit, (req, res) => {
-    const registration = findRegistrationByContact(db(), req.query.q);
-    if (!registration) {
-      res.status(404).json({ error: "We couldn't find a registration with that email or mobile." });
-      return;
-    }
-    res.json({
-      fullName: registration.full_name,
-      tierName: registration.product_name,
-      maskedEmail: maskEmail(registration.email),
-    });
+  router.get("/registrations/lookup", lookupLimit, (_req, res) => {
+    res.json({ ok: true });
   });
 
   router.post("/registrations/otp", otpLimit, async (req, res) => {
@@ -522,18 +532,15 @@ export function createApi() {
       return;
     }
     const result = await sendRegistrationOtp(db(), query);
-    if (result.error) {
-      res.status(result.status || 400).json({ error: result.error });
-      return;
-    }
-    res.json({ maskedEmail: result.maskedEmail });
+    if (result.error && result.status !== 404) console.error("Registration code was not sent");
+    res.json({ ok: true });
   });
 
   router.post("/registrations/otp/verify", otpLimit, (req, res) => {
     const query = String(req.body?.query || "").trim();
     const result = verifyRegistrationOtp(db(), query, req.body?.code);
     if (result.error) {
-      res.status(result.status || 400).json({ error: result.error });
+      res.status(400).json({ error: "That code is wrong." });
       return;
     }
     const registration = ensureResumeToken(db(), result.registration);
@@ -605,6 +612,7 @@ export function createApi() {
     const password = String(req.body?.password || "");
     const admin = db().prepare("SELECT * FROM admin_users WHERE email = ?").get(email);
     if (!admin || !verifyPassword(password, admin.password_hash)) {
+      recordSecurityEvent(db(), "admin.login.fail", "admin login failed");
       res.status(401).json({ error: "Email or password is wrong" });
       return;
     }
@@ -663,6 +671,7 @@ export function createApi() {
       ORDER BY r.created_at DESC, r.id DESC
     `).all();
     writeAudit(db(), req.admin.id, "registration.list", "registrations");
+    recordSecurityEvent(db(), "registration.list", "registration list");
     res.json(rows.map((row) => present(getRegistration(db(), row.id))));
   });
 
@@ -695,7 +704,9 @@ export function createApi() {
       return;
     }
     try {
-      res.json(present(compRegistration(db(), row.id, req.admin.id)));
+      const updated = compRegistration(db(), row.id, req.admin.id);
+      recordSecurityEvent(db(), "registration.comp", req.params.reference);
+      res.json(present(updated));
     } catch (error) {
       res.status(error.status || 400).json({ error: clientError(error, "The complimentary ticket was not saved") });
     }
@@ -706,10 +717,12 @@ export function createApi() {
     const token = raw.includes("/pass/") ? decodeURIComponent(raw.split("/pass/").pop().split(/[?#]/)[0]) : raw;
     const result = admitPass(db(), token, req.admin.id, req.body?.override === true);
     if (result.error) {
+      if (result.status === 409) recordSecurityEvent(db(), "pass.duplicate", result.pass?.reference || "");
       res.status(result.status || 400).json(result);
       return;
     }
     writeAudit(db(), req.admin.id, result.result === "override" ? "pass.override" : "pass.admit", result.reference);
+    if (result.result === "override") recordSecurityEvent(db(), "pass.override", result.reference);
     res.json(result);
   });
 
@@ -915,6 +928,7 @@ export function createApi() {
 
   router.get("/admin/members", requireAdmin, (req, res) => {
     writeAudit(db(), req.admin.id, "member.list", "members");
+    recordSecurityEvent(db(), "member.list", "member list");
     res.json(listMembers(db()));
   });
 

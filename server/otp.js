@@ -7,12 +7,20 @@ const TEN_MINUTES = 10 * 60 * 1000;
 const RESEND_WAIT = 30 * 1000;
 const MAX_ATTEMPTS = 5;
 
+function purposeSecret(envName, purpose) {
+  const dedicated = String(process.env[envName] || "").trim();
+  if (dedicated) return dedicated;
+  const root = String(process.env.ADMIN_SESSION_SECRET || "").trim();
+  if (root) return createHmac("sha256", root).update(purpose).digest("hex");
+  return "ibmc-dev-session";
+}
+
 function secret() {
-  return process.env.OTP_SECRET || process.env.ADMIN_SESSION_SECRET || "ibmc-dev-session";
+  return purposeSecret("OTP_SECRET", "ibmc-otp-v1");
 }
 
 function editSecret() {
-  return process.env.MEMBER_EDIT_SECRET || secret();
+  return purposeSecret("MEMBER_EDIT_SECRET", "ibmc-member-edit-v1");
 }
 
 function hashCode(email, code) {

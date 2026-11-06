@@ -173,13 +173,12 @@ const RESUME_KEY = "ibmc2027-resume";
 function rememberRegistration(record: { reference?: string; resumeToken?: string } | null) {
   if (!record?.reference || record.reference.startsWith("{")) return;
   localStorage.setItem(STORAGE_KEY, record.reference);
-  if (record.resumeToken) localStorage.setItem(RESUME_KEY, record.resumeToken);
+  localStorage.removeItem(RESUME_KEY);
 }
 
 function resumeHeaders(extra: Record<string, string> = {}, token = "") {
   const headers = { ...extra };
-  const resume = token || localStorage.getItem(RESUME_KEY) || "";
-  if (resume) headers["X-Resume-Token"] = resume;
+  if (token) headers["X-Resume-Token"] = token;
   return headers;
 }
 
@@ -432,6 +431,8 @@ function RegistrationWizard() {
   const [testMode, setTestMode] = useState(false);
   const [installmentTest, setInstallmentTest] = useState(false);
   const [memberProof, setMemberProof] = useState("");
+  const [challenge, setChallenge] = useState("");
+  const [companyWebsite, setCompanyWebsite] = useState("");
   const [testsOpen, setTestsOpen] = useState(false);
   const [testTicketOpen, setTestTicketOpen] = useState(false);
 
@@ -462,6 +463,22 @@ function RegistrationWizard() {
       })
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    localStorage.removeItem(RESUME_KEY);
+    if (step !== "pay") return undefined;
+    let stop = false;
+    fetch("/api/challenge")
+      .then(async (response) => {
+        if (!response.ok || stop) return;
+        const payload = await response.json();
+        if (!stop) setChallenge(payload.token || "");
+      })
+      .catch(() => undefined);
+    return () => {
+      stop = true;
+    };
+  }, [step]);
 
   useEffect(() => {
     const reference = localStorage.getItem(STORAGE_KEY);
@@ -508,7 +525,7 @@ function RegistrationWizard() {
   }
 
   async function confirmOtp() {
-    if (!member || otpBusy) return;
+    if (otpBusy) return;
     setOtpBusy(true);
     setOtpError("");
     try {
@@ -518,12 +535,11 @@ function RegistrationWizard() {
         body: JSON.stringify({ query: lookup.trim(), code: otpCode }),
       });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "That code is wrong.");
-      const nextMember = payload.member || member;
-      setMember(nextMember);
+      if (!response.ok || !payload.member) throw new Error(payload.error || "That code is wrong.");
+      setMember(payload.member);
       setEditToken(payload.editToken || "");
-      setAttendee(memberAttendee(nextMember));
-      setStep("guest");
+      setAttendee(memberAttendee(payload.member));
+      setOtpSentTo("");
     } catch (error) {
       setOtpError(error instanceof Error ? error.message : "That code is wrong.");
     } finally {
@@ -535,21 +551,21 @@ function RegistrationWizard() {
     const query = lookup.trim();
     if (!query || searching) return;
     setSearching(true);
-    setLookedUp(false);
     setLookupError("");
     setMember(null);
+    clearOtp();
     try {
-      const response = await fetch(`/api/members/lookup?q=${encodeURIComponent(query)}`);
+      const response = await fetch("/api/members/otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
       const payload = await response.json().catch(() => ({}));
-      if (response.status === 404) {
-        setLookedUp(true);
-        return;
-      }
-      if (!response.ok) throw new Error(payload.error || "Search failed");
-      setMember(payload);
+      if (!response.ok) throw new Error(payload.error || "Could not send the code");
+      setOtpSentTo("your email");
       setLookedUp(true);
     } catch (error) {
-      setLookupError(error instanceof Error ? error.message : "Search failed");
+      setLookupError(error instanceof Error ? error.message : "Could not send the code");
     } finally {
       setSearching(false);
     }
@@ -704,6 +720,8 @@ function RegistrationWizard() {
         attendeeType: attendee.audience,
         couponCode: plan === "full" ? coupon?.code || "" : "",
         memberToken: memberProof || undefined,
+        challenge,
+        companyWebsite,
       };
       const path = !peso
         ? "/api/registrations"
@@ -788,8 +806,8 @@ function RegistrationWizard() {
       ? { pose: "smile", label: "Lev, already registered", text: `You're already registered, ${first}.` }
       : member
         ? { pose: "smile", label: "Lev smiling, found your membership", text: `Found you, ${first}!` }
-        : lookedUp && lookup.trim()
-          ? { pose: "alert", label: "Lev, membership not found", text: "I couldn't find that membership. Check the email or mobile on your BNI profile." }
+        : otpSentTo
+          ? { pose: "smile", label: "Lev smiling", text: "If we found your membership, we sent a code to your email." }
           : {
               pose: "smile",
               label: "Lev smiling",
@@ -1167,6 +1185,7 @@ function RegistrationWizard() {
         }
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep("ticket")}>← Back</button>
+        <input className="absolute -left-[9999px] h-0 w-0" tabIndex={-1} autoComplete="off" aria-hidden="true" value={companyWebsite} onChange={(event) => setCompanyWebsite(event.target.value)} />
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Payment</h1>
         <LevNote pose="focus" label="Lev holding a card">Secure payment. I've got this.</LevNote>
         <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-2">
@@ -1794,17 +1813,14 @@ function Manage({
             return;
           }
         }
-        const lookup = await fetch(`/api/registrations/lookup?q=${encodeURIComponent(payReference)}`);
-        const payload = await lookup.json().catch(() => ({}));
+        const sent = await fetch("/api/registrations/otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: payReference }),
+        });
         if (stop) return;
-        if (lookup.status === 404) {
-          setLookedUp(true);
-          setFound(null);
-          return;
-        }
-        if (!lookup.ok) throw new Error(payload.error || "Search failed");
-        setFound(payload);
-        setLookedUp(true);
+        if (!sent.ok) throw new Error("Could not send the code");
+        setMaskedEmail("your email");
       } catch (lookupError) {
         if (!stop) setError(lookupError instanceof Error ? lookupError.message : "Search failed");
       } finally {
@@ -1834,15 +1850,14 @@ function Manage({
     setMaskedEmail("");
     setCode("");
     try {
-      const response = await fetch(`/api/registrations/lookup?q=${encodeURIComponent(contact)}`);
+      const response = await fetch("/api/registrations/otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: contact }),
+      });
       const payload = await response.json().catch(() => ({}));
-      if (response.status === 404) {
-        setLookedUp(true);
-        return;
-      }
-      if (!response.ok) throw new Error(payload.error || "Search failed");
-      setFound(payload);
-      setLookedUp(true);
+      if (!response.ok) throw new Error(payload.error || "Could not send the code");
+      setMaskedEmail("your email");
     } catch (lookupError) {
       setError(lookupError instanceof Error ? lookupError.message : "Search failed");
     } finally {
@@ -1863,7 +1878,7 @@ function Manage({
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Could not send the code");
-      setMaskedEmail(payload.maskedEmail || "");
+      setMaskedEmail("your email");
       setCode("");
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Could not send the code");

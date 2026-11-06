@@ -294,6 +294,27 @@ CREATE TABLE IF NOT EXISTS pass_scans (
 );
 CREATE INDEX IF NOT EXISTS idx_pass_scans_registration ON pass_scans(registration_id, result);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_external ON payments(external_reference) WHERE external_reference IS NOT NULL;
+
+CREATE TABLE IF NOT EXISTS rate_hits (
+  id INTEGER PRIMARY KEY,
+  bucket TEXT NOT NULL,
+  ip TEXT NOT NULL,
+  at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_rate_hits ON rate_hits(bucket, ip, at);
+
+CREATE TABLE IF NOT EXISTS form_challenges (
+  token TEXT PRIMARY KEY,
+  expires_at INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS security_events (
+  id INTEGER PRIMARY KEY,
+  kind TEXT NOT NULL,
+  detail TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_security_events ON security_events(kind, created_at);
 `;
 
 const PRODUCTS = [
@@ -458,6 +479,26 @@ function migrate(db) {
   db.exec("CREATE INDEX IF NOT EXISTS idx_members_phone ON members(phone_key)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_registrations_phone ON registrations(phone_key)");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_external ON payments(external_reference) WHERE external_reference IS NOT NULL");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS rate_hits (
+      id INTEGER PRIMARY KEY,
+      bucket TEXT NOT NULL,
+      ip TEXT NOT NULL,
+      at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_rate_hits ON rate_hits(bucket, ip, at);
+    CREATE TABLE IF NOT EXISTS form_challenges (
+      token TEXT PRIMARY KEY,
+      expires_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS security_events (
+      id INTEGER PRIMARY KEY,
+      kind TEXT NOT NULL,
+      detail TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_security_events ON security_events(kind, created_at);
+  `);
   if (testTicketEnabled()) ensureTestTicket(db);
   const names = new Set(db.prepare("PRAGMA table_info(registrations)").all().map((column) => column.name));
   const columns = [

@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import express from 'express';
+import fs from 'fs';
+import { createHash } from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -14,12 +16,26 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.set("trust proxy", 1);
+const pageHtml = fs.readFileSync(path.join(__dirname, "index.html"), "utf8");
+const inlineScript = pageHtml.match(/<script>([\s\S]*?)<\/script>/)?.[1] || "";
+const scriptHash = createHash("sha256").update(inlineScript).digest("base64");
+const contentSecurityPolicy = [
+  "default-src 'self'",
+  `script-src 'self' https://connect.facebook.net 'sha256-${scriptHash}'`,
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' https://fonts.gstatic.com data:",
+  "img-src 'self' data: https://www.facebook.com",
+  "connect-src 'self' https://www.facebook.com https://connect.facebook.net",
+  "frame-ancestors 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+].join("; ");
 app.use((_req, res, next) => {
   res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("Referrer-Policy", "no-referrer");
   res.setHeader("X-Frame-Options", "DENY");
-  res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+  res.setHeader("Content-Security-Policy", contentSecurityPolicy);
   next();
 });
 
