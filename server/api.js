@@ -957,5 +957,13 @@ export function createApi() {
   });
 
   app.use("/api", router);
+  app.use((error, _req, res, next) => {
+    if (res.headersSent) {
+      next(error);
+      return;
+    }
+    console.error(error);
+    res.status(500).json({ error: "Something went wrong" });
+  });
   return app;
 }

@@ -540,11 +540,11 @@ function RegistrationWizard() {
     setMember(null);
     try {
       const response = await fetch(`/api/members/lookup?q=${encodeURIComponent(query)}`);
+      const payload = await response.json().catch(() => ({}));
       if (response.status === 404) {
         setLookedUp(true);
         return;
       }
-      const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Search failed");
       setMember(payload);
       setLookedUp(true);

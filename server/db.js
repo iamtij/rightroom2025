@@ -293,8 +293,6 @@ CREATE TABLE IF NOT EXISTS pass_scans (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_pass_scans_registration ON pass_scans(registration_id, result);
-CREATE INDEX IF NOT EXISTS idx_members_phone ON members(phone_key);
-CREATE INDEX IF NOT EXISTS idx_registrations_phone ON registrations(phone_key);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_external ON payments(external_reference) WHERE external_reference IS NOT NULL;
 `;
 
