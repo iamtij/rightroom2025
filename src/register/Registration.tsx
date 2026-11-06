@@ -158,6 +158,7 @@ type StoredRegistration = {
   totalCents: number;
   payments: StoredPayment[];
   planStatus: "active" | "fully_paid";
+  qrToken?: string;
 };
 
 const STORAGE_KEY = "ibmc2027-registration";
@@ -1567,6 +1568,19 @@ function Manage({ onStart }: { onStart: () => void }) {
   const { channels, channel, setChannel } = usePaymentChannels();
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
+  const [badgeName, setBadgeName] = useState("");
+  const [badgeCompany, setBadgeCompany] = useState("");
+  const [badgeNote, setBadgeNote] = useState("");
+  const [badgeError, setBadgeError] = useState("");
+
+  function openRecord(payload: StoredRegistration) {
+    rememberRegistration(payload);
+    setRecord(payload);
+    setBadgeName(payload.attendee?.fullName || "");
+    setBadgeCompany(payload.attendee?.business || "");
+    setBadgeNote("");
+    setBadgeError("");
+  }
 
   function resetLookup() {
     setFound(null);
@@ -1636,8 +1650,7 @@ function Manage({ onStart }: { onStart: () => void }) {
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "That code is wrong.");
-      rememberRegistration(payload);
-      setRecord(payload);
+      openRecord(payload);
     } catch (confirmError) {
       setError(confirmError instanceof Error ? confirmError.message : "That code is wrong.");
     } finally {
@@ -1720,6 +1733,35 @@ function Manage({ onStart }: { onStart: () => void }) {
     );
   }
 
+  async function saveBadge() {
+    if (!record?.resumeToken || busy) return;
+    const fullName = badgeName.trim();
+    const business = badgeCompany.trim();
+    if (!fullName || !business) {
+      setBadgeNote("");
+      setBadgeError("Add the name and company name for your badge.");
+      return;
+    }
+    setBusy(true);
+    setBadgeError("");
+    setBadgeNote("");
+    try {
+      const response = await fetch(`/api/registrations/${record.reference}/badge`, {
+        method: "PATCH",
+        headers: resumeHeaders({ "Content-Type": "application/json" }, record.resumeToken),
+        body: JSON.stringify({ fullName, business }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Badge was not saved");
+      openRecord({ ...payload, resumeToken: payload.resumeToken || record.resumeToken });
+      setBadgeNote("Saved. Your badge will use this name and company.");
+    } catch (badgeError) {
+      setBadgeError(badgeError instanceof Error ? badgeError.message : "Badge was not saved");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function startPayment() {
     if (!record || busy || record.currency !== "PHP" || !channel) return;
     const hitpay = hitpayApiChannel(channel);
@@ -1795,6 +1837,39 @@ function Manage({ onStart }: { onStart: () => void }) {
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Hi {first}</h1>
         <p className="m-0 text-[15px] text-[#5C5C63]">{record.tierName} · {record.plan === "installment" ? "installment plan" : "paid in full"}</p>
       </div>
+      {record.planStatus === "fully_paid" && record.qrToken ? (
+        <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-5">
+          <span className="self-start text-[15px] font-bold">QR ticket</span>
+          <img src={`/api/passes/${encodeURIComponent(record.qrToken)}/qr`} alt="QR ticket" className="h-56 w-56" />
+          <span className="font-archivo text-lg font-extrabold">{record.reference}</span>
+          <span className="text-center text-[13px] leading-snug text-[#5C5C63]">Show this at the door on both days.</span>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-3 rounded-[14px] bg-[#E4E1DC] px-4 py-3.5">
+          <span className="flex flex-col gap-0.5">
+            <span className="text-[15px] font-bold">QR ticket</span>
+            <span className="text-[13px] text-[#3A3A40]">Unlocks when you're fully paid</span>
+          </span>
+          <span className="text-xs font-bold tracking-[0.1em] text-[#3A3A40] uppercase">Locked</span>
+        </div>
+      )}
+      <div className="flex flex-col gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+        <div className="flex flex-col gap-1">
+          <h2 className="m-0 text-[17px] font-bold">Conference badge</h2>
+          <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">This name and company name appear on your badge.</p>
+        </div>
+        <Field label="Name">
+          <input className={inputClass} value={badgeName} onChange={(event) => { setBadgeName(event.target.value); setBadgeNote(""); setBadgeError(""); }} />
+        </Field>
+        <Field label="Company name">
+          <input className={inputClass} value={badgeCompany} onChange={(event) => { setBadgeCompany(event.target.value); setBadgeNote(""); setBadgeError(""); }} />
+        </Field>
+        {badgeNote ? <p className="m-0 text-sm text-[#3A3A40]">{badgeNote}</p> : null}
+        {badgeError ? <p className="m-0 text-sm text-[#A8131F]">{badgeError}</p> : null}
+        <button type="button" disabled={busy} onClick={saveBadge} className="self-start rounded-full bg-[#141416] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#C8C4BE]">
+          {busy ? "Saving" : "Save badge"}
+        </button>
+      </div>
       <div className="flex flex-col gap-2.5 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
         <div className="flex items-baseline justify-between gap-3">
           <span className="text-[15px]"><b className="font-archivo text-[22px]">{money(paidCents, record.currency)}</b> paid</span>
@@ -1840,13 +1915,6 @@ function Manage({ onStart }: { onStart: () => void }) {
             </span>
           </div>
         ))}
-      </div>
-      <div className="flex items-center justify-between gap-3 rounded-[14px] bg-[#E4E1DC] px-4 py-3.5">
-        <span className="flex flex-col gap-0.5">
-          <span className="text-[15px] font-bold">QR ticket</span>
-          <span className="text-[13px] text-[#3A3A40]">{record.planStatus === "fully_paid" ? "Sent to your email and SMS" : "Unlocks when you're fully paid"}</span>
-        </span>
-        <span className="text-xs font-bold tracking-[0.1em] text-[#3A3A40] uppercase">{record.planStatus === "fully_paid" ? "Sent" : "Locked"}</span>
       </div>
     </Frame>
   );

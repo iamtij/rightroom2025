@@ -191,6 +191,18 @@ function sameMobile(left, right) {
   return a === b;
 }
 
+export function updateBadge(db, id, input) {
+  const fullName = String(input.fullName || "").trim();
+  const business = String(input.business || "").trim();
+  if (!fullName || !business) {
+    const error = new Error("Add the name and company name for your badge.");
+    error.status = 400;
+    throw error;
+  }
+  db.prepare("UPDATE registrations SET full_name = ?, business = ? WHERE id = ?").run(fullName, business, id);
+  return getRegistration(db, id);
+}
+
 export function updateRegistration(db, id, input) {
   const email = input.email.trim().toLowerCase();
   const mobile = input.mobile.trim();

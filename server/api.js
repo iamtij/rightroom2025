@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import { openDatabase, testTicketEnabled } from "./db.js";
 import { clearSessionCookie, cookieValue, readSession, seedAdmin, sessionCookie, signSession, verifyPassword } from "./auth.js";
-import { createRegistration, cancelRegistration, ensureResumeToken, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateRegistration } from "./registrations.js";
+import { createRegistration, cancelRegistration, ensureResumeToken, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
 import { listMembers, lookupMember, memberContactClash, parseMemberCsv, saveMember, updateMemberProfile, updateMemberRecord } from "./members.js";
@@ -67,6 +67,7 @@ function present(registration, options = {}) {
     registeredOn: registration.registered_on,
     payments,
     ...(options.resume && registration.resume_token ? { resumeToken: registration.resume_token } : {}),
+    ...(options.resume && registration.balance_cents === 0 && registration.qr_token ? { qrToken: registration.qr_token } : {}),
   };
 }
 
@@ -146,6 +147,7 @@ function clientError(error, fallback) {
     "That coupon",
     "That email is already",
     "That mobile number is already",
+    "for your badge",
   ];
   return safe.find((item) => message.includes(item)) ? message : fallback;
 }
@@ -510,6 +512,28 @@ export function createApi() {
       return;
     }
     res.json(pass);
+  });
+
+  router.patch("/registrations/:reference/badge", lookupLimit, (req, res) => {
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    const registration = getRegistration(db(), row.id);
+    if (!resumeTokenMatches(registration, req.get("x-resume-token"))) {
+      res.status(401).json({ error: "Sign in again to edit your badge." });
+      return;
+    }
+    if (registration.status !== "confirmed") {
+      res.status(400).json({ error: "This registration can't be edited." });
+      return;
+    }
+    try {
+      res.json(present(updateBadge(db(), registration.id, req.body || {}), { resume: true }));
+    } catch (error) {
+      res.status(error.status || 400).json({ error: clientError(error, "Badge was not saved") });
+    }
   });
 
   router.get("/registrations/:reference", lookupLimit, (req, res) => {
