@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { openDatabase } from "./db.js";
+import { currentTotp } from "./auth.js";
 import { createRegistration, getEntryPass, recordPayment, resumeTokenMatches } from "./registrations.js";
 import { upaySettlement } from "./upay.js";
 
@@ -175,7 +176,7 @@ try {
     INSERT INTO upay_payments (
       registration_id, installment_id, sender_ref_id, amount_cents, currency, payment_method,
       status, payment_url
-    ) VALUES (?, ?, 'IBMCSECURITYTEST', 1200000, 'PHP', 'instapay', 'pending', 'https://example.test/pay')
+    ) VALUES (?, ?, 'IBMCSECURITYTEST', 1200000, 'PHP', 'instapay', 'paid', 'https://example.test/pay')
   `).run(registrationId, installmentId);
   side.close();
 
@@ -229,8 +230,16 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email: "audit@example.com", password: "correct-horse-battery" }),
   });
+  const setup = await login.json();
   assert.equal(login.status, 200);
-  const cookie = (login.headers.get("set-cookie") || "").split(";")[0];
+  assert.ok(setup.setupToken);
+  const confirmed = await fetch(`${base}/api/admin/mfa/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ setupToken: setup.setupToken, code: currentTotp(setup.secret) }),
+  });
+  assert.equal(confirmed.status, 200);
+  const cookie = (confirmed.headers.get("set-cookie") || "").split(";")[0];
   assert.ok(cookie.startsWith("ibmc_admin="));
   const marked = await fetch(`${base}/api/admin/registrations/${body.reference}/payments`, {
     method: "POST",
@@ -239,6 +248,76 @@ try {
   assert.equal(marked.status, 200);
   const listed = await fetch(`${base}/api/admin/registrations`, { headers: { cookie } });
   assert.equal(listed.status, 200);
+
+  const duplicate = await fetch(`${base}/api/registrations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      productCode: "first_mover",
+      paymentPlan: "full",
+      fullName: "Amina Cruz",
+      email: "amina@example.com",
+      mobile: "09170001111",
+      attendeeType: "member",
+    }),
+  });
+  assert.equal(duplicate.status, 400);
+
+  const couponDb = openDatabase(file);
+  couponDb.prepare(`
+    INSERT INTO coupons (code, discount_type, discount_value, active)
+    VALUES ('FREESEAT', 'percent', 100, 1)
+  `).run();
+  couponDb.close();
+  const freeSeat = await fetch(`${base}/api/registrations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      productCode: "first_mover",
+      paymentPlan: "full",
+      fullName: "Free Seat",
+      email: "free.seat@example.com",
+      mobile: "09170002222",
+      attendeeType: "member",
+      couponCode: "FREESEAT",
+    }),
+  });
+  assert.equal(freeSeat.status, 400);
+
+  const callback = await fetch(`${base}/api/payments/upay/callback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ senderRefId: "IBMCSECURITYTEST" }),
+  });
+  assert.equal(callback.status, 401);
+
+  const passDb = openDatabase(file);
+  const qrToken = passDb.prepare("SELECT qr_token FROM registrations WHERE reference = ?").get(body.reference).qr_token;
+  passDb.close();
+  assert.ok(qrToken);
+  const firstScan = await fetch(`${base}/api/admin/passes/check-in`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie },
+    body: JSON.stringify({ token: qrToken }),
+  });
+  assert.equal(firstScan.status, 200);
+  const secondScan = await fetch(`${base}/api/admin/passes/check-in`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie },
+    body: JSON.stringify({ token: qrToken }),
+  });
+  assert.equal(secondScan.status, 409);
+  const overrideScan = await fetch(`${base}/api/admin/passes/check-in`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", cookie },
+    body: JSON.stringify({ token: qrToken, override: true }),
+  });
+  assert.equal(overrideScan.status, 200);
+
+  await fetch(`${base}/api/admin/logout`, { method: "POST", headers: { cookie } });
+  const afterLogout = await fetch(`${base}/api/admin/me`, { headers: { cookie } });
+  assert.equal(afterLogout.status, 401);
+
   const check = openDatabase(file);
   const audit = check.prepare("SELECT action, target, amount_cents, admin_id FROM admin_audit ORDER BY id").all();
   assert.ok(audit.some((row) => row.action === "registration.payment" && row.target === body.reference && row.amount_cents === 1_200_000 && row.admin_id));

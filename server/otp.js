@@ -8,7 +8,11 @@ const RESEND_WAIT = 30 * 1000;
 const MAX_ATTEMPTS = 5;
 
 function secret() {
-  return process.env.ADMIN_SESSION_SECRET || "ibmc-dev-session";
+  return process.env.OTP_SECRET || process.env.ADMIN_SESSION_SECRET || "ibmc-dev-session";
+}
+
+function editSecret() {
+  return process.env.MEMBER_EDIT_SECRET || secret();
 }
 
 function hashCode(email, code) {
@@ -87,7 +91,7 @@ const EDIT_WINDOW = 30 * 60 * 1000;
 
 export function memberEditToken(email) {
   const payload = Buffer.from(JSON.stringify({ email, exp: Date.now() + EDIT_WINDOW })).toString("base64url");
-  const signature = createHmac("sha256", secret()).update(`member-edit:${payload}`).digest("base64url");
+  const signature = createHmac("sha256", editSecret()).update(`member-edit:${payload}`).digest("base64url");
   return `${payload}.${signature}`;
 }
 
@@ -145,7 +149,7 @@ export function verifyRegistrationOtp(db, query, code) {
 export function readMemberEditToken(token) {
   const [payload, signature] = String(token || "").split(".");
   if (!payload || !signature) return "";
-  const expected = createHmac("sha256", secret()).update(`member-edit:${payload}`).digest("base64url");
+  const expected = createHmac("sha256", editSecret()).update(`member-edit:${payload}`).digest("base64url");
   if (!sameHash(signature, expected)) return "";
   try {
     const data = JSON.parse(Buffer.from(payload, "base64url").toString());

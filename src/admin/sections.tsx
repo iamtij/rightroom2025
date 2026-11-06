@@ -333,13 +333,63 @@ function Dashboard({ onError }: { onError: (message: string) => void }) {
   );
 }
 
+function CheckIn({ onError }: { onError: (message: string) => void }) {
+  const [token, setToken] = useState("");
+  const [result, setResult] = useState("");
+  const [duplicate, setDuplicate] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  async function scan(override = false) {
+    setBusy(true);
+    setResult("");
+    if (!override) setDuplicate(false);
+    try {
+      const response = await fetch("/api/admin/passes/check-in", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token, override }),
+      });
+      const payload = await response.json();
+      if (response.status === 409) {
+        setDuplicate(true);
+        setResult(payload.pass ? `${payload.pass.fullName} · ${payload.pass.reference} was already scanned.` : "This ticket was already scanned.");
+        return;
+      }
+      if (!response.ok) throw new Error(payload.error || "This QR ticket isn't valid.");
+      setDuplicate(false);
+      setResult(`${payload.result === "override" ? "Override admitted" : "Admitted"} ${payload.pass.fullName} · ${payload.pass.reference}`);
+      setToken("");
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Check-in failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="flex max-w-[520px] flex-col gap-3">
+      <h1 className="m-0 font-archivo text-[28px] font-extrabold">Check-in</h1>
+      <p className="m-0 text-sm text-[#5C5C63]">Paste the pass link or token. A second scan needs an override.</p>
+      <form className="flex flex-col gap-3" onSubmit={(event) => { event.preventDefault(); scan(false); }}>
+        <input className={field} value={token} placeholder="Pass link or token" onChange={(event) => setToken(event.target.value)} />
+        <div className="flex gap-2">
+          <button type="submit" className={buttonClass} disabled={busy || !token.trim()}>Admit</button>
+          {duplicate ? <button type="button" className={ghostButton} disabled={busy} onClick={() => scan(true)}>Override</button> : null}
+        </div>
+      </form>
+      {result ? <p className="m-0 text-sm font-semibold">{result}</p> : null}
+    </section>
+  );
+}
+
 export function AdminSections() {
   const [section, setSection] = useState("Dashboard");
   const [error, setError] = useState("");
   return (
     <div className="flex flex-col gap-5">
       <nav className="flex flex-wrap gap-2">
-        {["Dashboard", "Registrations", "Coupons", "Schedule", "Templates", "Members", "Chapters", "Settings"].map((item) => (
+        {["Dashboard", "Registrations", "Check-in", "Coupons", "Schedule", "Templates", "Members", "Chapters", "Settings"].map((item) => (
           <button
             key={item}
             type="button"
@@ -353,6 +403,7 @@ export function AdminSections() {
       {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
       {section === "Dashboard" ? <Dashboard onError={setError} /> : null}
       {section === "Registrations" ? <Registrations onError={setError} /> : null}
+      {section === "Check-in" ? <CheckIn onError={setError} /> : null}
       {section === "Coupons" ? <Coupons onError={setError} /> : null}
       {section === "Schedule" ? <Schedules onError={setError} /> : null}
       {section === "Templates" ? <Templates onError={setError} /> : null}
@@ -417,6 +468,16 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
       await load();
     } catch (error) {
       onError(error instanceof Error ? error.message : "Could not save");
+    }
+  }
+
+  async function comp(reference: string) {
+    if (!window.confirm("Mark the remaining balance as a complimentary ticket?")) return;
+    try {
+      await api(`/api/admin/registrations/${reference}/comp`, { method: "POST" });
+      await load();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not comp this ticket");
     }
   }
 
@@ -492,6 +553,7 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
             <td className={tdClass}>{row.status === "cancelled" ? "Cancelled" : row.balanceCents === 0 ? "Fully paid" : "Active"}</td>
             <td className={`${tdClass} whitespace-nowrap text-right`}>
               <button type="button" className={linkButton} onClick={() => edit(row)}>Edit</button>
+              {row.status !== "cancelled" && row.balanceCents > 0 ? <button type="button" className={`${linkButton} ml-3`} onClick={() => comp(row.reference)}>Comp</button> : null}
               {row.status !== "cancelled" ? <button type="button" className={`${linkButton} ml-3`} onClick={() => cancel(row.reference)}>Cancel</button> : null}
             </td>
           </tr>

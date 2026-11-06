@@ -63,6 +63,15 @@ CREATE TABLE IF NOT EXISTS admin_users (
   id INTEGER PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
+  totp_secret TEXT,
+  totp_enabled INTEGER NOT NULL DEFAULT 0 CHECK (totp_enabled IN (0, 1)),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  id TEXT PRIMARY KEY,
+  admin_id INTEGER NOT NULL REFERENCES admin_users(id),
+  expires_at INTEGER NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -273,6 +282,15 @@ CREATE TABLE IF NOT EXISTS admin_audit (
   amount_cents INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS pass_scans (
+  id INTEGER PRIMARY KEY,
+  registration_id INTEGER NOT NULL REFERENCES registrations(id),
+  result TEXT NOT NULL CHECK (result IN ('admitted', 'override')),
+  admin_id INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_pass_scans_registration ON pass_scans(registration_id, result);
 `;
 
 const PRODUCTS = [
@@ -396,6 +414,25 @@ function migrate(db) {
   if (!paymentColumns.has("admin_user_id")) {
     db.exec("ALTER TABLE payments ADD COLUMN admin_user_id INTEGER");
   }
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS admin_sessions (
+      id TEXT PRIMARY KEY,
+      admin_id INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS pass_scans (
+      id INTEGER PRIMARY KEY,
+      registration_id INTEGER NOT NULL REFERENCES registrations(id),
+      result TEXT NOT NULL CHECK (result IN ('admitted', 'override')),
+      admin_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_pass_scans_registration ON pass_scans(registration_id, result);
+  `);
+  const adminColumns = new Set(db.prepare("PRAGMA table_info(admin_users)").all().map((column) => column.name));
+  if (!adminColumns.has("totp_secret")) db.exec("ALTER TABLE admin_users ADD COLUMN totp_secret TEXT");
+  if (!adminColumns.has("totp_enabled")) db.exec("ALTER TABLE admin_users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0");
   if (testTicketEnabled()) ensureTestTicket(db);
   const names = new Set(db.prepare("PRAGMA table_info(registrations)").all().map((column) => column.name));
   const columns = [

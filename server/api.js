@@ -1,8 +1,8 @@
 import "dotenv/config";
 import express from "express";
 import { openDatabase, testRegistrationEnabled, testTicketEnabled } from "./db.js";
-import { clearSessionCookie, cookieValue, readSession, seedAdmin, sessionCookie, signSession, verifyPassword } from "./auth.js";
-import { createRegistration, cancelRegistration, ensureResumeToken, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
+import { beginMfaSetup, clearSessionCookie, cookieValue, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
+import { admitPass, cancelRegistration, compRegistration, createRegistration, ensureResumeToken, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
 import { listMembers, lookupMember, memberContactClash, memberFromProof, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
@@ -157,7 +157,7 @@ function clientError(error, fallback) {
 
 function requireAdmin(req, res, next) {
   const token = cookieValue(req.headers.cookie, "ibmc_admin");
-  const session = readSession(token);
+  const session = readSession(db(), token);
   const admin = session && db().prepare("SELECT id, email FROM admin_users WHERE id = ?").get(session.id);
   if (!admin) {
     res.status(401).json({ error: "Sign in required" });
@@ -266,6 +266,10 @@ export function createApi() {
     }
     if (!priced.code) {
       res.status(400).json({ error: "That coupon code isn't valid." });
+      return;
+    }
+    if (priced.totalCents === 0) {
+      res.status(400).json({ error: "That coupon can't cover the full ticket." });
       return;
     }
     res.json(presentCoupon(priced));
@@ -462,7 +466,9 @@ export function createApi() {
     res.status(result.status).json(result.body);
   });
 
-  router.post("/payments/upay/callback", express.text({ type: "*/*", limit: "2mb" }), async (req, res) => {
+  const upayCallbackLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 60 });
+
+  router.post("/payments/upay/callback", upayCallbackLimit, express.text({ type: "*/*", limit: "2mb" }), async (req, res) => {
     let body = req.body;
     if (typeof body === "string") {
       try {
@@ -471,8 +477,8 @@ export function createApi() {
         body = { payload: body };
       }
     }
-    await handleUpayCallback(db(), body);
-    res.json({ ok: true });
+    const result = await handleUpayCallback(db(), body);
+    res.status(result.status || 200).json({ ok: result.ok });
   });
 
   router.get("/registrations/lookup", lookupLimit, (req, res) => {
@@ -523,7 +529,7 @@ export function createApi() {
     const site = (process.env.SITE_URL || "https://ibmcph.com").replace(/\/$/, "");
     const png = await entryQrPng(`${site}/pass/${encodeURIComponent(token)}`);
     res.setHeader("Content-Type", "image/png");
-    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("Cache-Control", "private, no-store");
     res.send(png);
   });
 
@@ -576,11 +582,32 @@ export function createApi() {
       res.status(401).json({ error: "Email or password is wrong" });
       return;
     }
-    res.setHeader("Set-Cookie", sessionCookie(signSession(admin.id)));
+    if (!admin.totp_enabled) {
+      res.json(beginMfaSetup(db(), admin));
+      return;
+    }
+    if (!verifyTotp(admin.totp_secret, req.body?.code)) {
+      res.status(401).json({ mfaRequired: true, error: req.body?.code ? "That code is wrong." : "Enter the code from your authenticator." });
+      return;
+    }
+    res.setHeader("Set-Cookie", sessionCookie(signSession(db(), admin.id)));
     res.json({ email: admin.email });
   });
 
-  router.post("/admin/logout", (_req, res) => {
+  router.post("/admin/mfa/confirm", loginLimit, (req, res) => {
+    const setup = readMfaSetup(req.body?.setupToken);
+    const admin = setup && db().prepare("SELECT * FROM admin_users WHERE id = ?").get(setup.id);
+    if (!admin?.totp_secret || !verifyTotp(admin.totp_secret, req.body?.code)) {
+      res.status(401).json({ error: "That code is wrong." });
+      return;
+    }
+    db().prepare("UPDATE admin_users SET totp_enabled = 1 WHERE id = ?").run(admin.id);
+    res.setHeader("Set-Cookie", sessionCookie(signSession(db(), admin.id)));
+    res.json({ email: admin.email });
+  });
+
+  router.post("/admin/logout", (req, res) => {
+    revokeSession(db(), cookieValue(req.headers.cookie, "ibmc_admin"));
     res.setHeader("Set-Cookie", clearSessionCookie());
     res.json({ ok: true });
   });
@@ -633,6 +660,31 @@ export function createApi() {
       adminUserId: req.admin.id,
     });
     res.json(present(updated));
+  });
+
+  router.post("/admin/registrations/:reference/comp", requireAdmin, (req, res) => {
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    try {
+      res.json(present(compRegistration(db(), row.id, req.admin.id)));
+    } catch (error) {
+      res.status(error.status || 400).json({ error: clientError(error, "The complimentary ticket was not saved") });
+    }
+  });
+
+  router.post("/admin/passes/check-in", requireAdmin, (req, res) => {
+    const raw = String(req.body?.token || "").trim();
+    const token = raw.includes("/pass/") ? decodeURIComponent(raw.split("/pass/").pop().split(/[?#]/)[0]) : raw;
+    const result = admitPass(db(), token, req.admin.id, req.body?.override === true);
+    if (result.error) {
+      res.status(result.status || 400).json(result);
+      return;
+    }
+    writeAudit(db(), req.admin.id, result.result === "override" ? "pass.override" : "pass.admit", result.reference);
+    res.json(result);
   });
 
   router.post("/admin/registrations", requireAdmin, (req, res) => {

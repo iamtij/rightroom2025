@@ -100,6 +100,12 @@ export function createRegistration(db, input) {
     if ((input.productCode === "test_50" || input.productCode === "test_200") && !testRegistrationEnabled()) {
       throw new Error("Unknown ticket");
     }
+    const clash = registrationContactClash(db, { email: input.email, mobile: input.mobile });
+    if (clash) {
+      const error = new Error(clash);
+      error.status = 400;
+      throw error;
+    }
     const product = db.prepare("SELECT * FROM ticket_products WHERE code = ? AND active = 1").get(input.productCode);
     if (!product) throw new Error("Unknown ticket");
     if (input.paymentPlan === "installment" && !product.allows_installment) {
@@ -166,17 +172,9 @@ export function createRegistration(db, input) {
       );
     });
     if (priced.totalCents === 0) {
-      const paidAt = new Date().toISOString();
-      db.prepare(`
-        UPDATE registration_installments
-        SET amount_paid_cents = amount_cents, status = 'paid', paid_at = ?
-        WHERE registration_id = ?
-      `).run(paidAt, result.lastInsertRowid);
-      db.prepare(`
-        UPDATE registrations
-        SET qr_token = ?, fully_paid_at = ?, plan_status = 'fully_paid'
-        WHERE id = ?
-      `).run(token(), paidAt, result.lastInsertRowid);
+      const error = new Error("That coupon can't cover the full ticket.");
+      error.status = 400;
+      throw error;
     }
     return result.lastInsertRowid;
   });
@@ -274,10 +272,11 @@ export function recordPayment(db, input) {
       input.adminUserId || null,
     );
     if (input.adminUserId) {
+      const action = input.method === "comp" ? "registration.comp" : "registration.payment";
       db.prepare(`
         INSERT INTO admin_audit (admin_id, action, target, amount_cents)
-        VALUES (?, 'registration.payment', ?, ?)
-      `).run(input.adminUserId, registration.reference, input.amountCents);
+        VALUES (?, ?, ?, ?)
+      `).run(input.adminUserId, action, registration.reference, input.amountCents);
     }
     const paid = target.amount_paid_cents + input.amountCents;
     const settled = paid >= target.amount_cents;
@@ -306,4 +305,45 @@ export function recordPayment(db, input) {
     return registration.id;
   });
   return getRegistration(db, run());
+}
+
+export function compRegistration(db, registrationId, adminUserId) {
+  let current = getRegistration(db, registrationId);
+  if (!current || current.status !== "confirmed") {
+    const error = new Error("Registration is not payable");
+    error.status = 400;
+    throw error;
+  }
+  let guard = 0;
+  while (current.balance_cents > 0 && guard < 12) {
+    const due = current.installments.find((item) => item.status === "due");
+    if (!due) break;
+    current = recordPayment(db, {
+      registrationId: current.id,
+      installmentId: due.id,
+      amountCents: due.amount_cents - due.amount_paid_cents,
+      method: "comp",
+      adminUserId,
+    });
+    guard += 1;
+  }
+  return current;
+}
+
+export function admitPass(db, qrToken, adminId, override) {
+  const value = String(qrToken || "").trim();
+  const pass = getEntryPass(db, value);
+  if (!pass) return { error: "This QR ticket isn't valid.", status: 404 };
+  const registration = db.prepare("SELECT id, reference FROM registrations WHERE qr_token = ?").get(value);
+  const existing = db.prepare(`
+    SELECT created_at FROM pass_scans
+    WHERE registration_id = ? AND result IN ('admitted', 'override')
+    ORDER BY id DESC LIMIT 1
+  `).get(registration.id);
+  if (existing && !override) {
+    return { error: "This ticket was already scanned.", status: 409, scannedAt: existing.created_at, pass };
+  }
+  const result = existing ? "override" : "admitted";
+  db.prepare("INSERT INTO pass_scans (registration_id, result, admin_id) VALUES (?, ?, ?)").run(registration.id, result, adminId);
+  return { pass, result, reference: registration.reference };
 }

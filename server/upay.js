@@ -460,23 +460,28 @@ function decryptAes(encoded, key) {
 }
 
 export function readCallbackBody(body) {
-  if (body && typeof body === "object" && (body.senderRefId || body.sender_ref_id)) return body;
-  const encoded = typeof body === "string" ? body : body?.data || body?.payload || body?.encryptedData;
+  const encoded = typeof body === "string"
+    ? body
+    : body?.data || body?.payload || body?.encryptedData;
   const key = aesKey();
-  if (!encoded || !key) return body && typeof body === "object" ? body : {};
+  if (!encoded || !key || (body && (body.senderRefId || body.sender_ref_id) && !body.data && !body.payload && !body.encryptedData)) {
+    const error = new Error("Unsigned UPay callback");
+    error.status = 401;
+    throw error;
+  }
   const text = decryptAes(encoded, key);
   return JSON.parse(text);
 }
 
 export async function handleUpayCallback(db, body) {
-  let parsed = body;
+  let parsed;
   try {
     parsed = readCallbackBody(body);
   } catch {
-    return { ok: true };
+    return { ok: false, status: 401 };
   }
   const sender = parsed?.senderRefId || parsed?.sender_ref_id;
-  if (!sender) return { ok: true };
+  if (!sender) return { ok: false, status: 401 };
   await refreshUpayPayment(db, sender);
-  return { ok: true };
+  return { ok: true, status: 200 };
 }
