@@ -4,6 +4,7 @@ import Admin from './admin/Admin.tsx';
 import AmplifyHome from './AmplifyHome.tsx';
 import Pass from './pass/Pass.tsx';
 import Registration from './register/Registration.tsx';
+import Terms from './Terms.tsx';
 import './index.css';
 
 const path = window.location.pathname;
@@ -13,7 +14,9 @@ const Page = path.startsWith('/admin')
     ? Registration
     : path.startsWith('/pass/')
       ? Pass
-      : AmplifyHome;
+      : path.startsWith('/terms')
+        ? Terms
+        : AmplifyHome;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

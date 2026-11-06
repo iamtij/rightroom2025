@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
 const FIRST_MOVER_OPENS = new Date("2026-11-11T00:00:00+08:00");
 const FIRST_MOVER_ENDS = new Date("2026-12-01T00:00:00+08:00");
@@ -32,18 +32,18 @@ const STAKES_BARS = Array.from({ length: 56 }, (_, i) => {
   return { h: Math.round(wave), c: "#FF4D5A" };
 });
 
-const FAQS = [
+const FAQS: { q: string; a: ReactNode }[] = [
   {
     q: "Do I need to be a BNI member?",
     a: "No. Guests are welcome. IBMC is a great first look at how BNI works.",
   },
   {
     q: "Who will I meet there?",
-    a: "Members and guests from [X] industries across the Philippines — business owners who can send you clients.",
+    a: "Members and guests from across the Philippines, and international delegates — business owners who can send you clients.",
   },
   {
     q: "What happens during business matching?",
-    a: "[X] rounds of [X]-minute one-on-one meetings. You meet owners whose clients overlap with yours — partners, not competitors.",
+    a: "Structured time with owners whose clients overlap with yours — partners, not competitors — and more ways to connect and collaborate.",
   },
   {
     q: "Where and when is IBMC 2027?",
@@ -51,11 +51,15 @@ const FAQS = [
   },
   {
     q: "Can I pay in installments?",
-    a: "Yes on First Mover and Early Bird. First Mover is ₱13,000: ₱1,000 when you register, then ₱2,000 on the 15th each month from December 2026 through May 2027. Early Bird is ₱16,000: ₱4,000 when you register, then ₱3,000 on the 15th from February through May 2027. Regular is ₱18,000, paid once.",
+    a: <InstallmentAnswer />,
+  },
+  {
+    q: "I'm joining from outside the Philippines. What do I pay?",
+    a: "International delegates pay in full. Early Bird is USD 250 from January through March 2027. Regular is USD 350 from April through May 31, 2027. There is no installment plan.",
   },
   {
     q: "Is the fee refundable?",
-    a: "[Refund policy — confirm with the IBMC team before First Mover opens.]",
+    a: <RefundAnswer />,
   },
 ];
 
@@ -447,12 +451,57 @@ function BeforeAfter() {
   );
 }
 
+function InstallmentAnswer() {
+  const rows = [
+    ["First Mover", "₱12,000", "₱13,000. ₱1,000 when you register, then ₱2,000 on the 15th each month from December 2026 through May 2027"],
+    ["Early Bird", "₱15,000", "₱16,000. ₱4,000 when you register, then ₱3,000 on the 15th from February through May 2027"],
+    ["Regular", "₱18,000", "Paid once"],
+  ];
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="m-0">Yes on First Mover and Early Bird. Regular is paid once.</p>
+      <div className="overflow-x-auto rounded-xl border border-[#E4E1DC]">
+        <table className="w-full border-collapse text-left text-sm text-[#141416]">
+          <thead>
+            <tr className="bg-[#141416] text-white">
+              <th className="px-3 py-2 font-semibold">Tier</th>
+              <th className="px-3 py-2 font-semibold">In full</th>
+              <th className="px-3 py-2 font-semibold">Installments</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(([tier, full, plan], i) => (
+              <tr key={tier} className={i % 2 === 0 ? "bg-white" : "bg-[#F6F4F1]"}>
+                <td className="whitespace-nowrap px-3 py-2.5 align-top font-semibold">{tier}</td>
+                <td className="whitespace-nowrap px-3 py-2.5 align-top font-semibold"><Price text={full} /></td>
+                <td className="px-3 py-2.5 align-top leading-snug"><Price text={plan} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function RefundAnswer() {
+  return (
+    <>
+      <p className="m-0 max-w-[62ch]">
+        Payments already made are kept. If an installment is 15 days late, the plan ends and the ticket moves to the Regular rate of <Price text="₱18,000" />. What you've paid is credited toward that rate, and the balance is due by May 31, 2027.
+      </p>
+      <a href="/terms#refunds" className="mt-2 inline-block font-semibold text-[#A8131F] underline">Read the terms</a>
+    </>
+  );
+}
+
 function FaqList() {
   const [open, setOpen] = useState(0);
   return (
     <div className="flex min-w-0 flex-[999_1_560px] flex-col">
       {FAQS.map((item, i) => {
         const expanded = open === i;
+        const text = typeof item.a === "string";
         return (
           <div key={item.q} className={`border-t border-[#D9D5CF] py-[22px] ${i === FAQS.length - 1 ? "border-b" : ""}`}>
             <button
@@ -466,7 +515,13 @@ function FaqList() {
                 {expanded ? "−" : "+"}
               </span>
             </button>
-            {expanded && <p className="m-0 mt-2.5 max-w-[62ch] text-base leading-relaxed text-[#3A3A40]">{item.a}</p>}
+            {expanded && (
+              text ? (
+                <p className="m-0 mt-2.5 max-w-[62ch] text-base leading-relaxed text-[#3A3A40]">{item.a}</p>
+              ) : (
+                <div className="mt-2.5 text-base leading-relaxed text-[#3A3A40]">{item.a}</div>
+              )
+            )}
           </div>
         );
       })}
@@ -911,6 +966,7 @@ export default function AmplifyHome() {
           <div className="flex flex-col gap-2.5">
             <span className="font-semibold text-[#F6F4F1]">Event</span>
             <a href="#faq" className="text-[#A8A8B0] no-underline">FAQ</a>
+            <a href="/terms" className="text-[#A8A8B0] no-underline">Terms</a>
             <span>BNI Philippines</span>
             <span>ibmcph.com</span>
           </div>

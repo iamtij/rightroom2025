@@ -395,7 +395,6 @@ function RegistrationWizard() {
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
   const [ticketError, setTicketError] = useState("");
   const [guestError, setGuestError] = useState("");
-  const [showTerms, setShowTerms] = useState(false);
   const [datesOpen, setDatesOpen] = useState(false);
   const [payError, setPayError] = useState("");
   const [couponCode, setCouponCode] = useState("");
@@ -1049,14 +1048,9 @@ function RegistrationWizard() {
             <input type="checkbox" className="mt-0.5 h-5 w-5 accent-[#D0202E]" checked={agreed} onChange={(event) => { setAgreed(event.target.checked); setTicketError(""); }} />
             <span>
               I understand: if a payment is 15+ days late, my ticket moves to the Regular rate (₱18,000). What I've paid is kept.{" "}
-              <button type="button" className="font-semibold text-[#A8131F]" onClick={() => setShowTerms((open) => !open)}>Terms</button>
+              <a href="/terms#refunds" target="_blank" rel="noreferrer" className="font-semibold text-[#A8131F]">Terms</a>
             </span>
           </label>
-        ) : null}
-        {showTerms ? (
-          <p className="m-0 text-[13px] leading-normal text-[#3A3A40]">
-            Installment payments must be made on or before each due date. If an installment remains unpaid 15 days after its due date, the installment plan is automatically voided and the registration reverts to the Regular rate of ₱18,000. All payments already made will be credited toward the Regular rate, and the remaining balance must be paid in full on or before May 31, 2027.
-          </p>
         ) : null}
         {ticketError ? <p className="m-0 text-sm text-[#A8131F]">{ticketError}</p> : null}
         {plan !== "test" && tier.opensLabel ? <p className="m-0 text-[13px] text-[#5C5C63]">Sales open {tier.opensLabel}. This screen shows the price. No card is charged.</p> : null}
