@@ -967,6 +967,7 @@ export default function AmplifyHome() {
             <span className="font-semibold text-[#F6F4F1]">Event</span>
             <a href="#faq" className="text-[#A8A8B0] no-underline">FAQ</a>
             <a href="/terms" className="text-[#A8A8B0] no-underline">Terms</a>
+            <a href="/privacy" className="text-[#A8A8B0] no-underline">Data Privacy</a>
             <span>BNI Philippines</span>
             <span>ibmcph.com</span>
           </div>

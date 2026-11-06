@@ -160,7 +160,10 @@ export default function Terms() {
         <span className="font-archivo text-lg font-extrabold text-[#F6F4F1]">
           IBMC <span className="text-[#FF4D5A]">2027</span>
         </span>
-        <a href="/" className="text-[#A8A8B0] no-underline">Back to IBMC</a>
+        <div className="flex flex-wrap gap-6">
+          <a href="/privacy" className="text-[#A8A8B0] no-underline">Data Privacy</a>
+          <a href="/" className="text-[#A8A8B0] no-underline">Back to IBMC</a>
+        </div>
       </footer>
     </div>
   );
