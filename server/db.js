@@ -315,6 +315,14 @@ CREATE TABLE IF NOT EXISTS security_events (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_security_events ON security_events(kind, created_at);
+
+CREATE TABLE IF NOT EXISTS comp_requests (
+  id INTEGER PRIMARY KEY,
+  reference TEXT NOT NULL,
+  requested_by INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 const PRODUCTS = [
@@ -498,6 +506,13 @@ function migrate(db) {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_security_events ON security_events(kind, created_at);
+    CREATE TABLE IF NOT EXISTS comp_requests (
+      id INTEGER PRIMARY KEY,
+      reference TEXT NOT NULL,
+      requested_by INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
   if (testTicketEnabled()) ensureTestTicket(db);
   const names = new Set(db.prepare("PRAGMA table_info(registrations)").all().map((column) => column.name));

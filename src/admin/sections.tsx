@@ -474,7 +474,11 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
   async function comp(reference: string) {
     if (!window.confirm("Mark the remaining balance as a complimentary ticket?")) return;
     try {
-      await api(`/api/admin/registrations/${reference}/comp`, { method: "POST" });
+      const payload = await api(`/api/admin/registrations/${reference}/comp`, { method: "POST" });
+      if (payload.pending) {
+        onError("Waiting for another admin to approve this complimentary ticket.");
+        return;
+      }
       await load();
     } catch (error) {
       onError(error instanceof Error ? error.message : "Could not comp this ticket");

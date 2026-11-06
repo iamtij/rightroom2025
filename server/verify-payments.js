@@ -338,6 +338,42 @@ try {
   });
   assert.equal(overrideScan.status, 200);
 
+  const { hashPassword } = await import("./auth.js");
+  const secondDb = openDatabase(file);
+  secondDb.prepare("INSERT INTO admin_users (email, password_hash) VALUES ('second@example.com', ?)").run(hashPassword("another-correct-horse"));
+  secondDb.close();
+  const secondLogin = await fetch(`${base}/api/admin/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "second@example.com", password: "another-correct-horse" }),
+  });
+  const secondSetup = await secondLogin.json();
+  const secondConfirm = await fetch(`${base}/api/admin/mfa/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ setupToken: secondSetup.setupToken, code: currentTotp(secondSetup.secret) }),
+  });
+  const secondCookie = (secondConfirm.headers.get("set-cookie") || "").split(";")[0];
+  const requested = await fetch(`${base}/api/admin/registrations/${provedBody.reference}/comp`, {
+    method: "POST",
+    headers: { cookie },
+  });
+  const requestedBody = await requested.json();
+  assert.equal(requested.status, 200);
+  assert.equal(requestedBody.pending, true);
+  const sameAdmin = await fetch(`${base}/api/admin/registrations/${provedBody.reference}/comp`, {
+    method: "POST",
+    headers: { cookie },
+  });
+  assert.equal(sameAdmin.status, 409);
+  const approved = await fetch(`${base}/api/admin/registrations/${provedBody.reference}/comp`, {
+    method: "POST",
+    headers: { cookie: secondCookie },
+  });
+  assert.equal(approved.status, 200);
+  const approvedBody = await approved.json();
+  assert.equal(approvedBody.balanceCents, 0);
+
   await fetch(`${base}/api/admin/logout`, { method: "POST", headers: { cookie } });
   const afterLogout = await fetch(`${base}/api/admin/me`, { headers: { cookie } });
   assert.equal(afterLogout.status, 401);

@@ -16,6 +16,24 @@ import {
   type Tier,
 } from "./plans";
 
+function Turnstile({ siteKey, onToken }: { siteKey: string; onToken: (token: string) => void }) {
+  const holder = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+    script.async = true;
+    script.onload = () => {
+      const widget = (window as Window & { turnstile?: { render: (node: HTMLElement, options: object) => void } }).turnstile;
+      if (holder.current && widget) widget.render(holder.current, { sitekey: siteKey, callback: onToken });
+    };
+    document.head.appendChild(script);
+    return () => {
+      script.remove();
+    };
+  }, [siteKey, onToken]);
+  return <div ref={holder} />;
+}
+
 type Audience = "member" | "guest" | "international";
 type CheckoutPlan = PayPlan | "test";
 type Step = "start" | "member" | "guest" | "confirm" | "ticket" | "pay" | "paying" | "done" | "manage";
@@ -435,6 +453,8 @@ function RegistrationWizard() {
   const [companyWebsite, setCompanyWebsite] = useState("");
   const [testsOpen, setTestsOpen] = useState(false);
   const [testTicketOpen, setTestTicketOpen] = useState(false);
+  const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
+  const [turnstileToken, setTurnstileToken] = useState("");
 
   useEffect(() => {
     let stop = false;
@@ -445,6 +465,7 @@ function RegistrationWizard() {
         if (!stop) {
           setTestsOpen(Boolean(payload.tests));
           setTestTicketOpen(Boolean(payload.testTicket));
+          setTurnstileSiteKey(payload.turnstileSiteKey || "");
         }
       })
       .catch(() => undefined);
@@ -700,6 +721,10 @@ function RegistrationWizard() {
   async function pay() {
     const charging = checkoutTier();
     if (!attendee || !charging || saving || !charging.onSale) return;
+    if (turnstileSiteKey && !turnstileToken) {
+      setPayError("Confirm you are a person and try again.");
+      return;
+    }
     const useInstallment = plan === "installment" && Boolean(charging.installmentCents) && charging.rows.length > 0;
     const peso = charging.currency === "PHP";
     if (peso && !channel) return;
@@ -722,6 +747,7 @@ function RegistrationWizard() {
         memberToken: memberProof || undefined,
         challenge,
         companyWebsite,
+        turnstileToken,
       };
       const path = !peso
         ? "/api/registrations"
@@ -1186,6 +1212,7 @@ function RegistrationWizard() {
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep("ticket")}>← Back</button>
         <input className="absolute -left-[9999px] h-0 w-0" tabIndex={-1} autoComplete="off" aria-hidden="true" value={companyWebsite} onChange={(event) => setCompanyWebsite(event.target.value)} />
+        {turnstileSiteKey ? <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} /> : null}
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Payment</h1>
         <LevNote pose="focus" label="Lev holding a card">Secure payment. I've got this.</LevNote>
         <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-2">

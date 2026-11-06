@@ -221,7 +221,13 @@ export function createApi() {
   });
 
   router.get("/registration-options", (_req, res) => {
-    res.json({ tests: testRegistrationEnabled(), testTicket: testTicketEnabled() });
+    const siteKey = String(process.env.TURNSTILE_SITE_KEY || "").trim();
+    const secret = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
+    res.json({
+      tests: testRegistrationEnabled(),
+      testTicket: testTicketEnabled(),
+      turnstileSiteKey: siteKey && secret ? siteKey : "",
+    });
   });
 
   router.get("/challenge", (_req, res) => {
@@ -230,7 +236,7 @@ export function createApi() {
     res.json({ token });
   });
 
-  function rejectBot(req, res) {
+  async function rejectBot(req, res) {
     if (String(req.body?.companyWebsite || "").trim()) {
       res.status(400).json({ error: "Registration was not saved" });
       return true;
@@ -242,6 +248,19 @@ export function createApi() {
       return true;
     }
     db().prepare("DELETE FROM form_challenges WHERE token = ?").run(token);
+    const secret = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
+    if (secret) {
+      const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret, response: String(req.body?.turnstileToken || ""), remoteip: req.ip }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!payload.success) {
+        res.status(400).json({ error: "Confirm you are a person and try again." });
+        return true;
+      }
+    }
     return false;
   }
 
@@ -384,8 +403,8 @@ export function createApi() {
     return { contact: allowed, resume: allowed };
   }
 
-  router.post("/registrations", registerLimit, (req, res) => {
-    if (rejectBot(req, res)) return;
+  router.post("/registrations", registerLimit, async (req, res) => {
+    if (await rejectBot(req, res)) return;
     try {
       const registration = createPublicRegistration(req.body || {});
       attachResume(res, registration);
@@ -396,7 +415,7 @@ export function createApi() {
   });
 
   router.post("/registrations/upay", registerLimit, async (req, res) => {
-    if (rejectBot(req, res)) return;
+    if (await rejectBot(req, res)) return;
     try {
       const registration = createPublicRegistration(req.body || {});
       const result = await startUpayPayment(db(), registration, req.body?.paymentMethod);
@@ -407,7 +426,7 @@ export function createApi() {
   });
 
   router.post("/registrations/hitpay", registerLimit, async (req, res) => {
-    if (rejectBot(req, res)) return;
+    if (await rejectBot(req, res)) return;
     const channel = req.body?.channel === "online" ? "online" : req.body?.channel === "qr" ? "qr" : "";
     if (!channel) {
       res.status(400).json({ error: "Choose a payment option." });
@@ -702,6 +721,21 @@ export function createApi() {
     if (!row) {
       res.status(404).json({ error: "Registration not found" });
       return;
+    }
+    const admins = db().prepare("SELECT COUNT(*) AS n FROM admin_users").get().n;
+    if (admins >= 2) {
+      const pending = db().prepare("SELECT id, requested_by FROM comp_requests WHERE reference = ? AND status = 'pending'").get(req.params.reference);
+      if (!pending) {
+        db().prepare("INSERT INTO comp_requests (reference, requested_by) VALUES (?, ?)").run(req.params.reference, req.admin.id);
+        recordSecurityEvent(db(), "registration.comp", `${req.params.reference} requested`);
+        res.json({ pending: true, reference: req.params.reference });
+        return;
+      }
+      if (pending.requested_by === req.admin.id) {
+        res.status(409).json({ error: "Another admin has to approve this complimentary ticket.", pending: true });
+        return;
+      }
+      db().prepare("UPDATE comp_requests SET status = 'approved' WHERE id = ?").run(pending.id);
     }
     try {
       const updated = compRegistration(db(), row.id, req.admin.id);
