@@ -36,9 +36,12 @@ function present(registration, options = {}) {
       opened = true;
     }
     const slot = item.kind === "on_registration" || item.kind === "full";
+    const dayLabel = item.kind === "days_after" && item.days_after
+      ? `${formatLongDate(item.due_on)} · day ${item.days_after}`
+      : "";
     return {
       id: item.id,
-      label: slot ? "Today · secure your seat" : formatLongDate(item.due_on),
+      label: dayLabel || (slot ? "Today · secure your seat" : formatLongDate(item.due_on)),
       dueOn: item.due_on,
       amountCents: item.amount_cents,
       amountPaidCents: item.amount_paid_cents,
@@ -273,7 +276,7 @@ export function createApi() {
       error.status = 400;
       throw error;
     }
-    if (body.productCode !== "test" && body.productCode !== "test_50" && (body.attendeeType === "guest" || body.attendeeType === "international") && today < "2027-02-01") {
+    if (body.productCode !== "test" && body.productCode !== "test_50" && body.productCode !== "test_200" && (body.attendeeType === "guest" || body.attendeeType === "international") && today < "2027-02-01") {
       const error = new Error("That registration opens February 1, 2027");
       error.status = 400;
       throw error;

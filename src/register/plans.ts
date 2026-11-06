@@ -5,7 +5,7 @@ export type ScheduleRow = {
   label: string;
   dueOn: string;
   amountCents: number;
-  kind: "on_registration" | "fixed_date";
+  kind: "on_registration" | "fixed_date" | "days_after";
 };
 
 export type Tier = {
@@ -98,6 +98,28 @@ export function testTier(): Tier {
     saveLabel: "One payment of ₱10.",
     installmentSummary: null,
     note: null,
+  };
+}
+
+export function testInstallmentTier(): Tier {
+  return {
+    code: "test_200",
+    name: "Test Installment",
+    currency: "PHP",
+    fullCents: 20_000,
+    installmentCents: 20_000,
+    windowLabel: "available now",
+    nextLabel: "₱200 in full, or ₱100 when you pay, then ₱50 twice.",
+    onSale: true,
+    opensLabel: null,
+    rows: [
+      { label: "Day 0 · when you pay", dueOn: "on-registration", amountCents: 10_000, kind: "on_registration" },
+      { label: "Day 2 · after you pay", dueOn: "+2", amountCents: 5_000, kind: "days_after" },
+      { label: "Day 3 · after you pay", dueOn: "+3", amountCents: 5_000, kind: "days_after" },
+    ],
+    saveLabel: "One payment of ₱200.",
+    installmentSummary: "₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3.",
+    note: "Dates start the day your first payment is received.",
   };
 }
 

@@ -4,7 +4,7 @@ export function priceCoupon(db, input) {
   if (!product) return { error: "Unknown ticket", status: 400 };
   const installment = input.paymentPlan === "installment";
   const schedule = installment
-    ? db.prepare("SELECT sequence, kind, due_on, amount_cents FROM installment_plan_items WHERE product_id = ? ORDER BY sequence").all(product.id)
+    ? db.prepare("SELECT sequence, kind, due_on, days_after, amount_cents FROM installment_plan_items WHERE product_id = ? ORDER BY sequence").all(product.id)
     : [{ sequence: 1, kind: "full", due_on: input.registeredOn || null, amount_cents: product.full_price_cents }];
   if (installment && (!product.allows_installment || schedule.length === 0)) {
     return { error: "This ticket is paid in full", status: 400 };

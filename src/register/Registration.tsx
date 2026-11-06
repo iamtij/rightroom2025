@@ -6,6 +6,7 @@ import {
   formatMonthDate,
   manilaDate,
   money,
+  testInstallmentTier,
   testPaymentTier,
   testTier,
   tierFor,
@@ -372,6 +373,7 @@ function RegistrationWizard() {
   const [saved, setSaved] = useState<StoredRegistration | null>(null);
   const [chapters, setChapters] = useState<string[]>([]);
   const [testMode, setTestMode] = useState(false);
+  const [installmentTest, setInstallmentTest] = useState(false);
 
   useEffect(() => {
     fetch("/api/chapters")
@@ -395,7 +397,10 @@ function RegistrationWizard() {
   }, []);
 
   const international = attendee?.international ?? false;
-  const tier = useMemo(() => (testMode ? testTier() : tierFor(today, international)), [today, international, testMode]);
+  const tier = useMemo(() => {
+    if (installmentTest) return testInstallmentTier();
+    return testMode ? testTier() : tierFor(today, international);
+  }, [today, international, testMode, installmentTest]);
 
   function clearOtp() {
     setOtpSentTo("");
@@ -475,6 +480,7 @@ function RegistrationWizard() {
 
   function choose(audience: Audience) {
     setTestMode(false);
+    setInstallmentTest(false);
     setMemberTest(false);
     if (audience === "member") {
       setStep("member");
@@ -487,6 +493,7 @@ function RegistrationWizard() {
 
   function startTest() {
     setTestMode(true);
+    setInstallmentTest(false);
     setMemberTest(false);
     setAttendee(emptyGuest(false));
     setPlan("full");
@@ -494,8 +501,19 @@ function RegistrationWizard() {
     setStep("guest");
   }
 
+  function startInstallmentTest() {
+    setTestMode(false);
+    setInstallmentTest(true);
+    setMemberTest(false);
+    setAttendee(emptyGuest(false));
+    setPlan("installment");
+    setAgreed(false);
+    setStep("guest");
+  }
+
   function startMemberTest() {
     setTestMode(false);
+    setInstallmentTest(false);
     setMemberTest(true);
     setMember(null);
     setLookup("");
@@ -528,7 +546,7 @@ function RegistrationWizard() {
       setStep("confirm");
       return;
     }
-    setPlan("full");
+    setPlan(installmentTest ? "installment" : "full");
     setStep("ticket");
   }
 
@@ -565,7 +583,7 @@ function RegistrationWizard() {
 
   function continueTicket() {
     if (!checkoutTier()) return;
-    if (plan === "installment" && !agreed) {
+    if (plan === "installment" && !installmentTest && !agreed) {
       setTicketError("Tick the 15-day agreement to pay in installments.");
       return;
     }
@@ -649,6 +667,7 @@ function RegistrationWizard() {
         {localTier ? <PriceStrip tier={localTier} /> : <p className="m-0 text-[15px]">Registration closed on May 31, 2027.</p>}
         <h2 className="m-0 mt-1.5 text-[17px] font-bold">Who's registering?</h2>
         {import.meta.env.DEV ? <Choice title="Test ticket · ₱10" body="Available now, for a local payment test." emphasis onClick={startTest} /> : null}
+        <Choice title="Test installment · ₱200" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." emphasis onClick={startInstallmentTest} />
         <Choice title="I'm a BNI Philippines Member" body="Quick registration. We'll fill in your details." emphasis onClick={() => choose("member")} />
         <Choice title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." emphasis onClick={startMemberTest} />
         <Choice title="Non-BNI Philippines member" body={othersOpen ? "New to BNI? You're welcome here." : "Available February 1, 2027"} disabled={!othersOpen} onClick={() => choose("guest")} />
@@ -777,10 +796,10 @@ function RegistrationWizard() {
     const memberPath = attendee.audience === "member";
     return (
       <Frame label="Step 1 of 4" step={1} footer={<PrimaryButton disabled={!detailsReady(attendee)} onClick={continueGuest}>Continue</PrimaryButton>}>
-        <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => { if (!memberPath) setTestMode(false); setStep(memberPath ? "member" : "start"); }}>← Back</button>
+        <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => { if (!memberPath) { setTestMode(false); setInstallmentTest(false); } setStep(memberPath ? "member" : "start"); }}>← Back</button>
         <div className="flex flex-col gap-1.5">
           <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Your details</h1>
-          <p className="m-0 text-[15px] leading-normal text-[#5C5C63]">{memberPath ? "Check the details from your BNI membership." : testMode ? "Test ticket · ₱10. This does not open the real sale." : "About 3 minutes. Guests are welcome."}</p>
+          <p className="m-0 text-[15px] leading-normal text-[#5C5C63]">{memberPath ? "Check the details from your BNI membership." : installmentTest ? "Test installment · ₱200. Dates start the day you pay." : testMode ? "Test ticket · ₱10. This does not open the real sale." : "About 3 minutes. Guests are welcome."}</p>
         </div>
         <Field label="Full name">
           <input required className={inputClass} placeholder="As it should appear on your badge" value={attendee.fullName} onChange={(event) => setAttendee({ ...attendee, fullName: event.target.value })} />
@@ -814,7 +833,7 @@ function RegistrationWizard() {
             <input required className={inputClass} placeholder="917 123 4567" value={attendee.mobile} onChange={(event) => setAttendee({ ...attendee, mobile: event.target.value })} />
           </span>
         </Field>
-        {memberPath || testMode ? null : (
+        {memberPath || testMode || installmentTest ? null : (
           <>
             <Field label="Who invited you?" hint="Optional, so the member gets credit">
               <input className={inputClass} placeholder="Member name or chapter" value={attendee.invitedBy} onChange={(event) => setAttendee({ ...attendee, invitedBy: event.target.value })} />
@@ -874,9 +893,9 @@ function RegistrationWizard() {
         <div className="flex flex-col gap-1.5 rounded-[14px] bg-[#141416] p-4 text-[#F6F4F1]">
           <div className="flex items-center justify-between gap-3">
             <span className="font-archivo text-xl font-extrabold">{charging?.name}</span>
-            <span className="rounded-full bg-[#D0202E] px-2.5 py-1 text-[11px] font-bold tracking-[0.1em] text-white uppercase">{charging?.code === "test_50" ? "Test" : charging?.onSale ? "Best price" : "Opens soon"}</span>
+            <span className="rounded-full bg-[#D0202E] px-2.5 py-1 text-[11px] font-bold tracking-[0.1em] text-white uppercase">{charging?.code === "test_50" || charging?.code === "test_200" ? "Test" : charging?.onSale ? "Best price" : "Opens soon"}</span>
           </div>
-          <span className="text-sm text-[#C9C7C2]">{charging?.code === "test_50" ? "Payment is open" : charging?.onSale ? `Register by ${charging.windowLabel.replace("until ", "")}` : `Registration opens ${charging?.opensLabel}`}</span>
+          <span className="text-sm text-[#C9C7C2]">{charging?.code === "test_50" || charging?.code === "test_200" ? "Payment is open" : charging?.onSale ? `Register by ${charging.windowLabel.replace("until ", "")}` : `Registration opens ${charging?.opensLabel}`}</span>
           <span className="text-[13px] text-[#8E8E96]">{charging?.nextLabel}</span>
         </div>
         <h2 className="m-0 mt-1 text-[17px] font-bold">How would you like to pay?</h2>
@@ -915,7 +934,12 @@ function RegistrationWizard() {
             {tier.note ? <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">{tier.note}</p> : null}
           </PayChoice>
         ) : null}
-        {plan === "installment" ? (
+        {plan === "installment" && installmentTest ? (
+          <p className="m-0 rounded-xl bg-[#F6F4F1] p-3.5 text-[13px] leading-normal text-[#2A2A2E]">
+            Day 0 is ₱100, due when you pay. Day 2 and day 3 are ₱50 each, counted from that payment. We'll email you one day before each of those due dates, at 9:00am Manila time.
+          </p>
+        ) : null}
+        {plan === "installment" && !installmentTest ? (
           <label className="flex items-start gap-2.5 rounded-xl bg-[#FBE9EA] p-3.5 text-[13px] leading-normal text-[#2A2A2E]">
             <input type="checkbox" className="mt-0.5 h-5 w-5 accent-[#D0202E]" checked={agreed} onChange={(event) => { setAgreed(event.target.checked); setTicketError(""); }} />
             <span>

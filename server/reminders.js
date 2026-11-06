@@ -18,6 +18,17 @@ function looksLikePass(rendered) {
   return PASS_MARKERS.some((marker) => text.includes(marker));
 }
 
+function reminderApplies(db, rule, installment) {
+  if (installment.product_code !== "test_200") return true;
+  if (rule.channel !== "email" || rule.days_before !== 1 || installment.sequence === 1) return false;
+  const anchor = db.prepare(`
+    SELECT status, amount_paid_cents, amount_cents
+    FROM registration_installments
+    WHERE registration_id = ? AND sequence = 1
+  `).get(installment.registration_id);
+  return Boolean(anchor && anchor.status === "paid" && anchor.amount_paid_cents >= anchor.amount_cents);
+}
+
 function installmentStillDue(db, installmentId) {
   const row = db.prepare(`
     SELECT i.status, i.amount_cents, i.amount_paid_cents, r.status AS registration_status, r.fully_paid_at
@@ -99,15 +110,17 @@ export async function runReminders(db, now = new Date()) {
   for (const rule of rules) {
     if (rule.trigger === "before_due") {
       const due = db.prepare(`
-        SELECT i.*, r.email, r.mobile, r.full_name, r.reference, r.currency, r.qr_token
+        SELECT i.*, r.email, r.mobile, r.full_name, r.reference, r.currency, r.qr_token, p.code AS product_code
         FROM registration_installments i
         JOIN registrations r ON r.id = i.registration_id
+        JOIN ticket_products p ON p.id = r.product_id
         WHERE i.status = 'due'
           AND i.amount_paid_cents < i.amount_cents
           AND r.status = 'confirmed'
           AND r.fully_paid_at IS NULL
       `).all();
       for (const installment of due) {
+        if (!reminderApplies(db, rule, installment)) continue;
         if (addDays(installment.due_on, -rule.days_before) !== clock.date) continue;
         if (clock.time < rule.send_time) continue;
         const registration = getRegistration(db, installment.registration_id);

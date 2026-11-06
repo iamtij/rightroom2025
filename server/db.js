@@ -27,8 +27,9 @@ CREATE TABLE IF NOT EXISTS installment_plan_items (
   id INTEGER PRIMARY KEY,
   product_id INTEGER NOT NULL REFERENCES ticket_products(id),
   sequence INTEGER NOT NULL,
-  kind TEXT NOT NULL CHECK (kind IN ('on_registration', 'fixed_date')),
+  kind TEXT NOT NULL CHECK (kind IN ('on_registration', 'fixed_date', 'days_after')),
   due_on TEXT,
+  days_after INTEGER,
   amount_cents INTEGER NOT NULL,
   UNIQUE (product_id, sequence)
 );
@@ -71,6 +72,7 @@ CREATE TABLE IF NOT EXISTS registration_installments (
   sequence INTEGER NOT NULL,
   kind TEXT NOT NULL,
   due_on TEXT NOT NULL,
+  days_after INTEGER,
   amount_cents INTEGER NOT NULL,
   amount_paid_cents INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'due' CHECK (status IN ('due', 'paid', 'waived')),
@@ -354,6 +356,7 @@ export function openDatabase(file = process.env.IBMC_DB_PATH) {
   migrate(db);
   seed(db);
   ensureTestPayment(db);
+  ensureTestInstallment(db);
   return db;
 }
 
@@ -362,6 +365,7 @@ export function testTicketEnabled() {
 }
 
 function migrate(db) {
+  migrateInstallmentDays(db);
   if (testTicketEnabled()) ensureTestTicket(db);
   const names = new Set(db.prepare("PRAGMA table_info(registrations)").all().map((column) => column.name));
   const columns = [
@@ -390,6 +394,75 @@ function ensureTestTicket(db) {
       sales_start, sales_end, allows_installment
     ) VALUES ('test', 'Test', 'local', 'PHP', 1000, NULL, '2026-01-01', '2027-05-31', 0)
   `).run();
+}
+
+function migrateInstallmentDays(db) {
+  const planSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'installment_plan_items'").get()?.sql || "";
+  if (!planSql.includes("days_after")) {
+    db.pragma("foreign_keys = OFF");
+    try {
+    db.exec(`
+      CREATE TABLE installment_plan_items_next (
+        id INTEGER PRIMARY KEY,
+        product_id INTEGER NOT NULL REFERENCES ticket_products(id),
+        sequence INTEGER NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('on_registration', 'fixed_date', 'days_after')),
+        due_on TEXT,
+        days_after INTEGER,
+        amount_cents INTEGER NOT NULL,
+        UNIQUE (product_id, sequence)
+      );
+      INSERT INTO installment_plan_items_next (id, product_id, sequence, kind, due_on, amount_cents)
+        SELECT id, product_id, sequence, kind, due_on, amount_cents FROM installment_plan_items;
+      DROP TABLE installment_plan_items;
+      ALTER TABLE installment_plan_items_next RENAME TO installment_plan_items;
+    `);
+    } finally {
+      db.pragma("foreign_keys = ON");
+    }
+  }
+  const installmentColumns = new Set(db.prepare("PRAGMA table_info(registration_installments)").all().map((column) => column.name));
+  if (!installmentColumns.has("days_after")) {
+    db.exec("ALTER TABLE registration_installments ADD COLUMN days_after INTEGER");
+  }
+}
+
+function ensureTestInstallment(db) {
+  let product = db.prepare("SELECT id FROM ticket_products WHERE code = 'test_200'").get();
+  if (!product) {
+    const result = db.prepare(`
+      INSERT INTO ticket_products (
+        code, name, audience, currency, full_price_cents, installment_total_cents,
+        sales_start, sales_end, allows_installment
+      ) VALUES ('test_200', 'Test Installment', 'local', 'PHP', 20000, 20000, '2026-01-01', '2027-05-31', 1)
+    `).run();
+    product = { id: result.lastInsertRowid };
+  } else {
+    db.prepare(`
+      UPDATE ticket_products
+      SET name = 'Test Installment',
+          full_price_cents = 20000,
+          installment_total_cents = 20000,
+          allows_installment = 1,
+          active = 1,
+          sales_start = '2026-01-01',
+          sales_end = '2027-05-31'
+      WHERE id = ?
+    `).run(product.id);
+  }
+  const count = db.prepare("SELECT COUNT(*) AS count FROM installment_plan_items WHERE product_id = ?").get(product.id).count;
+  if (count === 3) return;
+  const replace = db.transaction(() => {
+    db.prepare("DELETE FROM installment_plan_items WHERE product_id = ?").run(product.id);
+    const insert = db.prepare(`
+      INSERT INTO installment_plan_items (product_id, sequence, kind, due_on, days_after, amount_cents)
+      VALUES (?, ?, ?, NULL, ?, ?)
+    `);
+    insert.run(product.id, 1, "on_registration", null, 10_000);
+    insert.run(product.id, 2, "days_after", 2, 5_000);
+    insert.run(product.id, 3, "days_after", 3, 5_000);
+  });
+  replace();
 }
 
 function ensureTestPayment(db) {

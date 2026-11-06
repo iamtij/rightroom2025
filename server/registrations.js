@@ -1,6 +1,13 @@
 import crypto from "crypto";
 import { claimCoupon, priceCoupon } from "./coupons.js";
 import { registrationBalance, testTicketEnabled } from "./db.js";
+import { addDays, manilaParts } from "./time.js";
+
+function dueOnFor(item, registeredOn) {
+  if (item.kind === "days_after") return addDays(registeredOn, Number(item.days_after) || 0);
+  if (item.kind === "on_registration" || item.kind === "full") return registeredOn;
+  return item.due_on;
+}
 
 function reference() {
   return `IBMC27-${crypto.randomBytes(3).toString("hex").toUpperCase()}`;
@@ -132,8 +139,8 @@ export function createRegistration(db, input) {
       token(),
     );
     const insertItem = db.prepare(`
-      INSERT INTO registration_installments (registration_id, sequence, kind, due_on, amount_cents)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO registration_installments (registration_id, sequence, kind, due_on, days_after, amount_cents)
+      VALUES (?, ?, ?, ?, ?, ?)
     `);
     priced.amounts.forEach((item, index) => {
       if (item.amount_cents <= 0 && index > 0) return;
@@ -141,7 +148,8 @@ export function createRegistration(db, input) {
         result.lastInsertRowid,
         index + 1,
         item.kind,
-        item.kind === "on_registration" || item.kind === "full" ? input.registeredOn : item.due_on,
+        dueOnFor(item, input.registeredOn),
+        item.kind === "days_after" ? Number(item.days_after) || 0 : null,
         item.amount_cents,
       );
     });
@@ -259,6 +267,15 @@ export function recordPayment(db, input) {
       SET amount_paid_cents = ?, status = ?, paid_at = ?
       WHERE id = ?
     `).run(paid, settled ? "paid" : "due", settled ? new Date().toISOString() : null, target.id);
+    if (settled && target.sequence === 1 && target.kind === "on_registration") {
+      const paidOn = manilaParts().date;
+      const later = db.prepare(`
+        SELECT id, days_after FROM registration_installments
+        WHERE registration_id = ? AND kind = 'days_after' AND days_after IS NOT NULL AND status != 'paid'
+      `).all(registration.id);
+      const updateDue = db.prepare("UPDATE registration_installments SET due_on = ? WHERE id = ?");
+      for (const item of later) updateDue.run(addDays(paidOn, item.days_after), item.id);
+    }
     const balance = registrationBalance(db, registration.id);
     if (balance === 0) {
       db.prepare(`

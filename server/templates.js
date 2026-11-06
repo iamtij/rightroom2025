@@ -63,13 +63,17 @@ export function renderInstallmentReminder({ registration, installment, daysBefor
   const subject = installmentLabel
     ? `IBMC 2027 · ${amount} ${when} · ${installmentLabel}`
     : `IBMC 2027 · ${amount} ${when}`;
+  const planNote = registration.product_code === "test_200"
+    ? "Counted from the day you paid: Day 0 ₱100, Day 2 ₱50, Day 3 ₱50. Paying ₱200 at once covers the seat."
+    : "";
   const text = [
     `IBMC 2027`,
     `Hi ${name}, ${amount} for your ${registration.product_name} seat is ${when} (${due}).`,
     `Payment ${installment.sequence} of ${registration.installment_count}.`,
+    planNote,
     `Ref ${registration.reference}`,
     payUrl,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
   const html = shell({
     headline: escapeHtml(headline),
     intro: `Hi ${escapeHtml(name)}, this is a reminder for your IBMC 2027 seat. Your QR ticket is sent only after the seat is fully paid.`,
@@ -79,6 +83,7 @@ export function renderInstallmentReminder({ registration, installment, daysBefor
           <div style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#A8131F;">${escapeHtml(registration.product_name)} · payment ${installment.sequence} of ${registration.installment_count}</div>
           <div style="margin-top:8px;font-size:36px;font-weight:800;line-height:1;">${escapeHtml(amount)}</div>
           <div style="margin-top:8px;font-size:16px;color:#3A3A40;">Due ${escapeHtml(due)}</div>
+          ${planNote ? `<div style="margin-top:14px;font-size:14px;line-height:1.5;color:#3A3A40;">${escapeHtml(planNote)}</div>` : ""}
           <div style="margin-top:14px;font-size:14px;color:#5C5C63;">Reference ${escapeHtml(registration.reference)}</div>
         </td></tr>
       </table>`,
