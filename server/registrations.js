@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import { claimCoupon, priceCoupon } from "./coupons.js";
-import { registrationBalance, testTicketEnabled } from "./db.js";
+import { registrationBalance, testRegistrationEnabled, testTicketEnabled } from "./db.js";
 import { addDays, manilaParts } from "./time.js";
 
 function dueOnFor(item, registeredOn) {
@@ -85,6 +85,7 @@ export function getEntryPass(db, qrToken) {
   const registration = getRegistration(db, row.id);
   if (!registration || registration.status !== "confirmed" || !registration.fully_paid_at) return null;
   if (registration.balance_cents !== 0) return null;
+  if (["test", "test_50", "test_200"].includes(registration.product_code)) return null;
   return {
     fullName: registration.full_name,
     tierName: registration.product_name,
@@ -96,6 +97,9 @@ export function getEntryPass(db, qrToken) {
 export function createRegistration(db, input) {
   const run = db.transaction(() => {
     if (input.productCode === "test" && !testTicketEnabled()) throw new Error("Unknown ticket");
+    if ((input.productCode === "test_50" || input.productCode === "test_200") && !testRegistrationEnabled()) {
+      throw new Error("Unknown ticket");
+    }
     const product = db.prepare("SELECT * FROM ticket_products WHERE code = ? AND active = 1").get(input.productCode);
     if (!product) throw new Error("Unknown ticket");
     if (input.paymentPlan === "installment" && !product.allows_installment) {
@@ -258,8 +262,8 @@ export function recordPayment(db, input) {
       throw new Error("Payment does not match the amount still due");
     }
     db.prepare(`
-      INSERT INTO payments (registration_id, installment_id, amount_cents, currency, method, external_reference)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO payments (registration_id, installment_id, amount_cents, currency, method, external_reference, admin_user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
       registration.id,
       target.id,
@@ -267,7 +271,14 @@ export function recordPayment(db, input) {
       registration.currency,
       input.method || null,
       input.externalReference || null,
+      input.adminUserId || null,
     );
+    if (input.adminUserId) {
+      db.prepare(`
+        INSERT INTO admin_audit (admin_id, action, target, amount_cents)
+        VALUES (?, 'registration.payment', ?, ?)
+      `).run(input.adminUserId, registration.reference, input.amountCents);
+    }
     const paid = target.amount_paid_cents + input.amountCents;
     const settled = paid >= target.amount_cents;
     db.prepare(`

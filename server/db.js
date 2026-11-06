@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS payments (
   currency TEXT NOT NULL,
   method TEXT,
   external_reference TEXT,
+  admin_user_id INTEGER,
   recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -263,6 +264,15 @@ CREATE TABLE IF NOT EXISTS hitpay_payments (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_hitpay_gateway ON hitpay_payments(gateway_ref) WHERE gateway_ref IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_hitpay_installment ON hitpay_payments(installment_id, channel, status);
+
+CREATE TABLE IF NOT EXISTS admin_audit (
+  id INTEGER PRIMARY KEY,
+  admin_id INTEGER,
+  action TEXT NOT NULL,
+  target TEXT,
+  amount_cents INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 `;
 
 const PRODUCTS = [
@@ -355,8 +365,10 @@ export function openDatabase(file = process.env.IBMC_DB_PATH) {
   db.exec(SCHEMA);
   migrate(db);
   seed(db);
-  ensureTestPayment(db);
-  ensureTestInstallment(db);
+  if (testRegistrationEnabled()) {
+    ensureTestPayment(db);
+    ensureTestInstallment(db);
+  }
   return db;
 }
 
@@ -365,14 +377,25 @@ export function testTicketEnabled() {
 }
 
 export function testRegistrationEnabled() {
-  const override = String(process.env.ALLOW_TEST_REGISTRATION || "").trim().toLowerCase();
-  if (override === "true") return true;
-  if (override === "false") return false;
-  return String(process.env.RAILWAY_ENVIRONMENT_NAME || "").trim().toLowerCase() !== "production";
+  return String(process.env.ALLOW_TEST_REGISTRATION || "").trim().toLowerCase() === "true";
 }
 
 function migrate(db) {
   migrateInstallmentDays(db);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS admin_audit (
+      id INTEGER PRIMARY KEY,
+      admin_id INTEGER,
+      action TEXT NOT NULL,
+      target TEXT,
+      amount_cents INTEGER,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `);
+  const paymentColumns = new Set(db.prepare("PRAGMA table_info(payments)").all().map((column) => column.name));
+  if (!paymentColumns.has("admin_user_id")) {
+    db.exec("ALTER TABLE payments ADD COLUMN admin_user_id INTEGER");
+  }
   if (testTicketEnabled()) ensureTestTicket(db);
   const names = new Set(db.prepare("PRAGMA table_info(registrations)").all().map((column) => column.name));
   const columns = [

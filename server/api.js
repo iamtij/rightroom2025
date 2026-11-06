@@ -5,7 +5,7 @@ import { clearSessionCookie, cookieValue, readSession, seedAdmin, sessionCookie,
 import { createRegistration, cancelRegistration, ensureResumeToken, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
-import { listMembers, lookupMember, memberContactClash, parseMemberCsv, saveMember, updateMemberProfile, updateMemberRecord } from "./members.js";
+import { listMembers, lookupMember, memberContactClash, memberFromProof, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
 import { presentCoupon, priceCoupon } from "./coupons.js";
 import { maskEmail, readMemberEditToken, sendMemberOtp, sendRegistrationOtp, verifyMemberOtp, verifyRegistrationOtp } from "./otp.js";
 import { rateLimit } from "./limits.js";
@@ -167,6 +167,13 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function writeAudit(database, adminId, action, target, amountCents = null) {
+  database.prepare(`
+    INSERT INTO admin_audit (admin_id, action, target, amount_cents)
+    VALUES (?, ?, ?, ?)
+  `).run(adminId, action, target, amountCents);
+}
+
 export function createApi() {
   const app = express();
   const router = express.Router();
@@ -194,7 +201,7 @@ export function createApi() {
   });
 
   router.get("/registration-options", (_req, res) => {
-    res.json({ tests: testRegistrationEnabled() });
+    res.json({ tests: testRegistrationEnabled(), testTicket: testTicketEnabled() });
   });
 
   router.get("/members/lookup", memberLookupLimit, (req, res) => {
@@ -207,11 +214,11 @@ export function createApi() {
       const registration = findRegistrationByContact(db(), contact);
       return Boolean(registration && registration.status === "confirmed");
     });
-    res.json({ ...member, registered });
+    res.json(toPublicMember(member, registered));
   });
 
   router.post("/members/otp", otpLimit, async (req, res) => {
-    const result = await sendMemberOtp(db(), req.body?.email);
+    const result = await sendMemberOtp(db(), req.body?.query || req.body?.email);
     if (result.error) {
       res.status(result.status || 400).json({ error: result.error });
       return;
@@ -220,12 +227,14 @@ export function createApi() {
   });
 
   router.post("/members/otp/verify", otpLimit, (req, res) => {
-    const result = verifyMemberOtp(db(), req.body?.email, req.body?.code);
+    const result = verifyMemberOtp(db(), req.body?.query || req.body?.email, req.body?.code);
     if (result.error) {
       res.status(result.status || 400).json({ error: result.error });
       return;
     }
-    res.json({ ok: true, editToken: result.editToken });
+    const member = lookupMember(db(), result.email);
+    const { id, ...visible } = member || {};
+    res.json({ ok: true, editToken: result.editToken, member: member ? visible : undefined });
   });
 
   router.post("/members/details", otpLimit, (req, res) => {
@@ -286,17 +295,18 @@ export function createApi() {
       error.status = 400;
       throw error;
     }
+    const proved = memberFromProof(db(), body.memberToken);
     return createRegistration(db(), {
       productCode: body.productCode,
       paymentPlan: body.paymentPlan,
-      fullName: body.fullName || "",
-      email: body.email || "",
-      mobile: body.mobile || "",
+      fullName: body.fullName || proved?.full_name || "",
+      email: proved?.email || body.email || "",
+      mobile: proved?.mobile || body.mobile || "",
       registeredOn: today,
       attendeeType: body.attendeeType,
-      business: body.business,
-      industry: body.industry,
-      chapter: body.chapter,
+      business: body.business || proved?.business_name,
+      industry: body.industry || proved?.category,
+      chapter: body.chapter || proved?.chapter,
       invitedBy: body.invitedBy,
       couponCode: body.couponCode,
     });
@@ -413,7 +423,7 @@ export function createApi() {
       return;
     }
     res.status(result.status && result.status !== 200 ? result.status : 200).json({
-      registration: present(result.registration),
+      registration: present(result.registration, ownerAccess(result.registration, req.get("x-resume-token"))),
       upay: result.upay,
       error: result.error,
     });
@@ -429,7 +439,7 @@ export function createApi() {
       return;
     }
     res.status(result.status && result.status !== 200 ? result.status : 200).json({
-      registration: present(result.registration),
+      registration: present(result.registration, ownerAccess(result.registration, req.get("x-resume-token"))),
       hitpay: result.hitpay,
       error: result.error,
     });
@@ -441,7 +451,7 @@ export function createApi() {
       res.status(result.status || 404).json({ error: result.error || "Payment not found" });
       return;
     }
-    sendHitpay(res, result, false);
+    sendHitpay(res, { ...result, ...ownerAccess(result.registration, req.get("x-resume-token")) }, false);
   });
 
   router.post("/webhooks/hitpay", express.text({ type: "*/*", limit: "1mb" }), async (req, res) => {
@@ -584,19 +594,22 @@ export function createApi() {
   });
 
   router.patch("/admin/payment-channels", requireAdmin, (req, res) => {
-    res.json({ channels: savePaymentChannels(db(), req.body || {}), hitpayConfigured: hitpayConfigured() });
+    const channels = savePaymentChannels(db(), req.body || {});
+    writeAudit(db(), req.admin.id, "payment_channel.update", "payment_channels");
+    res.json({ channels, hitpayConfigured: hitpayConfigured() });
   });
 
   router.get("/admin/dashboard", requireAdmin, (_req, res) => {
     res.json(dashboardStats(db()));
   });
 
-  router.get("/admin/registrations", requireAdmin, (_req, res) => {
+  router.get("/admin/registrations", requireAdmin, (req, res) => {
     const rows = db().prepare(`
       SELECT r.id
       FROM registrations r
       ORDER BY r.created_at DESC, r.id DESC
     `).all();
+    writeAudit(db(), req.admin.id, "registration.list", "registrations");
     res.json(rows.map((row) => present(getRegistration(db(), row.id))));
   });
 
@@ -617,6 +630,7 @@ export function createApi() {
       installmentId: due.id,
       amountCents: due.amount_cents - due.amount_paid_cents,
       method: "admin",
+      adminUserId: req.admin.id,
     });
     res.json(present(updated));
   });
@@ -649,7 +663,9 @@ export function createApi() {
       return;
     }
     try {
-      res.json(present(updateRegistration(db(), row.id, req.body || {})));
+      const updated = updateRegistration(db(), row.id, req.body || {});
+      writeAudit(db(), req.admin.id, "registration.update", req.params.reference);
+      res.json(present(updated));
     } catch (error) {
       res.status(400).json({ error: clientError(error, "Registration was not saved") });
     }
@@ -661,7 +677,9 @@ export function createApi() {
       res.status(404).json({ error: "Registration not found" });
       return;
     }
-    res.json(present(cancelRegistration(db(), row.id)));
+    const updated = cancelRegistration(db(), row.id);
+    writeAudit(db(), req.admin.id, "registration.cancel", req.params.reference);
+    res.json(present(updated));
   });
 
   router.get("/admin/products", requireAdmin, (_req, res) => {
@@ -683,6 +701,7 @@ export function createApi() {
         INSERT INTO coupons (code, discount_type, discount_value, currency, ticket_code, email, usage_limit, expires_on)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(coupon.code, coupon.discountType, coupon.discountValue, coupon.currency, coupon.ticketCode, coupon.email, coupon.usageLimit, coupon.expiresOn);
+      writeAudit(db(), req.admin.id, "coupon.create", coupon.code);
       res.status(201).json(db().prepare("SELECT * FROM coupons WHERE id = ?").get(result.lastInsertRowid));
     } catch (error) {
       res.status(400).json({ error: clientError(error, "Coupon was not saved") });
@@ -706,6 +725,7 @@ export function createApi() {
         SET code = ?, discount_type = ?, discount_value = ?, currency = ?, ticket_code = ?, email = ?, usage_limit = ?, expires_on = ?
         WHERE id = ?
       `).run(coupon.code, coupon.discountType, coupon.discountValue, coupon.currency, coupon.ticketCode, coupon.email, coupon.usageLimit, coupon.expiresOn, existing.id);
+      writeAudit(db(), req.admin.id, "coupon.update", coupon.code);
       res.json(db().prepare("SELECT * FROM coupons WHERE id = ?").get(existing.id));
     } catch (error) {
       res.status(400).json({ error: clientError(error, "Coupon was not saved") });
@@ -811,10 +831,12 @@ export function createApi() {
       return;
     }
     const saved = importChapters(db(), names);
+    writeAudit(db(), req.admin.id, "chapter.import", String(saved));
     res.json({ saved, chapters: listChapters(db()) });
   });
 
-  router.get("/admin/members", requireAdmin, (_req, res) => {
+  router.get("/admin/members", requireAdmin, (req, res) => {
+    writeAudit(db(), req.admin.id, "member.list", "members");
     res.json(listMembers(db()));
   });
 
@@ -843,6 +865,7 @@ export function createApi() {
       for (const member of rows) saveMember(db(), member);
     });
     saveAll(members);
+    writeAudit(db(), req.admin.id, "member.import", String(members.length));
     res.json({ saved: members.length, members: listMembers(db()) });
   });
 

@@ -1,4 +1,45 @@
+import { createHmac, timingSafeEqual } from "crypto";
+
 const STATUSES = new Set(["updated", "delayed", "cancelled"]);
+const PROOF_WINDOW = 2 * 60 * 60 * 1000;
+
+function proofSecret() {
+  return process.env.ADMIN_SESSION_SECRET || "ibmc-dev-session";
+}
+
+function phoneKey(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : "";
+}
+
+export function findMemberRow(db, query) {
+  const value = String(query || "").trim().toLowerCase();
+  if (!value) return null;
+  if (value.includes("@")) return db.prepare("SELECT * FROM members WHERE lower(email) = ?").get(value) || null;
+  return db.prepare("SELECT * FROM members").all().find((member) => phoneKey(member.mobile) && phoneKey(member.mobile) === phoneKey(value)) || null;
+}
+
+export function signMemberProof(memberId) {
+  const payload = Buffer.from(JSON.stringify({ id: memberId, exp: Date.now() + PROOF_WINDOW })).toString("base64url");
+  const signature = createHmac("sha256", proofSecret()).update(`member-lookup:${payload}`).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+export function memberFromProof(db, token) {
+  const [payload, signature] = String(token || "").split(".");
+  if (!payload || !signature) return null;
+  const expected = createHmac("sha256", proofSecret()).update(`member-lookup:${payload}`).digest("base64url");
+  const left = Buffer.from(signature);
+  const right = Buffer.from(expected);
+  if (left.length !== right.length || !timingSafeEqual(left, right)) return null;
+  try {
+    const data = JSON.parse(Buffer.from(payload, "base64url").toString());
+    if (!data?.id || Number(data.exp) < Date.now()) return null;
+    return db.prepare("SELECT * FROM members WHERE id = ?").get(Number(data.id)) || null;
+  } catch {
+    return null;
+  }
+}
 
 export function parseMemberCsv(csv) {
   const rows = [];
@@ -170,16 +211,14 @@ export function updateMemberProfile(db, currentEmail, input) {
       full_name = ?, email = ?, mobile = ?, category = ?, business_name = ?, chapter = ?, updated_at = datetime('now')
     WHERE id = ?
   `).run(fullName, nextEmail, mobile, industry, business, known?.name || chapter, existing.id);
-  return { member: lookupMember(db, nextEmail) };
+  const member = lookupMember(db, nextEmail);
+  if (!member) return { error: "We couldn't find that membership", status: 404 };
+  const { id, ...visible } = member;
+  return { member: visible };
 }
 
 export function listMembers(db) {
   return db.prepare("SELECT * FROM members ORDER BY registered_at DESC, id DESC").all().map(presentMember);
-}
-
-function phoneKey(value) {
-  const digits = String(value || "").replace(/\D/g, "");
-  return digits.length >= 10 ? digits.slice(-10) : "";
 }
 
 function sameMobile(left, right) {
@@ -192,23 +231,48 @@ function sameMobile(left, right) {
   return a === b;
 }
 
+function missingLabels(row) {
+  const missing = [];
+  if (!String(row.full_name || "").trim()) missing.push("name");
+  if (!String(row.business_name || "").trim()) missing.push("business name");
+  if (!String(row.category || "").trim()) missing.push("category");
+  if (!String(row.chapter || "").trim()) missing.push("chapter");
+  if (!String(row.email || "").includes("@")) missing.push("email");
+  if (!phoneKey(row.mobile)) missing.push("mobile number");
+  return missing;
+}
+
 export function lookupMember(db, query) {
-  const value = String(query || "").trim().toLowerCase();
-  if (!value) return null;
-  const row = value.includes("@")
-    ? db.prepare("SELECT * FROM members WHERE lower(email) = ?").get(value)
-    : db.prepare("SELECT * FROM members").all().find((member) => phoneKey(member.mobile) && phoneKey(member.mobile) === phoneKey(value));
+  const row = findMemberRow(db, query);
   if (!row) return null;
   const digits = String(row.mobile || "").replace(/\D/g, "");
   const last4 = digits.slice(-4);
+  const missing = missingLabels(row);
   return {
+    id: row.id,
     fullName: row.full_name,
     business: row.business_name || "",
     industry: row.category || "",
     chapter: row.chapter || "",
     email: row.email,
     mobile: row.mobile,
-    mobileMasked: last4 ? `+63 ••• ${last4}` : row.mobile,
+    mobileMasked: last4 ? `+63 ••• ${last4}` : "",
+    profileReady: missing.length === 0,
+    missing,
+  };
+}
+
+export function toPublicMember(member, registered) {
+  return {
+    fullName: member.fullName,
+    business: member.business,
+    industry: member.industry,
+    chapter: member.chapter,
+    mobileMasked: member.mobileMasked,
+    registered: Boolean(registered),
+    profileReady: Boolean(member.profileReady),
+    missing: member.missing || [],
+    memberToken: signMemberProof(member.id),
   };
 }
 

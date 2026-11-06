@@ -1,4 +1,5 @@
 import { createHmac, randomInt, timingSafeEqual } from "crypto";
+import { findMemberRow } from "./members.js";
 import { sendEmail } from "./providers.js";
 import { findRegistrationByContact } from "./registrations.js";
 
@@ -31,10 +32,10 @@ export function maskEmail(email) {
   return `${shown}${"*".repeat(Math.max(1, name.length - shown.length))}@${domain}`;
 }
 
-export function issueMemberOtp(db, email) {
-  const normalized = String(email || "").trim().toLowerCase();
-  const member = db.prepare("SELECT email FROM members WHERE email = ?").get(normalized);
+export function issueMemberOtp(db, query) {
+  const member = findMemberRow(db, query);
   if (!member) return { error: "We couldn't find that membership", status: 404 };
+  const normalized = member.email.trim().toLowerCase();
   const recent = db.prepare("SELECT created_at FROM member_otps WHERE email = ? ORDER BY id DESC LIMIT 1").get(normalized);
   if (recent && Date.now() - recent.created_at < RESEND_WAIT) {
     return { maskedEmail: maskEmail(normalized), waited: true };
@@ -65,8 +66,10 @@ export async function sendMemberOtp(db, email) {
   return { maskedEmail: issued.maskedEmail };
 }
 
-export function verifyMemberOtp(db, email, code) {
-  const normalized = String(email || "").trim().toLowerCase();
+export function verifyMemberOtp(db, query, code) {
+  const member = findMemberRow(db, query);
+  if (!member) return { error: "We couldn't find that membership", status: 404 };
+  const normalized = member.email.trim().toLowerCase();
   const entered = String(code || "").replace(/\D/g, "");
   const row = db.prepare("SELECT * FROM member_otps WHERE email = ? ORDER BY id DESC LIMIT 1").get(normalized);
   if (!row || row.expires_at < Date.now() || row.attempts >= MAX_ATTEMPTS) {
@@ -77,7 +80,7 @@ export function verifyMemberOtp(db, email, code) {
     return { error: "That code is wrong.", status: 400 };
   }
   db.prepare("DELETE FROM member_otps WHERE email = ?").run(normalized);
-  return { ok: true, editToken: memberEditToken(normalized) };
+  return { ok: true, editToken: memberEditToken(normalized), email: normalized };
 }
 
 const EDIT_WINDOW = 30 * 60 * 1000;

@@ -125,10 +125,13 @@ type FoundMember = {
   business: string;
   industry: string;
   chapter: string;
-  email: string;
-  mobile: string;
+  email?: string;
+  mobile?: string;
   mobileMasked: string;
   registered?: boolean;
+  profileReady?: boolean;
+  missing?: string[];
+  memberToken?: string;
 };
 
 type StoredPayment = {
@@ -178,6 +181,25 @@ function resumeHeaders(extra: Record<string, string> = {}, token = "") {
   const resume = token || localStorage.getItem(RESUME_KEY) || "";
   if (resume) headers["X-Resume-Token"] = resume;
   return headers;
+}
+
+function mergeStored(current: StoredRegistration, next: StoredRegistration): StoredRegistration {
+  const previous = current.attendee;
+  const incoming = next.attendee;
+  return {
+    ...next,
+    resumeToken: next.resumeToken || current.resumeToken,
+    qrToken: next.qrToken || current.qrToken,
+    attendee: {
+      ...incoming,
+      fullName: incoming.fullName || previous.fullName,
+      email: incoming.email || previous.email,
+      mobile: incoming.mobile || previous.mobile,
+      business: incoming.business || previous.business,
+      industry: incoming.industry || previous.industry,
+      chapter: incoming.chapter || previous.chapter,
+    },
+  };
 }
 const CALENDAR_URL =
   "https://calendar.google.com/calendar/render?action=TEMPLATE&text=IBMC%202027&dates=20270616/20270618&location=Newport%20Performing%20Arts%20Theater%2C%20Pasay%20City&details=IBMC%202027%20%C2%B7%20June%2016%E2%80%9317";
@@ -344,14 +366,15 @@ function memberAttendee(member: FoundMember, audience: Audience = "member"): Att
     business: member.business,
     industry: member.industry,
     chapter: member.chapter,
-    email: member.email,
-    mobile: member.mobile,
+    email: member.email || "",
+    mobile: member.mobile || "",
     invitedBy: "",
     international: false,
   };
 }
 
 function membershipHoldNote(member: FoundMember, editing: boolean) {
+  if (member.profileReady) return "";
   const person = memberAttendee(member);
   const checks: Array<[string, string]> = [
     [person.fullName, "name"],
@@ -361,7 +384,9 @@ function membershipHoldNote(member: FoundMember, editing: boolean) {
     [person.email, "email"],
     [person.mobile, "mobile number"],
   ];
-  const missing = checks.filter(([value]) => !value.trim()).map(([, label]) => label);
+  const missing = member.missing?.length
+    ? member.missing
+    : checks.filter(([value]) => !value.trim()).map(([, label]) => label);
   if (!missing.length) return "";
   const listed = missing.length === 1 ? `your ${missing[0]}` : `your ${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]}`;
   const add = missing.length === 1 ? "add it" : "add them";
@@ -406,7 +431,9 @@ function RegistrationWizard() {
   const [chapters, setChapters] = useState<string[]>([]);
   const [testMode, setTestMode] = useState(false);
   const [installmentTest, setInstallmentTest] = useState(false);
-  const [testsOpen, setTestsOpen] = useState(() => import.meta.env.DEV || (typeof window !== "undefined" && window.location.hostname.includes("staging")));
+  const [memberProof, setMemberProof] = useState("");
+  const [testsOpen, setTestsOpen] = useState(false);
+  const [testTicketOpen, setTestTicketOpen] = useState(false);
 
   useEffect(() => {
     let stop = false;
@@ -414,7 +441,10 @@ function RegistrationWizard() {
       .then(async (response) => {
         if (!response.ok) return;
         const payload = await response.json();
-        if (!stop) setTestsOpen(Boolean(payload.tests));
+        if (!stop) {
+          setTestsOpen(Boolean(payload.tests));
+          setTestTicketOpen(Boolean(payload.testTicket));
+        }
       })
       .catch(() => undefined);
     return () => {
@@ -464,11 +494,11 @@ function RegistrationWizard() {
       const response = await fetch("/api/members/otp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: member.email }),
+        body: JSON.stringify({ query: lookup.trim() }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Could not send the code");
-      setOtpSentTo(payload.maskedEmail || member.email);
+      setOtpSentTo(payload.maskedEmail || "your email");
       setOtpCode("");
     } catch (error) {
       setOtpError(error instanceof Error ? error.message : "Could not send the code");
@@ -485,12 +515,14 @@ function RegistrationWizard() {
       const response = await fetch("/api/members/otp/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: member.email, code: otpCode }),
+        body: JSON.stringify({ query: lookup.trim(), code: otpCode }),
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "That code is wrong.");
+      const nextMember = payload.member || member;
+      setMember(nextMember);
       setEditToken(payload.editToken || "");
-      setAttendee(memberAttendee(member));
+      setAttendee(memberAttendee(nextMember));
       setStep("guest");
     } catch (error) {
       setOtpError(error instanceof Error ? error.message : "That code is wrong.");
@@ -531,6 +563,7 @@ function RegistrationWizard() {
     setTestMode(false);
     setInstallmentTest(false);
     setMemberTest(false);
+    setMemberProof("");
     if (audience === "member") {
       setStep("member");
       return;
@@ -545,6 +578,7 @@ function RegistrationWizard() {
     setTestMode(true);
     setInstallmentTest(false);
     setMemberTest(false);
+    setMemberProof("");
     setAttendee(emptyGuest(false));
     setPlan("full");
     setAgreed(false);
@@ -555,6 +589,7 @@ function RegistrationWizard() {
     setTestMode(false);
     setInstallmentTest(true);
     setMemberTest(false);
+    setMemberProof("");
     setAttendee(emptyGuest(false));
     setPlan("installment");
     setAgreed(false);
@@ -565,6 +600,7 @@ function RegistrationWizard() {
     setTestMode(false);
     setInstallmentTest(false);
     setMemberTest(true);
+    setMemberProof("");
     setMember(null);
     setLookup("");
     setLookedUp(false);
@@ -667,6 +703,7 @@ function RegistrationWizard() {
         invitedBy: attendee.invitedBy,
         attendeeType: attendee.audience,
         couponCode: plan === "full" ? coupon?.code || "" : "",
+        memberToken: memberProof || undefined,
       };
       const path = !peso
         ? "/api/registrations"
@@ -720,7 +757,7 @@ function RegistrationWizard() {
         </div>
         {localTier ? <PriceStrip tier={localTier} /> : <p className="m-0 text-[15px]">Registration closed on May 31, 2027.</p>}
         <h2 className="m-0 mt-1.5 text-[17px] font-bold">Who's registering?</h2>
-        {import.meta.env.DEV && testsOpen ? <Choice title="Test ticket · ₱10" body="Available now, for a local payment test." emphasis onClick={startTest} /> : null}
+        {import.meta.env.DEV && testTicketOpen ? <Choice title="Test ticket · ₱10" body="Available now, for a local payment test." emphasis onClick={startTest} /> : null}
         {testsOpen ? <Choice title="Test installment · ₱200" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." emphasis onClick={startInstallmentTest} /> : null}
         <Choice title={liveCopy ? "I'm a BNI Philippines Member" : "I'm a BNI member"} body="Quick registration. We'll fill in your details." emphasis onClick={() => choose("member")} />
         {testsOpen ? <Choice title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." emphasis onClick={startMemberTest} /> : null}
@@ -769,7 +806,18 @@ function RegistrationWizard() {
             Manage my registration
           </button>
         ) : member ? (
-          <PrimaryButton disabled={!detailsReady(memberAttendee(member))} onClick={() => { if (!detailsReady(memberAttendee(member))) return; setAttendee(memberAttendee(member)); setPlan(memberTest ? "test" : "full"); setStep("ticket"); }}>Continue</PrimaryButton>
+          <PrimaryButton disabled={!member.profileReady && !detailsReady(memberAttendee(member))} onClick={() => {
+            if (!member.profileReady && !detailsReady(memberAttendee(member))) return;
+            const typed = lookup.trim();
+            setMemberProof(member.memberToken || "");
+            setAttendee({
+              ...memberAttendee(member),
+              email: member.email || (typed.includes("@") ? typed : ""),
+              mobile: member.mobile || (typed.includes("@") ? "" : typed),
+            });
+            setPlan(memberTest ? "test" : "full");
+            setStep("ticket");
+          }}>Continue</PrimaryButton>
         ) : null}
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep("start")}>← Back</button>
@@ -1343,9 +1391,9 @@ function UpayPending({
     if (!current.senderRefId || current.status === "paid") return;
     setChecking(true);
     try {
-      const response = await fetch(`/api/payments/upay/${current.senderRefId}`);
+      const response = await fetch(`/api/payments/upay/${current.senderRefId}`, { headers: resumeHeaders() });
       const payload = await response.json();
-      if (payload.registration && payload.upay) onUpdate(payload.registration, payload.upay);
+      if (payload.registration && payload.upay) onUpdate(mergeStored(record, payload.registration), payload.upay);
       if (!response.ok) throw new Error(payload.error || "UnionBank has not confirmed the payment yet.");
       if (payload.error && payload.upay?.status === "pending") setError(payload.error);
       else if (payload.upay?.status === "failed") setError(payload.upay.state || "UnionBank declined the payment.");
@@ -1387,7 +1435,7 @@ function UpayPending({
       <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Pay {channel}</h1>
       <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">
         {due ? `${money(due.amountCents, record.currency)} to ${session.billerName}. ` : ""}
-        This page updates when UnionBank confirms the payment. The receipt goes to {record.attendee.email}.
+        This page updates when UnionBank confirms the payment.{record.attendee.email ? ` The receipt goes to ${record.attendee.email}.` : ""}
       </p>
       {session.qrDataUrl ? (
         <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
@@ -1452,9 +1500,9 @@ function HitpayPending({
     if (!current.sessionId || current.status === "paid" || current.status === "failed") return;
     setChecking(true);
     try {
-      const response = await fetch(`/api/payments/hitpay/${current.sessionId}`);
+      const response = await fetch(`/api/payments/hitpay/${current.sessionId}`, { headers: resumeHeaders() });
       const payload = await response.json();
-      if (payload.registration && payload.hitpay) onUpdate(payload.registration, payload.hitpay);
+      if (payload.registration && payload.hitpay) onUpdate(mergeStored(record, payload.registration), payload.hitpay);
       if (!response.ok && !payload.hitpay) throw new Error(payload.error || "HitPay has not confirmed the payment yet.");
       if (payload.hitpay?.status === "failed") setError("This payment can't continue. Nothing was charged.");
       else if (payload.error && payload.hitpay?.status === "pending") setError(payload.error);
@@ -1478,9 +1526,9 @@ function HitpayPending({
     setRefreshing(true);
     setError("");
     try {
-      const response = await fetch(`/api/payments/hitpay/${session.sessionId}/refresh-qr`, { method: "POST" });
+      const response = await fetch(`/api/payments/hitpay/${session.sessionId}/refresh-qr`, { method: "POST", headers: resumeHeaders() });
       const payload = await response.json();
-      if (payload.registration && payload.hitpay) onUpdate(payload.registration, payload.hitpay);
+      if (payload.registration && payload.hitpay) onUpdate(mergeStored(record, payload.registration), payload.hitpay);
       if (!response.ok) throw new Error(payload.error || "A new QR could not be created.");
     } catch (refreshError) {
       setError(refreshError instanceof Error ? refreshError.message : "A new QR could not be created.");
@@ -1512,7 +1560,7 @@ function HitpayPending({
       <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">
         {session.channel === "online" ? "Checking payment status. " : ""}
         {due ? `${money(due.amountCents, record.currency)} for IBMC 2027. ` : ""}
-        The receipt goes to {record.attendee.email}. Coming back to this page does not by itself confirm the payment.
+        {record.attendee.email ? `The receipt goes to ${record.attendee.email}. ` : ""}Coming back to this page does not by itself confirm the payment.
       </p>
       {session.channel === "qr" && session.qrDataUrl ? (
         <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
@@ -1565,7 +1613,7 @@ function HitpayReturn({ sessionId }: { sessionId: string }) {
     let stop = false;
     async function load() {
       try {
-        const response = await fetch(`/api/payments/hitpay/${sessionId}`);
+        const response = await fetch(`/api/payments/hitpay/${sessionId}`, { headers: resumeHeaders() });
         const payload = await response.json();
         if (stop) return;
         if (payload.registration) setRecord(payload.registration);

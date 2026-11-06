@@ -58,10 +58,34 @@ assert.equal(pass.fullName, "Amina Cruz");
 assert.equal(pass.reference, registration.reference);
 assert.equal(getEntryPass(db, "made-up-token"), null);
 
+process.env.ALLOW_TEST_REGISTRATION = "true";
+db.prepare(`
+  INSERT INTO ticket_products (
+    code, name, audience, currency, full_price_cents, installment_total_cents,
+    sales_start, sales_end, allows_installment
+  ) VALUES ('test_50', 'Test Payment', 'local', 'PHP', 5000, NULL, '2020-01-01', '2027-05-31', 0)
+`).run();
+const testRegistration = createRegistration(db, {
+  productCode: "test_50",
+  paymentPlan: "full",
+  fullName: "Test Person",
+  email: "test50@example.com",
+  mobile: "09170000050",
+  registeredOn: "2026-11-12",
+});
+const testPaid = recordPayment(db, { registrationId: testRegistration.id, amountCents: 5_000, method: "manual" });
+assert.ok(testPaid.qr_token);
+assert.equal(getEntryPass(db, testPaid.qr_token), null);
+delete process.env.ALLOW_TEST_REGISTRATION;
+
 const file = path.join(os.tmpdir(), `ibmc-verify-${process.pid}.sqlite`);
 fs.rmSync(file, { force: true });
 process.env.IBMC_DB_PATH = file;
 process.env.ALLOW_TEST_TICKET = "";
+delete process.env.ALLOW_TEST_REGISTRATION;
+process.env.ADMIN_EMAIL = "audit@example.com";
+process.env.ADMIN_PASSWORD = "correct-horse-battery";
+process.env.ADMIN_SESSION_SECRET = "security-audit-test-secret-32ch";
 const { createApi } = await import("./api.js");
 const seeded = openDatabase(file);
 seeded.prepare("UPDATE ticket_products SET sales_start = '2020-01-01'").run();
@@ -119,6 +143,110 @@ try {
 
   const missing = await fetch(`${base}/api/passes/not-a-real-pass`);
   assert.equal(missing.status, 404);
+
+  const options = await fetch(`${base}/api/registration-options`);
+  const optionBody = await options.json();
+  assert.equal(options.status, 200);
+  assert.equal(optionBody.tests, false);
+  assert.equal(optionBody.testTicket, false);
+  const testSale = await fetch(`${base}/api/registrations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      productCode: "test_50",
+      paymentPlan: "full",
+      fullName: "Test Person",
+      email: "test50-http@example.com",
+      mobile: "09170000051",
+      attendeeType: "member",
+    }),
+  });
+  assert.equal(testSale.status, 400);
+
+  const side = openDatabase(file);
+  side.prepare(`
+    INSERT INTO members (
+      full_name, email, mobile, chapter, category, business_name, reg_status, registered_at
+    ) VALUES ('Member One', 'member.one@example.com', '09181234567', 'Makati', 'Consulting', 'One Co', 'updated', '2026-11-01')
+  `).run();
+  const registrationId = side.prepare("SELECT id FROM registrations WHERE reference = ?").get(body.reference).id;
+  const installmentId = side.prepare("SELECT id FROM registration_installments WHERE registration_id = ? ORDER BY sequence LIMIT 1").get(registrationId).id;
+  side.prepare(`
+    INSERT INTO upay_payments (
+      registration_id, installment_id, sender_ref_id, amount_cents, currency, payment_method,
+      status, payment_url
+    ) VALUES (?, ?, 'IBMCSECURITYTEST', 1200000, 'PHP', 'instapay', 'pending', 'https://example.test/pay')
+  `).run(registrationId, installmentId);
+  side.close();
+
+  const lookedUp = await fetch(`${base}/api/members/lookup?q=${encodeURIComponent("member.one@example.com")}`);
+  const looked = await lookedUp.json();
+  assert.equal(lookedUp.status, 200);
+  assert.equal(looked.fullName, "Member One");
+  assert.equal(looked.email, undefined);
+  assert.equal(looked.mobile, undefined);
+  assert.equal(looked.profileReady, true);
+  assert.ok(looked.memberToken);
+
+  const proved = await fetch(`${base}/api/registrations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      productCode: "first_mover",
+      paymentPlan: "full",
+      fullName: "Member One",
+      email: "attacker@example.com",
+      mobile: "09170000999",
+      attendeeType: "member",
+      memberToken: looked.memberToken,
+      business: "One Co",
+      industry: "Consulting",
+      chapter: "Makati",
+    }),
+  });
+  const provedBody = await proved.json();
+  assert.equal(proved.status, 201);
+  assert.equal(provedBody.attendee.email, "member.one@example.com");
+  assert.equal(provedBody.attendee.mobile, "09181234567");
+
+  const hiddenPay = await fetch(`${base}/api/payments/upay/IBMCSECURITYTEST`);
+  const hiddenPayBody = await hiddenPay.json();
+  assert.equal(hiddenPay.status, 200);
+  assert.equal(hiddenPayBody.registration.attendee.email, "");
+  assert.equal(hiddenPayBody.registration.attendee.mobile, "");
+  assert.equal(hiddenPayBody.registration.reference, body.reference);
+  assert.equal(hiddenPayBody.upay.senderRefId, "IBMCSECURITYTEST");
+
+  const shownPay = await fetch(`${base}/api/payments/upay/IBMCSECURITYTEST`, {
+    headers: { "X-Resume-Token": body.resumeToken },
+  });
+  const shownPayBody = await shownPay.json();
+  assert.equal(shownPayBody.registration.attendee.email, "amina@example.com");
+  assert.equal(shownPayBody.registration.attendee.fullName, "Amina Cruz");
+
+  const login = await fetch(`${base}/api/admin/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "audit@example.com", password: "correct-horse-battery" }),
+  });
+  assert.equal(login.status, 200);
+  const cookie = (login.headers.get("set-cookie") || "").split(";")[0];
+  assert.ok(cookie.startsWith("ibmc_admin="));
+  const marked = await fetch(`${base}/api/admin/registrations/${body.reference}/payments`, {
+    method: "POST",
+    headers: { cookie },
+  });
+  assert.equal(marked.status, 200);
+  const listed = await fetch(`${base}/api/admin/registrations`, { headers: { cookie } });
+  assert.equal(listed.status, 200);
+  const check = openDatabase(file);
+  const audit = check.prepare("SELECT action, target, amount_cents, admin_id FROM admin_audit ORDER BY id").all();
+  assert.ok(audit.some((row) => row.action === "registration.payment" && row.target === body.reference && row.amount_cents === 1_200_000 && row.admin_id));
+  assert.ok(audit.some((row) => row.action === "registration.list" && row.target === "registrations"));
+  const payment = check.prepare("SELECT admin_user_id, method FROM payments WHERE registration_id = ?").get(registrationId);
+  assert.equal(payment.method, "admin");
+  assert.equal(payment.admin_user_id, audit.find((row) => row.action === "registration.payment").admin_id);
+  check.close();
 } finally {
   await new Promise((resolve) => server.close(resolve));
   fs.rmSync(file, { force: true });

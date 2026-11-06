@@ -7,6 +7,7 @@ import { addDays, manilaParts } from "./time.js";
 
 delete process.env.RESEND_API_KEY;
 delete process.env.SEMAPHORE_API_KEY;
+process.env.ALLOW_TEST_REGISTRATION = "true";
 
 const db = openDatabase(":memory:");
 const today = manilaParts().date;
