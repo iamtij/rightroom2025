@@ -99,6 +99,55 @@ export function saveMember(db, input) {
   );
 }
 
+export function memberContactClash(db, { email, mobile, excludeId = 0 }) {
+  const nextEmail = String(email || "").trim().toLowerCase();
+  if (nextEmail) {
+    const emailOwner = db.prepare("SELECT id FROM members WHERE email = ? AND id != ?").get(nextEmail, excludeId);
+    if (emailOwner) return "That email is already on the roster.";
+  }
+  const key = phoneKey(mobile);
+  const digits = String(mobile || "").replace(/\D/g, "");
+  if (!key && !digits) return "";
+  const owner = db.prepare("SELECT id, mobile FROM members WHERE id != ?").all(excludeId)
+    .find((row) => sameMobile(row.mobile, mobile));
+  if (owner) return "That mobile number is already on the roster.";
+  return "";
+}
+
+export function updateMemberRecord(db, id, input) {
+  const existing = db.prepare("SELECT * FROM members WHERE id = ?").get(id);
+  if (!existing) return { error: "Member not found", status: 404 };
+  const fullName = String(input.fullName || "").trim();
+  const email = String(input.email || "").trim().toLowerCase();
+  const mobile = String(input.mobile || "").trim();
+  if (!fullName || !email.includes("@") || !mobile) {
+    return { error: "Name, email, and mobile are required", status: 400 };
+  }
+  const clash = memberContactClash(db, { email, mobile, excludeId: existing.id });
+  if (clash) return { error: clash, status: 400 };
+  const status = STATUSES.has(input.regStatus) ? input.regStatus : existing.reg_status;
+  db.prepare(`
+    UPDATE members SET
+      full_name = ?, email = ?, mobile = ?, chapter = ?, category = ?, business_name = ?,
+      ticket_type = ?, reg_status = ?, country = ?, gold_club = ?, registered_at = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(
+    fullName,
+    email,
+    mobile,
+    blank(input.chapter),
+    blank(input.category),
+    blank(input.businessName),
+    blank(input.ticketType),
+    status,
+    blank(input.country),
+    input.goldClub ? 1 : 0,
+    input.registeredAt || existing.registered_at,
+    existing.id,
+  );
+  return { member: listMembers(db).find((member) => member.id === existing.id) };
+}
+
 export function updateMemberProfile(db, currentEmail, input) {
   const email = String(currentEmail || "").trim().toLowerCase();
   const existing = db.prepare("SELECT * FROM members WHERE email = ?").get(email);
@@ -115,9 +164,8 @@ export function updateMemberProfile(db, currentEmail, input) {
   const known = db.prepare("SELECT name FROM chapters WHERE lower(name) = lower(?)").get(chapter);
   const sameAsCurrent = chapter.toLowerCase() === String(existing.chapter || "").trim().toLowerCase();
   if (!known && !sameAsCurrent) return { error: "Choose a chapter from the list.", status: 400 };
-  if (nextEmail !== email && db.prepare("SELECT id FROM members WHERE email = ?").get(nextEmail)) {
-    return { error: "That email is already on the roster.", status: 400 };
-  }
+  const clash = memberContactClash(db, { email: nextEmail, mobile, excludeId: existing.id });
+  if (clash) return { error: clash, status: 400 };
   db.prepare(`
     UPDATE members SET
       full_name = ?, email = ?, mobile = ?, category = ?, business_name = ?, chapter = ?, updated_at = datetime('now')
@@ -133,6 +181,16 @@ export function listMembers(db) {
 function phoneKey(value) {
   const digits = String(value || "").replace(/\D/g, "");
   return digits.length >= 10 ? digits.slice(-10) : "";
+}
+
+function sameMobile(left, right) {
+  const a = String(left || "").replace(/\D/g, "");
+  const b = String(right || "").replace(/\D/g, "");
+  if (!a || !b) return false;
+  const aKey = phoneKey(a);
+  const bKey = phoneKey(b);
+  if (aKey && bKey) return aKey === bKey;
+  return a === b;
 }
 
 export function lookupMember(db, query) {

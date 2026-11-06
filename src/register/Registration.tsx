@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   INDUSTRIES,
   addDays,
@@ -6,6 +6,7 @@ import {
   formatMonthDate,
   manilaDate,
   money,
+  testTier,
   tierFor,
   type Currency,
   type PayPlan,
@@ -13,7 +14,95 @@ import {
 } from "./plans";
 
 type Audience = "member" | "guest" | "international";
-type Step = "start" | "member" | "guest" | "confirm" | "ticket" | "pay" | "done" | "manage";
+type Step = "start" | "member" | "guest" | "confirm" | "ticket" | "pay" | "paying" | "done" | "manage";
+type UpayMethod = "instapay" | "paygate" | "UB Online";
+
+type UpaySession = {
+  senderRefId: string;
+  paymentMethod: UpayMethod;
+  status: "pending" | "paid" | "failed";
+  state: string;
+  qrDataUrl: string;
+  paymentUrl: string;
+  billerName: string;
+};
+
+const UPAY_METHODS: { id: UpayMethod; label: string; detail: string }[] = [
+  { id: "instapay", label: "InstaPay", detail: "Bank or e-wallet. You get a QR to scan." },
+  { id: "UB Online", label: "UnionBank Online", detail: "Pay from a UnionBank account." },
+  { id: "paygate", label: "Other banks", detail: "Pay through PCHC Paygate." },
+];
+
+type PayChannelCode = "upay" | "hitpay_qr" | "hitpay_online";
+
+type PayChannel = {
+  code: PayChannelCode;
+  label: string;
+  detail: string;
+};
+
+type HitpaySession = {
+  sessionId: string;
+  channel: "qr" | "online";
+  status: "pending" | "paid" | "failed" | "expired";
+  qrDataUrl: string;
+  paymentUrl: string;
+  expiresAt: string;
+  refreshesLeft: number;
+  canRefresh: boolean;
+};
+
+function isPayChannel(value: string): value is PayChannelCode {
+  return value === "upay" || value === "hitpay_qr" || value === "hitpay_online";
+}
+
+function safeHitpayUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return "";
+    const host = url.hostname.toLowerCase();
+    if (host !== "hit-pay.com" && !host.endsWith(".hit-pay.com")) return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function hitpayApiChannel(code: PayChannelCode) {
+  if (code === "hitpay_qr") return "qr";
+  if (code === "hitpay_online") return "online";
+  return "";
+}
+
+function payActionLabel(channel: PayChannelCode | "", amount: string, busy: boolean) {
+  if (busy) return channel === "upay" || !channel ? "Opening UnionBank" : "Opening payment";
+  if (channel === "hitpay_qr") return `Pay with QR · ${amount}`;
+  if (channel === "hitpay_online") return `Pay with online banking · ${amount}`;
+  return `Pay with UnionBank · ${amount}`;
+}
+
+function usePaymentChannels() {
+  const [channels, setChannels] = useState<PayChannel[] | null>(null);
+  const [channel, setChannel] = useState<PayChannelCode | "">("");
+  useEffect(() => {
+    let stop = false;
+    fetch("/api/payment-channels")
+      .then((response) => response.json())
+      .then((payload) => {
+        if (stop) return;
+        const list = (Array.isArray(payload.channels) ? payload.channels : []).filter((item: PayChannel) => item && isPayChannel(String(item.code)));
+        setChannels(list);
+        setChannel((current) => (current && list.some((item: PayChannel) => item.code === current) ? current : list[0]?.code || ""));
+      })
+      .catch(() => {
+        if (!stop) setChannels([]);
+      });
+    return () => {
+      stop = true;
+    };
+  }, []);
+  return { channels, channel, setChannel };
+}
 
 type Attendee = {
   audience: Audience;
@@ -230,7 +319,7 @@ function memberAttendee(member: FoundMember, audience: Audience = "member"): Att
   };
 }
 
-export default function Registration() {
+function RegistrationWizard() {
   const today = manilaDate();
   const [step, setStep] = useState<Step>("start");
   const [attendee, setAttendee] = useState<Attendee | null>(null);
@@ -246,7 +335,11 @@ export default function Registration() {
   const [editToken, setEditToken] = useState("");
   const [plan, setPlan] = useState<PayPlan>("full");
   const [agreed, setAgreed] = useState(false);
-  const [method, setMethod] = useState("Credit or debit card");
+  const [method, setMethod] = useState<UpayMethod>("instapay");
+  const { channels, channel, setChannel } = usePaymentChannels();
+  const [checkoutReference, setCheckoutReference] = useState("");
+  const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
+  const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
   const [ticketError, setTicketError] = useState("");
   const [guestError, setGuestError] = useState("");
   const [showTerms, setShowTerms] = useState(false);
@@ -258,6 +351,7 @@ export default function Registration() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<StoredRegistration | null>(null);
   const [chapters, setChapters] = useState<string[]>([]);
+  const [testMode, setTestMode] = useState(false);
 
   useEffect(() => {
     fetch("/api/chapters")
@@ -281,7 +375,7 @@ export default function Registration() {
   }, []);
 
   const international = attendee?.international ?? false;
-  const tier = useMemo(() => tierFor(today, international), [today, international]);
+  const tier = useMemo(() => (testMode ? testTier() : tierFor(today, international)), [today, international, testMode]);
 
   function clearOtp() {
     setOtpSentTo("");
@@ -360,12 +454,21 @@ export default function Registration() {
   const othersOpen = today >= "2027-02-01";
 
   function choose(audience: Audience) {
+    setTestMode(false);
     if (audience === "member") {
       setStep("member");
       return;
     }
     if (!othersOpen) return;
     setAttendee(emptyGuest(audience === "international"));
+    setStep("guest");
+  }
+
+  function startTest() {
+    setTestMode(true);
+    setAttendee(emptyGuest(false));
+    setPlan("full");
+    setAgreed(false);
     setStep("guest");
   }
 
@@ -436,30 +539,58 @@ export default function Registration() {
   async function pay() {
     if (!attendee || !tier || saving || !tier.onSale) return;
     const useInstallment = plan === "installment" && Boolean(tier.installmentCents) && tier.rows.length > 0;
+    const peso = tier.currency === "PHP";
+    if (peso && !channel) return;
+    const hitpay = peso && channel ? hitpayApiChannel(channel) : "";
     setSaving(true);
     setPayError("");
     try {
-      const response = await fetch("/api/registrations", {
+      const registrationBody = {
+        productCode: tier.code,
+        paymentPlan: useInstallment ? "installment" : "full",
+        fullName: attendee.fullName,
+        email: attendee.email,
+        mobile: attendee.mobile,
+        business: attendee.business,
+        industry: attendee.industry,
+        chapter: attendee.chapter,
+        invitedBy: attendee.invitedBy,
+        attendeeType: attendee.audience,
+        couponCode: useInstallment ? "" : coupon?.code || "",
+      };
+      const path = !peso
+        ? "/api/registrations"
+        : hitpay
+          ? (checkoutReference ? `/api/registrations/${checkoutReference}/hitpay` : "/api/registrations/hitpay")
+          : (checkoutReference ? `/api/registrations/${checkoutReference}/upay` : "/api/registrations/upay");
+      const paymentBody = hitpay ? { channel: hitpay } : { paymentMethod: method };
+      const response = await fetch(path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          productCode: tier.code,
-          paymentPlan: useInstallment ? "installment" : "full",
-          fullName: attendee.fullName,
-          email: attendee.email,
-          mobile: attendee.mobile,
-          business: attendee.business,
-          industry: attendee.industry,
-          chapter: attendee.chapter,
-          invitedBy: attendee.invitedBy,
-          attendeeType: attendee.audience,
-          couponCode: useInstallment ? "" : coupon?.code || "",
-        }),
+        body: JSON.stringify(peso && checkoutReference ? paymentBody : peso ? { ...registrationBody, ...paymentBody } : registrationBody),
       });
       const payload = await response.json();
+      const record = payload.registration || (payload.reference ? payload : null);
+      if (record?.reference) {
+        localStorage.setItem(STORAGE_KEY, record.reference);
+        setSaved(record);
+        setCheckoutReference(record.reference);
+      }
       if (!response.ok) throw new Error(payload.error || "Registration was not saved");
-      localStorage.setItem(STORAGE_KEY, payload.reference);
-      setSaved(payload);
+      if (payload.upay?.senderRefId) {
+        setHitpaySession(null);
+        setUpaySession(payload.upay);
+        setStep("paying");
+        return;
+      }
+      if (payload.hitpay?.sessionId) {
+        setUpaySession(null);
+        setHitpaySession(payload.hitpay);
+        setStep("paying");
+        const url = payload.hitpay.channel === "online" ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
+        if (url) window.location.assign(url);
+        return;
+      }
       setStep("done");
     } catch (error) {
       setPayError(error instanceof Error ? error.message : "Registration was not saved");
@@ -479,6 +610,7 @@ export default function Registration() {
         </div>
         {localTier ? <PriceStrip tier={localTier} /> : <p className="m-0 text-[15px]">Registration closed on May 31, 2027.</p>}
         <h2 className="m-0 mt-1.5 text-[17px] font-bold">Who's registering?</h2>
+        {import.meta.env.DEV ? <Choice title="Test ticket · ₱10" body="Available now, for a local payment test." emphasis onClick={startTest} /> : null}
         <Choice title="I'm a BNI Philippines Member" body="Quick registration. We'll fill in your details." emphasis onClick={() => choose("member")} />
         <Choice title="Non-BNI Philippines member" body={othersOpen ? "New to BNI? You're welcome here." : "Available February 1, 2027"} disabled={!othersOpen} onClick={() => choose("guest")} />
         <Choice title="International delegate" body={othersOpen ? "Joining from outside the Philippines. Priced in USD." : "Available February 1, 2027"} disabled={!othersOpen} onClick={() => choose("international")} />
@@ -599,10 +731,10 @@ export default function Registration() {
     const memberPath = attendee.audience === "member";
     return (
       <Frame label="Step 1 of 4" step={1} footer={<PrimaryButton disabled={!detailsReady(attendee)} onClick={continueGuest}>Continue</PrimaryButton>}>
-        <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep(memberPath ? "member" : "start")}>← Back</button>
+        <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => { if (!memberPath) setTestMode(false); setStep(memberPath ? "member" : "start"); }}>← Back</button>
         <div className="flex flex-col gap-1.5">
           <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Your details</h1>
-          <p className="m-0 text-[15px] leading-normal text-[#5C5C63]">{memberPath ? "Check the details from your BNI membership." : "About 3 minutes. Guests are welcome."}</p>
+          <p className="m-0 text-[15px] leading-normal text-[#5C5C63]">{memberPath ? "Check the details from your BNI membership." : testMode ? "Test ticket · ₱10. This does not open the real sale." : "About 3 minutes. Guests are welcome."}</p>
         </div>
         <Field label="Full name">
           <input required className={inputClass} placeholder="As it should appear on your badge" value={attendee.fullName} onChange={(event) => setAttendee({ ...attendee, fullName: event.target.value })} />
@@ -636,7 +768,7 @@ export default function Registration() {
             <input required className={inputClass} placeholder="917 123 4567" value={attendee.mobile} onChange={(event) => setAttendee({ ...attendee, mobile: event.target.value })} />
           </span>
         </Field>
-        {memberPath ? null : (
+        {memberPath || testMode ? null : (
           <>
             <Field label="Who invited you?" hint="Optional, so the member gets credit">
               <input className={inputClass} placeholder="Member name or chapter" value={attendee.invitedBy} onChange={(event) => setAttendee({ ...attendee, invitedBy: event.target.value })} />
@@ -796,10 +928,16 @@ export default function Registration() {
         step={3}
         footer={
           <div className="flex flex-col gap-2.5">
-            <PrimaryButton disabled={!tier.onSale || saving} onClick={pay}>
-              {tier.onSale ? `Submit registration · ${money(dueToday, tier.currency)} due` : `Opens ${tier.opensLabel}`}
+            <PrimaryButton disabled={!tier.onSale || saving || (tier.currency === "PHP" && !channel)} onClick={pay}>
+              {tier.onSale
+                ? tier.currency === "PHP"
+                  ? payActionLabel(channel, money(dueToday, tier.currency), saving)
+                  : `Submit registration · ${money(dueToday, tier.currency)} due`
+                : `Opens ${tier.opensLabel}`}
             </PrimaryButton>
-            <span className="text-center text-xs text-[#5C5C63]">Secure payment</span>
+            <span className="text-center text-xs text-[#5C5C63]">
+              {tier.currency === "PHP" ? (channel && channel !== "upay" ? "HitPay · secure payment" : "UnionBank UPay · secure payment") : "Secure payment"}
+            </span>
           </div>
         }
       >
@@ -852,22 +990,54 @@ export default function Registration() {
           </div>
         ) : null}
         <h2 className="m-0 mt-1 text-[17px] font-bold">Pay with</h2>
-        <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF] bg-white">
-          {["Credit or debit card", "E-wallet", "Online banking"].map((item) => (
-            <label key={item} className={`flex items-center gap-3 border-t border-[#E4E1DC] px-4 py-4 text-[15px] font-semibold first:border-t-0 ${method === item ? "bg-[#FBE9EA]" : ""}`}>
-              <input type="radio" name="method" className="h-5 w-5 accent-[#D0202E]" checked={method === item} onChange={() => setMethod(item)} />
-              {item}
-            </label>
-          ))}
-        </div>
-        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
-          [Payment methods depend on the gateway — to confirm.] Your receipt goes to {attendee.email} and {attendee.mobile}.
-        </p>
+        {tier.currency === "PHP" ? (
+          <>
+            <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} />
+            <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
+              Your receipt goes to {attendee.email} and {attendee.mobile}.
+            </p>
+          </>
+        ) : (
+          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
+            UnionBank UPay collects peso payments. This ticket is in US dollars, so the seat is held and IBMC records the payment separately. Your receipt goes to {attendee.email} and {attendee.mobile}.
+          </p>
+        )}
         {payError ? <p className="m-0 text-sm text-[#A8131F]">{payError}</p> : null}
       </Frame>
     );
   }
 
+  if (step === "paying" && saved && hitpaySession) {
+    return (
+      <HitpayPending
+        record={saved}
+        session={hitpaySession}
+        onUpdate={(registration, session) => {
+          setSaved(registration);
+          setHitpaySession(session);
+          if (session.status === "paid") setStep("done");
+        }}
+        onLater={() => setStep("done")}
+        onBack={() => setStep("pay")}
+      />
+    );
+  }
+
+  if (step === "paying" && saved && upaySession) {
+    return (
+      <UpayPending
+        record={saved}
+        session={upaySession}
+        onUpdate={(registration, session) => {
+          setSaved(registration);
+          setUpaySession(session);
+          if (session.status === "paid") setStep("done");
+        }}
+        onLater={() => setStep("done")}
+        onBack={() => setStep("pay")}
+      />
+    );
+  }
   if (step === "done" && saved) return <Confirmed record={saved} onManage={() => setStep("manage")} />;
   if (step === "manage") return <Manage onStart={() => setStep("start")} />;
   return null;
@@ -907,6 +1077,355 @@ function Row({ label, value }: { label: string; value: string }) {
       <span className="text-[#5C5C63]">{label}</span>
       <span className="text-right font-semibold">{value}</span>
     </div>
+  );
+}
+
+function PaymentChoices({
+  channels,
+  channel,
+  onChannel,
+  method,
+  onMethod,
+}: {
+  channels: PayChannel[] | null;
+  channel: PayChannelCode | "";
+  onChannel: (channel: PayChannelCode) => void;
+  method: UpayMethod;
+  onMethod: (method: UpayMethod) => void;
+}) {
+  if (channels === null) return <p className="m-0 text-sm text-[#5C5C63]">Loading payment options.</p>;
+  if (channels.length === 0) return <p className="m-0 text-sm text-[#5C5C63]">Payment isn't open right now.</p>;
+  return (
+    <>
+      {channels.length > 1 ? (
+        <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF] bg-white">
+          {channels.map((item) => (
+            <label key={item.code} className={`flex items-start gap-3 border-t border-[#E4E1DC] px-4 py-4 first:border-t-0 ${channel === item.code ? "bg-[#FBE9EA]" : ""}`}>
+              <input type="radio" name="channel" className="mt-1 h-5 w-5 accent-[#D0202E]" checked={channel === item.code} onChange={() => onChannel(item.code)} />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-[15px] font-semibold">{item.label}</span>
+                <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{item.detail}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      ) : (
+        <p className="m-0 text-[15px] font-semibold">{channels[0].label}</p>
+      )}
+      {channel === "upay" ? <UpayMethods method={method} onChange={onMethod} /> : null}
+      {channel === "upay" ? (
+        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">UnionBank collects this for GLOBAL REFERRAL MARKETING INC.</p>
+      ) : null}
+      {channel === "hitpay_qr" ? (
+        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">You'll get a QR Ph code on the next screen. Stay on that page if you already paid.</p>
+      ) : null}
+      {channel === "hitpay_online" ? (
+        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">You'll continue to HitPay to pay with UnionBank Online. That page closes after 5 minutes. Coming back here does not by itself mean the payment went through.</p>
+      ) : null}
+    </>
+  );
+}
+
+function UpayMethods({ method, onChange }: { method: UpayMethod; onChange: (method: UpayMethod) => void }) {
+  return (
+    <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF] bg-white">
+      {UPAY_METHODS.map((item) => (
+        <label key={item.id} className={`flex items-start gap-3 border-t border-[#E4E1DC] px-4 py-4 first:border-t-0 ${method === item.id ? "bg-[#FBE9EA]" : ""}`}>
+          <input type="radio" name="method" className="mt-1 h-5 w-5 accent-[#D0202E]" checked={method === item.id} onChange={() => onChange(item.id)} />
+          <span className="flex flex-col gap-0.5">
+            <span className="text-[15px] font-semibold">{item.label}</span>
+            <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{item.detail}</span>
+          </span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
+function UpayPending({
+  record,
+  session,
+  onUpdate,
+  onLater,
+  onBack,
+}: {
+  record: StoredRegistration;
+  session: UpaySession;
+  onUpdate: (registration: StoredRegistration, session: UpaySession) => void;
+  onLater: () => void;
+  onBack: () => void;
+}) {
+  const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+
+  async function checkStatus() {
+    const current = sessionRef.current;
+    if (!current.senderRefId || current.status === "paid") return;
+    setChecking(true);
+    try {
+      const response = await fetch(`/api/payments/upay/${current.senderRefId}`);
+      const payload = await response.json();
+      if (payload.registration && payload.upay) onUpdate(payload.registration, payload.upay);
+      if (!response.ok) throw new Error(payload.error || "UnionBank has not confirmed the payment yet.");
+      if (payload.error && payload.upay?.status === "pending") setError(payload.error);
+      else if (payload.upay?.status === "failed") setError(payload.upay.state || "UnionBank declined the payment.");
+      else setError("");
+    } catch (statusError) {
+      setError(statusError instanceof Error ? statusError.message : "UnionBank has not confirmed the payment yet.");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  useEffect(() => {
+    if (session.status !== "pending") return undefined;
+    checkStatus();
+    const timer = window.setInterval(() => {
+      checkStatus();
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [session.senderRefId, session.status]);
+
+  const due = record.payments.find((item) => item.status === "due");
+  const channel = UPAY_METHODS.find((item) => item.id === session.paymentMethod)?.label || "UnionBank";
+  return (
+    <Frame
+      label="Step 3 of 4"
+      step={3}
+      footer={
+        <div className="flex flex-col gap-2.5">
+          {session.paymentUrl ? (
+            <a href={session.paymentUrl} target="_blank" rel="noreferrer" className="block w-full rounded-full bg-[#D0202E] px-4 py-4 text-center text-base font-bold text-white no-underline">
+              Continue to UnionBank
+            </a>
+          ) : null}
+          <button type="button" className="text-center text-sm font-semibold text-[#A8131F]" onClick={onLater}>I'll finish this later</button>
+        </div>
+      }
+    >
+      <button type="button" className="self-start text-sm text-[#A8131F]" onClick={onBack}>← Back</button>
+      <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Pay {channel}</h1>
+      <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">
+        {due ? `${money(due.amountCents, record.currency)} to ${session.billerName}. ` : ""}
+        This page updates when UnionBank confirms the payment. The receipt goes to {record.attendee.email}.
+      </p>
+      {session.qrDataUrl ? (
+        <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+          <img src={session.qrDataUrl} alt="InstaPay QR" className="h-[220px] w-[220px]" />
+          <span className="text-center text-[13px] leading-snug text-[#5C5C63]">Scan with your bank or e-wallet app.</span>
+        </div>
+      ) : (
+        <div className="rounded-[14px] border border-[#E4E1DC] bg-white p-4 text-sm leading-normal text-[#3A3A40]">
+          Finish the payment in UnionBank. Reference {session.senderRefId}.
+        </div>
+      )}
+      <button type="button" disabled={checking} className="self-start text-sm font-semibold text-[#A8131F] disabled:text-[#C8C4BE]" onClick={checkStatus}>
+        {checking ? "Checking with UnionBank" : "I've paid — check again"}
+      </button>
+      {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
+    </Frame>
+  );
+}
+
+function useCountdown(expiresAt: string) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [expiresAt]);
+  const end = Date.parse(expiresAt);
+  const remaining = Number.isFinite(end) ? Math.max(0, end - now) : 0;
+  const minutes = Math.floor(remaining / 60000);
+  const seconds = Math.floor((remaining % 60000) / 1000);
+  return {
+    label: `${minutes}:${String(seconds).padStart(2, "0")}`,
+    lastMinute: remaining > 0 && remaining < 60_000,
+    expired: Number.isFinite(end) && remaining === 0,
+    pastWindow: Number.isFinite(end) && now > end + 2 * 60 * 1000,
+  };
+}
+
+function HitpayPending({
+  record,
+  session,
+  onUpdate,
+  onLater,
+  onBack,
+}: {
+  record: StoredRegistration;
+  session: HitpaySession;
+  onUpdate: (registration: StoredRegistration, session: HitpaySession) => void;
+  onLater: () => void;
+  onBack: () => void;
+}) {
+  const [error, setError] = useState("");
+  const [checking, setChecking] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
+  const clock = useCountdown(session.expiresAt);
+  const checkoutUrl = safeHitpayUrl(session.paymentUrl);
+  const showRefresh = session.channel === "qr" && session.status !== "paid" && session.status !== "failed" && session.refreshesLeft > 0 && !clock.pastWindow && (clock.expired || session.canRefresh);
+
+  async function checkStatus() {
+    const current = sessionRef.current;
+    if (!current.sessionId || current.status === "paid" || current.status === "failed") return;
+    setChecking(true);
+    try {
+      const response = await fetch(`/api/payments/hitpay/${current.sessionId}`);
+      const payload = await response.json();
+      if (payload.registration && payload.hitpay) onUpdate(payload.registration, payload.hitpay);
+      if (!response.ok && !payload.hitpay) throw new Error(payload.error || "HitPay has not confirmed the payment yet.");
+      if (payload.hitpay?.status === "failed") setError("This payment can't continue. Nothing was charged.");
+      else if (payload.error && payload.hitpay?.status === "pending") setError(payload.error);
+      else setError("");
+    } catch (statusError) {
+      setError(statusError instanceof Error ? statusError.message : "HitPay has not confirmed the payment yet.");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  useEffect(() => {
+    if (session.status === "paid" || session.status === "failed") return undefined;
+    checkStatus();
+    const timer = window.setInterval(checkStatus, 3000);
+    return () => window.clearInterval(timer);
+  }, [session.sessionId, session.status]);
+
+  async function refreshQr() {
+    if (refreshing) return;
+    setRefreshing(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/payments/hitpay/${session.sessionId}/refresh-qr`, { method: "POST" });
+      const payload = await response.json();
+      if (payload.registration && payload.hitpay) onUpdate(payload.registration, payload.hitpay);
+      if (!response.ok) throw new Error(payload.error || "A new QR could not be created.");
+    } catch (refreshError) {
+      setError(refreshError instanceof Error ? refreshError.message : "A new QR could not be created.");
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  const due = record.payments.find((item) => item.status === "due");
+  const title = session.channel === "qr" ? "Pay with QR Ph" : "Pay with online banking";
+  const qrClosed = session.channel === "qr" && clock.expired && !showRefresh && session.status !== "paid";
+  return (
+    <Frame
+      label="Step 3 of 4"
+      step={3}
+      footer={
+        <div className="flex flex-col gap-2.5">
+          {session.channel === "online" && checkoutUrl && !clock.expired ? (
+            <a href={checkoutUrl} className="block w-full rounded-full bg-[#D0202E] px-4 py-4 text-center text-base font-bold text-white no-underline">
+              Continue to online banking
+            </a>
+          ) : null}
+          <button type="button" className="text-center text-sm font-semibold text-[#A8131F]" onClick={onLater}>I'll finish this later</button>
+        </div>
+      }
+    >
+      <button type="button" className="self-start text-sm text-[#A8131F]" onClick={onBack}>← Back</button>
+      <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">{title}</h1>
+      <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">
+        {session.channel === "online" ? "Checking payment status. " : ""}
+        {due ? `${money(due.amountCents, record.currency)} for IBMC 2027. ` : ""}
+        The receipt goes to {record.attendee.email}. Coming back to this page does not by itself confirm the payment.
+      </p>
+      {session.channel === "qr" && session.qrDataUrl ? (
+        <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+          <img src={session.qrDataUrl} alt="QR Ph" className={`h-[280px] w-[280px] ${clock.expired ? "opacity-40" : ""}`} />
+          <span className={`text-center text-sm font-semibold tabular-nums ${clock.lastMinute || clock.expired ? "text-[#A8131F]" : "text-[#3A3A40]"}`}>
+            {clock.expired ? "QR expired" : `Expires in ${clock.label}`}
+          </span>
+          <span className="text-center text-[13px] leading-snug text-[#5C5C63]">Scan with any QR Ph bank or e-wallet.</span>
+          {showRefresh ? (
+            <>
+              <button type="button" disabled={refreshing} onClick={refreshQr} className="rounded-full bg-[#141416] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#C8C4BE]">
+                {refreshing ? "Generating" : "Generate new QR"}
+              </button>
+              <span className="text-center text-[13px] leading-snug text-[#5C5C63]">Stay on this page if you already paid.</span>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+      {session.channel === "online" ? (
+        <div className="rounded-[14px] border border-[#E4E1DC] bg-white p-4 text-sm leading-normal text-[#3A3A40]">
+          {clock.expired
+            ? "The payment was not completed. Nothing was charged. Stay on this page if you already paid."
+            : "Finish the payment on HitPay. This page checks every few seconds."}
+        </div>
+      ) : null}
+      {session.status === "failed" ? (
+        <p className="m-0 text-sm text-[#A8131F]">This payment can't continue. Nothing was charged.</p>
+      ) : null}
+      {qrClosed && session.status !== "failed" ? (
+        <p className="m-0 text-sm text-[#A8131F]">
+          {session.refreshesLeft > 0
+            ? "This QR expired. Go back and start the payment again. Stay here if you already paid."
+            : "This payment wasn't completed. Nothing was charged."}
+        </p>
+      ) : null}
+      <button type="button" disabled={checking || session.status === "paid"} className="self-start text-sm font-semibold text-[#A8131F] disabled:text-[#C8C4BE]" onClick={checkStatus}>
+        {checking ? "Checking payment status" : "I've paid — check again"}
+      </button>
+      {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
+    </Frame>
+  );
+}
+
+function HitpayReturn({ sessionId }: { sessionId: string }) {
+  const [record, setRecord] = useState<StoredRegistration | null>(null);
+  const [session, setSession] = useState<HitpaySession | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let stop = false;
+    async function load() {
+      try {
+        const response = await fetch(`/api/payments/hitpay/${sessionId}`);
+        const payload = await response.json();
+        if (stop) return;
+        if (payload.registration) setRecord(payload.registration);
+        if (payload.hitpay) setSession(payload.hitpay);
+        if (!response.ok && !payload.hitpay) setError(payload.error || "Payment not found");
+      } catch {
+        if (!stop) setError("Checking payment status failed.");
+      }
+    }
+    load();
+    return () => {
+      stop = true;
+    };
+  }, [sessionId]);
+
+  if (record && session?.status === "paid") {
+    return <Confirmed record={record} onManage={() => { window.location.href = "/register"; }} />;
+  }
+  if (record && session) {
+    return (
+      <HitpayPending
+        record={record}
+        session={session}
+        onUpdate={(registration, next) => {
+          setRecord(registration);
+          setSession(next);
+        }}
+        onLater={() => { window.location.href = "/register"; }}
+        onBack={() => { window.location.href = "/register"; }}
+      />
+    );
+  }
+  return (
+    <Frame label="Payment">
+      <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Checking payment status</h1>
+      <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">This page checks with HitPay. Opening the return link does not confirm the payment.</p>
+      {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
+    </Frame>
   );
 }
 
@@ -996,6 +1515,10 @@ function Manage({ onStart }: { onStart: () => void }) {
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [method, setMethod] = useState<UpayMethod>("instapay");
+  const { channels, channel, setChannel } = usePaymentChannels();
+  const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
+  const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
 
   function resetLookup() {
     setFound(null);
@@ -1147,6 +1670,70 @@ function Manage({ onStart }: { onStart: () => void }) {
       </Frame>
     );
   }
+
+  async function startPayment() {
+    if (!record || busy || record.currency !== "PHP" || !channel) return;
+    const hitpay = hitpayApiChannel(channel);
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(hitpay ? `/api/registrations/${record.reference}/hitpay` : `/api/registrations/${record.reference}/upay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(hitpay ? { channel: hitpay } : { paymentMethod: method }),
+      });
+      const payload = await response.json();
+      if (payload.registration) setRecord(payload.registration);
+      if (!response.ok) throw new Error(payload.error || "The payment could not be started.");
+      if (payload.upay?.senderRefId) {
+        setHitpaySession(null);
+        setUpaySession(payload.upay);
+      }
+      if (payload.hitpay?.sessionId) {
+        setUpaySession(null);
+        setHitpaySession(payload.hitpay);
+        const url = payload.hitpay.channel === "online" ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
+        if (url) window.location.assign(url);
+      }
+    } catch (payError) {
+      setError(payError instanceof Error ? payError.message : "The payment could not be started.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (hitpaySession) {
+    return (
+      <HitpayPending
+        record={record}
+        session={hitpaySession}
+        onUpdate={(registration, session) => {
+          setRecord(registration);
+          setHitpaySession(session);
+          if (session.status === "paid") setHitpaySession(null);
+        }}
+        onLater={() => setHitpaySession(null)}
+        onBack={() => setHitpaySession(null)}
+      />
+    );
+  }
+
+  if (upaySession) {
+    return (
+      <UpayPending
+        record={record}
+        session={upaySession}
+        onUpdate={(registration, session) => {
+          setRecord(registration);
+          setUpaySession(session);
+          if (session.status === "paid") setUpaySession(null);
+        }}
+        onLater={() => setUpaySession(null)}
+        onBack={() => setUpaySession(null)}
+      />
+    );
+  }
+
   const paid = record.payments.filter((item) => item.status === "paid");
   const paidCents = paid.reduce((sum, item) => sum + item.amountCents, 0);
   const due = record.payments.find((item) => item.status === "due");
@@ -1176,7 +1763,17 @@ function Manage({ onStart }: { onStart: () => void }) {
             </div>
             <span className="font-archivo text-[26px] font-extrabold">{money(due.amountCents, record.currency)}</span>
           </div>
-          <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">IBMC records this payment. Nothing is charged on this page.</p>
+          {record.currency === "PHP" ? (
+            <>
+              <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} />
+              <button type="button" disabled={busy || !channel} onClick={startPayment} className="rounded-full bg-[#D0202E] px-4 py-3 text-sm font-bold text-white disabled:bg-[#E4A0A6]">
+                {payActionLabel(channel, money(due.amountCents, record.currency), busy)}
+              </button>
+              {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
+            </>
+          ) : (
+            <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">UnionBank UPay collects peso payments. IBMC records this dollar payment separately.</p>
+          )}
           {keepUntil ? (
             <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">
               Pay by {formatMonthDate(keepUntil)} to keep your {money(record.totalCents, record.currency)} rate. After that, your ticket moves to the Regular rate of ₱18,000.
@@ -1204,6 +1801,12 @@ function Manage({ onStart }: { onStart: () => void }) {
       </div>
     </Frame>
   );
+}
+
+export default function Registration() {
+  const paySession = new URLSearchParams(window.location.search).get("paySession") || "";
+  if (paySession) return <HitpayReturn sessionId={paySession} />;
+  return <RegistrationWizard />;
 }
 
 function Progress({ payments, label }: { payments: StoredPayment[]; label: string }) {

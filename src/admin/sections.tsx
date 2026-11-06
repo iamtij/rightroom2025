@@ -340,7 +340,7 @@ export function AdminSections() {
   return (
     <div className="flex flex-col gap-5">
       <nav className="flex flex-wrap gap-2">
-        {["Dashboard", "Registrations", "Coupons", "Schedule", "Templates", "Members", "Chapters"].map((item) => (
+        {["Dashboard", "Registrations", "Coupons", "Schedule", "Templates", "Members", "Chapters", "Settings"].map((item) => (
           <button
             key={item}
             type="button"
@@ -359,6 +359,7 @@ export function AdminSections() {
       {section === "Templates" ? <Templates onError={setError} /> : null}
       {section === "Members" ? <Members onError={setError} /> : null}
       {section === "Chapters" ? <Chapters onError={setError} /> : null}
+      {section === "Settings" ? <PaymentSettings onError={setError} /> : null}
     </div>
   );
 }
@@ -901,7 +902,7 @@ function Members({ onError }: { onError: (message: string) => void }) {
       {editor !== null ? (
         <form className="grid gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4 sm:grid-cols-2" onSubmit={save}>
           <Field label="Name"><input className={field} required value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} /></Field>
-          <Field label="Email"><input className={field} type="email" required disabled={editor !== "add"} value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
+          <Field label="Email"><input className={field} type="email" required value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></Field>
           <Field label="Mobile"><input className={field} required value={form.mobile} onChange={(event) => setForm({ ...form, mobile: event.target.value })} /></Field>
           <Field label="Chapter">
             <select className={field} value={form.chapter} onChange={(event) => setForm({ ...form, chapter: event.target.value })}>
@@ -951,6 +952,81 @@ function Members({ onError }: { onError: (message: string) => void }) {
           </tr>
         ))}
       </DataTable>
+    </section>
+  );
+}
+
+type PaymentChannelSetting = {
+  code: string;
+  label: string;
+  detail: string;
+  enabled: boolean;
+};
+
+function PaymentSettings({ onError }: { onError: (message: string) => void }) {
+  const [channels, setChannels] = useState<PaymentChannelSetting[]>([]);
+  const [hitpayConfigured, setHitpayConfigured] = useState(true);
+  const [saving, setSaving] = useState("");
+
+  async function load() {
+    const payload = await api("/api/admin/payment-channels");
+    setChannels(payload.channels || []);
+    setHitpayConfigured(Boolean(payload.hitpayConfigured));
+  }
+
+  useEffect(() => {
+    load().catch((error) => onError(error.message));
+  }, []);
+
+  async function toggle(code: string, enabled: boolean) {
+    setSaving(code);
+    setChannels((current) => current.map((item) => (item.code === code ? { ...item, enabled } : item)));
+    try {
+      const payload = await api("/api/admin/payment-channels", {
+        method: "PATCH",
+        body: JSON.stringify({ [code]: enabled }),
+      });
+      setChannels(payload.channels || []);
+      setHitpayConfigured(Boolean(payload.hitpayConfigured));
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Payment channels were not saved");
+      await load().catch(() => {});
+    } finally {
+      setSaving("");
+    }
+  }
+
+  return (
+    <section className="flex flex-col gap-3">
+      <h1 className="m-0 font-archivo text-[28px] font-extrabold">Settings</h1>
+      <div className="flex max-w-[640px] flex-col gap-4 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+        <div className="flex flex-col gap-1">
+          <h2 className="m-0 text-[17px] font-bold">Payment channels</h2>
+          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Checked channels are the ones a buyer can use when paying.</p>
+        </div>
+        <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF]">
+          {channels.map((channel) => (
+            <label key={channel.code} className={`flex items-start gap-3 border-t border-[#E4E1DC] px-4 py-4 first:border-t-0 ${channel.enabled ? "bg-[#FBE9EA]" : ""}`}>
+              <input
+                type="checkbox"
+                className="mt-1 h-5 w-5 accent-[#D0202E]"
+                checked={channel.enabled}
+                disabled={saving === channel.code}
+                onChange={(event) => toggle(channel.code, event.target.checked)}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-[15px] font-semibold">{channel.label}</span>
+                <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{channel.detail}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {hitpayConfigured ? null : (
+          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
+            HitPay QR and HitPay online banking need HITPAY_API_KEY and HITPAY_SALT on the server before a buyer can be charged.
+          </p>
+        )}
+      </div>
     </section>
   );
 }

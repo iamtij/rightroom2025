@@ -130,15 +130,47 @@ export function createRegistration(db, input) {
   return getRegistration(db, run());
 }
 
+export function registrationContactClash(db, { email, mobile, excludeId = 0 }) {
+  const nextEmail = String(email || "").trim().toLowerCase();
+  if (nextEmail) {
+    const emailOwner = db.prepare(`
+      SELECT id FROM registrations
+      WHERE lower(email) = ? AND id != ? AND status != 'cancelled'
+    `).get(nextEmail, excludeId);
+    if (emailOwner) return "That email is already on a registration.";
+  }
+  const digits = String(mobile || "").replace(/\D/g, "");
+  if (!phoneKey(mobile) && !digits) return "";
+  const owner = db.prepare(`
+    SELECT id, mobile FROM registrations WHERE id != ? AND status != 'cancelled'
+  `).all(excludeId).find((row) => sameMobile(row.mobile, mobile));
+  if (owner) return "That mobile number is already on a registration.";
+  return "";
+}
+
+function sameMobile(left, right) {
+  const a = String(left || "").replace(/\D/g, "");
+  const b = String(right || "").replace(/\D/g, "");
+  if (!a || !b) return false;
+  const aKey = phoneKey(a);
+  const bKey = phoneKey(b);
+  if (aKey && bKey) return aKey === bKey;
+  return a === b;
+}
+
 export function updateRegistration(db, id, input) {
+  const email = input.email.trim().toLowerCase();
+  const mobile = input.mobile.trim();
+  const clash = registrationContactClash(db, { email, mobile, excludeId: id });
+  if (clash) throw new Error(clash);
   db.prepare(`
     UPDATE registrations
     SET full_name = ?, email = ?, mobile = ?, business = ?, industry = ?, chapter = ?
     WHERE id = ?
   `).run(
     input.fullName.trim(),
-    input.email.trim().toLowerCase(),
-    input.mobile.trim(),
+    email,
+    mobile,
     input.business?.trim() || null,
     input.industry?.trim() || null,
     input.chapter?.trim() || null,

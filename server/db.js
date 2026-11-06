@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
 import { fileURLToPath } from "url";
+import { seedPaymentChannels } from "./payment-channels.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -85,6 +86,25 @@ CREATE TABLE IF NOT EXISTS payments (
   method TEXT,
   external_reference TEXT,
   recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS upay_payments (
+  id INTEGER PRIMARY KEY,
+  registration_id INTEGER NOT NULL REFERENCES registrations(id),
+  installment_id INTEGER NOT NULL REFERENCES registration_installments(id),
+  sender_ref_id TEXT NOT NULL UNIQUE,
+  amount_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL,
+  payment_method TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed')),
+  unionbank_code TEXT,
+  unionbank_state TEXT,
+  transaction_id TEXT,
+  transaction_uuid TEXT,
+  qr TEXT,
+  payment_url TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS reminder_rules (
@@ -215,6 +235,31 @@ CREATE TABLE IF NOT EXISTS chapters (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chapters_name ON chapters(lower(name));
+
+CREATE TABLE IF NOT EXISTS payment_channels (
+  code TEXT PRIMARY KEY,
+  enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1))
+);
+
+CREATE TABLE IF NOT EXISTS hitpay_payments (
+  id INTEGER PRIMARY KEY,
+  registration_id INTEGER NOT NULL REFERENCES registrations(id),
+  installment_id INTEGER NOT NULL REFERENCES registration_installments(id),
+  session_id TEXT NOT NULL UNIQUE,
+  gateway_ref TEXT,
+  amount_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL,
+  channel TEXT NOT NULL CHECK (channel IN ('qr', 'online')),
+  status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed', 'expired')),
+  gateway_status TEXT,
+  qr_code TEXT,
+  payment_url TEXT,
+  expires_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_hitpay_gateway ON hitpay_payments(gateway_ref) WHERE gateway_ref IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_hitpay_installment ON hitpay_payments(installment_id, channel, status);
 `;
 
 const PRODUCTS = [
@@ -311,6 +356,7 @@ export function openDatabase(file = process.env.IBMC_DB_PATH) {
 }
 
 function migrate(db) {
+  if (process.env.NODE_ENV !== "production") ensureTestTicket(db);
   const names = new Set(db.prepare("PRAGMA table_info(registrations)").all().map((column) => column.name));
   const columns = [
     ["attendee_type", "TEXT NOT NULL DEFAULT 'guest'"],
@@ -324,6 +370,18 @@ function migrate(db) {
   for (const [name, type] of columns) {
     if (!names.has(name)) db.exec(`ALTER TABLE registrations ADD COLUMN ${name} ${type}`);
   }
+  seedPaymentChannels(db);
+}
+
+function ensureTestTicket(db) {
+  const existing = db.prepare("SELECT id FROM ticket_products WHERE code = 'test'").get();
+  if (existing) return;
+  db.prepare(`
+    INSERT INTO ticket_products (
+      code, name, audience, currency, full_price_cents, installment_total_cents,
+      sales_start, sales_end, allows_installment
+    ) VALUES ('test', 'Test', 'local', 'PHP', 1000, NULL, '2026-01-01', '2027-05-31', 0)
+  `).run();
 }
 
 function seed(db) {

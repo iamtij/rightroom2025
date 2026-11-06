@@ -5,11 +5,14 @@ import { clearSessionCookie, cookieValue, readSession, seedAdmin, sessionCookie,
 import { createRegistration, cancelRegistration, findRegistrationByContact, getRegistration, recordPayment, updateRegistration } from "./registrations.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
-import { listMembers, lookupMember, parseMemberCsv, saveMember, updateMemberProfile } from "./members.js";
+import { listMembers, lookupMember, memberContactClash, parseMemberCsv, saveMember, updateMemberProfile, updateMemberRecord } from "./members.js";
 import { presentCoupon, priceCoupon } from "./coupons.js";
 import { maskEmail, readMemberEditToken, sendMemberOtp, sendRegistrationOtp, verifyMemberOtp, verifyRegistrationOtp } from "./otp.js";
 import { rateLimit } from "./limits.js";
 import { formatLongDate, manilaParts } from "./time.js";
+import { handleUpayCallback, refreshUpayPayment, startUpayPayment } from "./upay.js";
+import { handleHitpayWebhook, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
+import { hitpayConfigured, listPaymentChannels, savePaymentChannels } from "./payment-channels.js";
 
 let database;
 
@@ -138,6 +141,8 @@ function clientError(error, fallback) {
     "Payment does not match",
     "Nothing is due",
     "That coupon",
+    "That email is already",
+    "That mobile number is already",
   ];
   return safe.find((item) => message.includes(item)) ? message : fallback;
 }
@@ -158,7 +163,11 @@ export function createApi() {
   const app = express();
   const router = express.Router();
   app.set("trust proxy", 1);
-  app.use(express.json({ limit: "2mb" }));
+  app.use((req, res, next) => {
+    const url = req.originalUrl || req.url || "";
+    if (url.includes("/payments/upay/callback") || url.includes("/webhooks/hitpay")) return next();
+    express.json({ limit: "2mb" })(req, res, next);
+  });
   const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 8 });
   const registerLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 10 });
   const lookupLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 30 });
@@ -167,6 +176,12 @@ export function createApi() {
 
   router.get("/chapters", (_req, res) => {
     res.json(listChapters(db()));
+  });
+
+  router.get("/payment-channels", (_req, res) => {
+    res.json({
+      channels: listPaymentChannels(db(), { enabledOnly: true }).map(({ code, label, detail }) => ({ code, label, detail })),
+    });
   });
 
   router.get("/members/lookup", memberLookupLimit, (req, res) => {
@@ -230,41 +245,196 @@ export function createApi() {
     res.json(presentCoupon(priced));
   });
 
+  function createPublicRegistration(body) {
+    const today = manilaParts().date;
+    const product = db().prepare("SELECT * FROM ticket_products WHERE code = ? AND active = 1").get(body.productCode);
+    if (!product) {
+      const error = new Error("Unknown ticket");
+      error.status = 400;
+      throw error;
+    }
+    if (today < product.sales_start || today > product.sales_end) {
+      const error = new Error(`${product.name} is not on sale today`);
+      error.status = 400;
+      throw error;
+    }
+    if (body.productCode !== "test" && (body.attendeeType === "guest" || body.attendeeType === "international") && today < "2027-02-01") {
+      const error = new Error("That registration opens February 1, 2027");
+      error.status = 400;
+      throw error;
+    }
+    return createRegistration(db(), {
+      productCode: body.productCode,
+      paymentPlan: body.paymentPlan,
+      fullName: body.fullName || "",
+      email: body.email || "",
+      mobile: body.mobile || "",
+      registeredOn: today,
+      attendeeType: body.attendeeType,
+      business: body.business,
+      industry: body.industry,
+      chapter: body.chapter,
+      invitedBy: body.invitedBy,
+      couponCode: body.couponCode,
+    });
+  }
+
+  function sendHitpay(res, result, created) {
+    const body = {
+      error: result.error,
+      registration: result.registration ? present(result.registration) : undefined,
+      hitpay: result.hitpay || undefined,
+    };
+    if (result.error) {
+      res.status(result.status || 502).json(body);
+      return;
+    }
+    res.status(created ? 201 : 200).json(body);
+  }
+
+  function sendUpay(res, result, created) {
+    if (result.error) {
+      res.status(result.status || 502).json({
+        error: result.error,
+        registration: result.registration ? present(result.registration) : undefined,
+        upay: result.upay || undefined,
+      });
+      return;
+    }
+    res.status(created ? 201 : 200).json({
+      registration: present(result.registration),
+      upay: result.upay,
+    });
+  }
+
   router.post("/registrations", registerLimit, (req, res) => {
     try {
-      const body = req.body || {};
-      const today = manilaParts().date;
-      const product = db().prepare("SELECT * FROM ticket_products WHERE code = ? AND active = 1").get(body.productCode);
-      if (!product) {
-        res.status(400).json({ error: "Unknown ticket" });
-        return;
-      }
-      if (today < product.sales_start || today > product.sales_end) {
-        res.status(400).json({ error: `${product.name} is not on sale today` });
-        return;
-      }
-      if ((body.attendeeType === "guest" || body.attendeeType === "international") && today < "2027-02-01") {
-        res.status(400).json({ error: "That registration opens February 1, 2027" });
-        return;
-      }
-      const registration = createRegistration(db(), {
-        productCode: body.productCode,
-        paymentPlan: body.paymentPlan,
-        fullName: body.fullName || "",
-        email: body.email || "",
-        mobile: body.mobile || "",
-        registeredOn: today,
-        attendeeType: body.attendeeType,
-        business: body.business,
-        industry: body.industry,
-        chapter: body.chapter,
-        invitedBy: body.invitedBy,
-        couponCode: body.couponCode,
-      });
+      const registration = createPublicRegistration(req.body || {});
       res.status(201).json(present(registration));
     } catch (error) {
-      res.status(400).json({ error: clientError(error, "Registration was not saved") });
+      res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
     }
+  });
+
+  router.post("/registrations/upay", registerLimit, async (req, res) => {
+    try {
+      const registration = createPublicRegistration(req.body || {});
+      const result = await startUpayPayment(db(), registration, req.body?.paymentMethod);
+      sendUpay(res, result, true);
+    } catch (error) {
+      res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
+    }
+  });
+
+  router.post("/registrations/hitpay", registerLimit, async (req, res) => {
+    const channel = req.body?.channel === "online" ? "online" : req.body?.channel === "qr" ? "qr" : "";
+    if (!channel) {
+      res.status(400).json({ error: "Choose a payment option." });
+      return;
+    }
+    try {
+      const registration = createPublicRegistration(req.body || {});
+      const result = await startHitpayPayment(db(), registration, channel);
+      sendHitpay(res, result, true);
+    } catch (error) {
+      res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
+    }
+  });
+
+  router.post("/registrations/:reference/hitpay", registerLimit, async (req, res) => {
+    const channel = req.body?.channel === "online" ? "online" : req.body?.channel === "qr" ? "qr" : "";
+    if (!channel) {
+      res.status(400).json({ error: "Choose a payment option." });
+      return;
+    }
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    const registration = getRegistration(db(), row.id);
+    if (!registration || registration.status !== "confirmed") {
+      res.status(400).json({ error: "Registration is not payable" });
+      return;
+    }
+    const result = await startHitpayPayment(db(), registration, channel);
+    sendHitpay(res, result, false);
+  });
+
+  router.post("/registrations/:reference/upay", registerLimit, async (req, res) => {
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    const registration = getRegistration(db(), row.id);
+    if (!registration || registration.status !== "confirmed") {
+      res.status(400).json({ error: "Registration is not payable" });
+      return;
+    }
+    const result = await startUpayPayment(db(), registration, req.body?.paymentMethod);
+    sendUpay(res, result, false);
+  });
+
+  const upayPollLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 240 });
+
+  router.get("/payments/upay/:senderRefId", upayPollLimit, async (req, res) => {
+    const result = await refreshUpayPayment(db(), req.params.senderRefId);
+    if (!result.registration) {
+      res.status(result.status || 404).json({ error: result.error || "Payment not found" });
+      return;
+    }
+    res.status(result.status && result.status !== 200 ? result.status : 200).json({
+      registration: present(result.registration),
+      upay: result.upay,
+      error: result.error,
+    });
+  });
+
+  const hitpayPollLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 240 });
+  const hitpayRefreshLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 12 });
+
+  router.get("/payments/hitpay/:sessionId", hitpayPollLimit, async (req, res) => {
+    const result = await refreshHitpayPayment(db(), req.params.sessionId);
+    if (!result.registration) {
+      res.status(result.status || 404).json({ error: result.error || "Payment not found" });
+      return;
+    }
+    res.status(result.status && result.status !== 200 ? result.status : 200).json({
+      registration: present(result.registration),
+      hitpay: result.hitpay,
+      error: result.error,
+    });
+  });
+
+  router.post("/payments/hitpay/:sessionId/refresh-qr", hitpayRefreshLimit, async (req, res) => {
+    const result = await refreshHitpayQr(db(), req.params.sessionId);
+    if (!result.registration) {
+      res.status(result.status || 404).json({ error: result.error || "Payment not found" });
+      return;
+    }
+    sendHitpay(res, result, false);
+  });
+
+  router.post("/webhooks/hitpay", express.text({ type: "*/*", limit: "1mb" }), async (req, res) => {
+    const result = await handleHitpayWebhook(db(), String(req.body || ""), req.get("hitpay-signature"), {
+      eventType: req.get("hitpay-event-type"),
+      eventObject: req.get("hitpay-event-object"),
+    });
+    res.status(result.status).json(result.body);
+  });
+
+  router.post("/payments/upay/callback", express.text({ type: "*/*", limit: "2mb" }), async (req, res) => {
+    let body = req.body;
+    if (typeof body === "string") {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        body = { payload: body };
+      }
+    }
+    await handleUpayCallback(db(), body);
+    res.json({ ok: true });
   });
 
   router.get("/registrations/lookup", lookupLimit, (req, res) => {
@@ -332,6 +502,14 @@ export function createApi() {
 
   router.get("/admin/me", requireAdmin, (req, res) => {
     res.json({ email: req.admin.email });
+  });
+
+  router.get("/admin/payment-channels", requireAdmin, (_req, res) => {
+    res.json({ channels: listPaymentChannels(db()), hitpayConfigured: hitpayConfigured() });
+  });
+
+  router.patch("/admin/payment-channels", requireAdmin, (req, res) => {
+    res.json({ channels: savePaymentChannels(db(), req.body || {}), hitpayConfigured: hitpayConfigured() });
   });
 
   router.get("/admin/dashboard", requireAdmin, (_req, res) => {
@@ -571,6 +749,11 @@ export function createApi() {
       res.status(400).json({ error: "Name, email, and mobile are required" });
       return;
     }
+    const clash = memberContactClash(db(), { email: body.email, mobile: body.mobile });
+    if (clash) {
+      res.status(400).json({ error: clash });
+      return;
+    }
     saveMember(db(), body);
     res.status(201).json(listMembers(db()).find((member) => member.email === String(body.email).trim().toLowerCase()));
   });
@@ -589,13 +772,12 @@ export function createApi() {
   });
 
   router.patch("/admin/members/:id", requireAdmin, (req, res) => {
-    const existing = db().prepare("SELECT email FROM members WHERE id = ?").get(req.params.id);
-    if (!existing) {
-      res.status(404).json({ error: "Member not found" });
+    const result = updateMemberRecord(db(), req.params.id, req.body || {});
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
       return;
     }
-    saveMember(db(), { ...req.body, email: existing.email });
-    res.json(listMembers(db()).find((member) => member.email === existing.email));
+    res.json(result.member);
   });
 
   app.use("/api", router);

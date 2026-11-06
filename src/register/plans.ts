@@ -83,6 +83,24 @@ export function money(cents: number, currency: Currency) {
   return currency === "USD" ? `USD ${amount}` : `₱${amount}`;
 }
 
+export function testTier(): Tier {
+  return {
+    code: "test",
+    name: "Test",
+    currency: "PHP",
+    fullCents: 1_000,
+    installmentCents: null,
+    windowLabel: "available now",
+    nextLabel: "₱10, paid once",
+    onSale: true,
+    opensLabel: null,
+    rows: [],
+    saveLabel: "One payment of ₱10.",
+    installmentSummary: null,
+    note: null,
+  };
+}
+
 export function tierFor(today: string, international: boolean): Tier | null {
   if (today > "2027-05-31") return null;
   if (international) {
