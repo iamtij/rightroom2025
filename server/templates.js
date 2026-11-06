@@ -72,7 +72,7 @@ export function renderInstallmentReminder({ registration, installment, daysBefor
   ].join("\n");
   const html = shell({
     headline: escapeHtml(headline),
-    intro: `Hi ${escapeHtml(name)}, this is a reminder for your IBMC 2027 seat. Your entry QR is sent only after the seat is fully paid.`,
+    intro: `Hi ${escapeHtml(name)}, this is a reminder for your IBMC 2027 seat. Your QR ticket is sent only after the seat is fully paid.`,
     body: `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;background:#F6F4F1;border-radius:16px;">
         <tr><td style="padding:20px 22px;">
@@ -87,36 +87,47 @@ export function renderInstallmentReminder({ registration, installment, daysBefor
   return { subject, body: text, html, includesQr: false };
 }
 
-export async function renderEntryPass({ registration, passUrl }) {
-  if (registration.balance_cents !== 0 || !registration.qr_token) {
-    throw new Error("Entry QR is only created for a fully paid seat");
-  }
-  const name = firstName(registration.full_name);
-  const svg = await QRCode.toString(passUrl, {
-    type: "svg",
+export function entryQrPng(passUrl) {
+  return QRCode.toBuffer(passUrl, {
+    type: "png",
     margin: 1,
-    width: 220,
+    width: 440,
     color: { dark: "#0E0E10", light: "#FFFFFF" },
   });
-  const subject = "IBMC 2027 · Your entry pass";
+}
+
+function qrImageUrl(passUrl) {
+  const url = new URL(passUrl);
+  const token = decodeURIComponent(url.pathname.split("/").filter(Boolean).pop() || "");
+  return `${url.origin}/api/passes/${encodeURIComponent(token)}/qr`;
+}
+
+export async function renderEntryPass({ registration, passUrl }) {
+  if (registration.balance_cents !== 0 || !registration.qr_token) {
+    throw new Error("A QR ticket is only created for a fully paid seat");
+  }
+  const name = firstName(registration.full_name);
+  const subject = "IBMC 2027 · Your QR ticket";
   const text = [
     "IBMC 2027",
     `${name}, your seat is fully paid.`,
-    `Entry QR: ${passUrl}`,
+    `QR ticket: ${passUrl}`,
     EVENT,
     `Ref ${registration.reference}`,
   ].join("\n");
   const html = shell({
     headline: "You're in.",
-    intro: `${escapeHtml(name)}, your ${escapeHtml(registration.product_name)} seat is fully paid. This QR is your entry. Bring it on both days.`,
+    intro: `${escapeHtml(name)}, your ${escapeHtml(registration.product_name)} seat is fully paid. This QR ticket is your entry. Bring it on both days.`,
     body: `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;border:1px solid #E4E1DC;border-radius:16px;">
-        <tr><td align="center" style="padding:28px 22px 12px;">${svg}</td></tr>
+        <tr><td align="center" style="padding:28px 22px 12px;">
+          <img src="${escapeHtml(qrImageUrl(passUrl))}" width="220" height="220" alt="QR ticket" style="display:block;width:220px;height:220px;border:0;">
+        </td></tr>
         <tr><td align="center" style="padding:0 22px 24px;font-size:14px;color:#5C5C63;">
           ${escapeHtml(registration.reference)}<br>${EVENT}
         </td></tr>
       </table>`,
-    action: button(passUrl, "Open my entry pass"),
+    action: button(passUrl, "Open my QR ticket"),
   });
   return { subject, body: text, html, includesQr: true };
 }

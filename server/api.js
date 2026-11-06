@@ -13,6 +13,7 @@ import { formatLongDate, manilaParts } from "./time.js";
 import { handleUpayCallback, refreshUpayPayment, startUpayPayment } from "./upay.js";
 import { handleHitpayWebhook, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
 import { hitpayConfigured, listPaymentChannels, savePaymentChannels } from "./payment-channels.js";
+import { entryQrPng } from "./templates.js";
 
 let database;
 
@@ -488,10 +489,24 @@ export function createApi() {
     res.json(present(registration, { resume: true }));
   });
 
+  router.get("/passes/:token/qr", passLimit, async (req, res) => {
+    const token = String(req.params.token || "").trim();
+    const pass = getEntryPass(db(), token);
+    if (!pass) {
+      res.status(404).json({ error: "This QR ticket isn't valid." });
+      return;
+    }
+    const site = (process.env.SITE_URL || "https://ibmcph.com").replace(/\/$/, "");
+    const png = await entryQrPng(`${site}/pass/${encodeURIComponent(token)}`);
+    res.setHeader("Content-Type", "image/png");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(png);
+  });
+
   router.get("/passes/:token", passLimit, (req, res) => {
     const pass = getEntryPass(db(), req.params.token);
     if (!pass) {
-      res.status(404).json({ error: "This pass isn't valid." });
+      res.status(404).json({ error: "This QR ticket isn't valid." });
       return;
     }
     res.json(pass);

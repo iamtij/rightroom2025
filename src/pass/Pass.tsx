@@ -52,7 +52,7 @@ export default function Pass() {
       <div className="mx-auto flex min-h-full w-full max-w-[480px] flex-col">
         <header className="flex items-center justify-between border-b border-[#E4E1DC] bg-[#FDFCFA] px-5 py-4">
           <Brand />
-          <span className="text-[13px] text-[#5C5C63]">Entry pass</span>
+          <span className="text-[13px] text-[#5C5C63]">QR ticket</span>
         </header>
         <main className="flex flex-1 flex-col gap-4 px-5 py-5">
           {pass ? (
@@ -62,16 +62,17 @@ export default function Pass() {
                 <h1 className="m-0 font-archivo text-[30px] leading-[1.05] font-black">{pass.fullName}</h1>
                 <p className="m-0 text-[15px] leading-snug text-[#FFE3E5]">{pass.tierName}</p>
               </div>
-              <div className="flex flex-col gap-2 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+              <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-5">
+                <img src={`/api/passes/${encodeURIComponent(token)}/qr`} alt="QR ticket" className="h-56 w-56" />
                 <span className="text-sm text-[#5C5C63]">Reference</span>
                 <span className="font-archivo text-[22px] font-extrabold">{pass.reference}</span>
-                <span className="text-sm leading-snug text-[#5C5C63]">{pass.event}</span>
+                <span className="text-center text-sm leading-snug text-[#5C5C63]">{pass.event}</span>
               </div>
             </>
           ) : invalid ? (
             <>
-              <h1 className="m-0 font-archivo text-[30px] leading-[1.05] font-black">This pass isn't valid.</h1>
-              <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">An entry pass opens only for a seat that is fully paid.</p>
+              <h1 className="m-0 font-archivo text-[30px] leading-[1.05] font-black">This QR ticket isn't valid.</h1>
+              <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">A QR ticket opens only for a seat that is fully paid.</p>
             </>
           ) : (
             <p className="m-0 text-[15px] text-[#5C5C63]">Checking this pass.</p>

@@ -7,7 +7,7 @@ import { addDays, formatLongDate, manilaParts } from "./time.js";
 
 export { createRegistration, getRegistration, recordPayment };
 
-const PASS_MARKERS = ["/pass/", "<svg", "your entry pass"];
+const PASS_MARKERS = ["/pass/", "<svg", "open my qr ticket"];
 
 function siteUrl() {
   return (process.env.SITE_URL || "https://ibmcph.com").replace(/\/$/, "");
