@@ -1587,9 +1587,19 @@ function Confirmed({ record, onManage }: { record: StoredRegistration; onManage:
   );
 }
 
-function Manage({ onStart, initialQuery = "" }: { onStart: () => void; initialQuery?: string }) {
+function Manage({
+  onStart,
+  initialQuery = "",
+  payReference = "",
+  openPayOnLoad = false,
+}: {
+  onStart: () => void;
+  initialQuery?: string;
+  payReference?: string;
+  openPayOnLoad?: boolean;
+}) {
   const [record, setRecord] = useState<StoredRegistration | null>(null);
-  const [query, setQuery] = useState(initialQuery);
+  const [query, setQuery] = useState(payReference || initialQuery);
   const [found, setFound] = useState<{ fullName: string; tierName: string; maskedEmail: string } | null>(null);
   const [lookedUp, setLookedUp] = useState(false);
   const [maskedEmail, setMaskedEmail] = useState("");
@@ -1598,21 +1608,67 @@ function Manage({ onStart, initialQuery = "" }: { onStart: () => void; initialQu
   const [busy, setBusy] = useState(false);
   const [method, setMethod] = useState<UpayMethod>("instapay");
   const { channels, channel, setChannel } = usePaymentChannels();
+  const [payingInstallment, setPayingInstallment] = useState(false);
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
   const [badgeName, setBadgeName] = useState("");
   const [badgeCompany, setBadgeCompany] = useState("");
   const [badgeNote, setBadgeNote] = useState("");
   const [badgeError, setBadgeError] = useState("");
+  const payIntent = Boolean(payReference || openPayOnLoad);
 
-  function openRecord(payload: StoredRegistration) {
+  function openRecord(payload: StoredRegistration, options: { openPay?: boolean } = {}) {
     rememberRegistration(payload);
     setRecord(payload);
     setBadgeName(payload.attendee?.fullName || "");
     setBadgeCompany(payload.attendee?.business || "");
     setBadgeNote("");
     setBadgeError("");
+    const shouldOpenPay =
+      options.openPay &&
+      payload.currency === "PHP" &&
+      payload.planStatus !== "fully_paid" &&
+      payload.payments.some((item) => item.status === "due");
+    setPayingInstallment(shouldOpenPay);
   }
+
+  useEffect(() => {
+    if (!payReference || record) return;
+    let stop = false;
+    (async () => {
+      setQuery(payReference);
+      setBusy(true);
+      setError("");
+      try {
+        const response = await fetch(`/api/registrations/${encodeURIComponent(payReference)}`, { headers: resumeHeaders() });
+        if (response.ok) {
+          const payload = (await response.json()) as StoredRegistration;
+          if (!stop && payload.resumeToken) {
+            openRecord(payload, { openPay: payIntent });
+            return;
+          }
+        }
+        const lookup = await fetch(`/api/registrations/lookup?q=${encodeURIComponent(payReference)}`);
+        const payload = await lookup.json().catch(() => ({}));
+        if (stop) return;
+        if (lookup.status === 404) {
+          setLookedUp(true);
+          setFound(null);
+          return;
+        }
+        if (!lookup.ok) throw new Error(payload.error || "Search failed");
+        setFound(payload);
+        setLookedUp(true);
+      } catch (lookupError) {
+        if (!stop) setError(lookupError instanceof Error ? lookupError.message : "Search failed");
+      } finally {
+        if (!stop) setBusy(false);
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [payReference, payIntent, record]);
 
   function resetLookup() {
     setFound(null);
@@ -1682,7 +1738,7 @@ function Manage({ onStart, initialQuery = "" }: { onStart: () => void; initialQu
       });
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "That code is wrong.");
-      openRecord(payload);
+      openRecord(payload, { openPay: payIntent });
     } catch (confirmError) {
       setError(confirmError instanceof Error ? confirmError.message : "That code is wrong.");
     } finally {
@@ -1692,11 +1748,15 @@ function Manage({ onStart, initialQuery = "" }: { onStart: () => void; initialQu
 
   if (!record) {
     return (
-      <Frame label="My registration">
+      <Frame label={payIntent ? "Pay installment" : "My registration"}>
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={onStart}>← Back</button>
         <div className="flex flex-col gap-1.5">
-          <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">My registration</h1>
-          <p className="m-0 text-[15px] leading-normal text-[#5C5C63]">Use the email or mobile number on your registration.</p>
+          <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">{payIntent ? "Pay your installment" : "My registration"}</h1>
+          <p className="m-0 text-[15px] leading-normal text-[#5C5C63]">
+            {payIntent
+              ? "Confirm it's you to pay. We'll send a code to the email on your registration."
+              : "Use the email or mobile number on your registration."}
+          </p>
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-[13px] font-semibold text-[#3A3A40]" htmlFor="registration-lookup">Email or mobile</label>
@@ -1729,7 +1789,10 @@ function Manage({ onStart, initialQuery = "" }: { onStart: () => void; initialQu
             <span className="self-start rounded-full bg-[#141416] px-2.5 py-1 text-xs font-bold tracking-[0.1em] text-white uppercase">Registration found</span>
             <p className="m-0 font-archivo text-[22px] font-extrabold">{found.fullName}</p>
             <p className="m-0 text-sm text-[#5C5C63]">{found.tierName}</p>
-            <p className="m-0 text-sm text-[#5C5C63]">We'll send a code to {found.maskedEmail}. Check your email.</p>
+            <p className="m-0 text-sm text-[#5C5C63]">
+              {payIntent ? "Send a code to continue to payment. We'll email " : "We'll send a code to "}
+              {found.maskedEmail}.{payIntent ? "" : " Check your email."}
+            </p>
             <button type="button" disabled={busy} onClick={sendCode} className="self-start rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]">
               {busy ? "Sending" : "Send code"}
             </button>
@@ -1811,10 +1874,12 @@ function Manage({ onStart, initialQuery = "" }: { onStart: () => void; initialQu
       if (payload.upay?.senderRefId) {
         setHitpaySession(null);
         setUpaySession(payload.upay);
+        setPayingInstallment(false);
       }
       if (payload.hitpay?.sessionId) {
         setUpaySession(null);
         setHitpaySession(payload.hitpay);
+        setPayingInstallment(false);
         const url = payload.hitpay.channel === "online" ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
         if (url) window.location.assign(url);
       }
@@ -1833,7 +1898,10 @@ function Manage({ onStart, initialQuery = "" }: { onStart: () => void; initialQu
         onUpdate={(registration, session) => {
           setRecord(registration);
           setHitpaySession(session);
-          if (session.status === "paid") setHitpaySession(null);
+          if (session.status === "paid") {
+            setHitpaySession(null);
+            setPayingInstallment(false);
+          }
         }}
         onLater={() => setHitpaySession(null)}
         onBack={() => setHitpaySession(null)}
@@ -1849,7 +1917,10 @@ function Manage({ onStart, initialQuery = "" }: { onStart: () => void; initialQu
         onUpdate={(registration, session) => {
           setRecord(registration);
           setUpaySession(session);
-          if (session.status === "paid") setUpaySession(null);
+          if (session.status === "paid") {
+            setUpaySession(null);
+            setPayingInstallment(false);
+          }
         }}
         onLater={() => setUpaySession(null)}
         onBack={() => setUpaySession(null)}
@@ -1910,26 +1981,76 @@ function Manage({ onStart, initialQuery = "" }: { onStart: () => void; initialQu
         <Progress payments={record.payments} label={`${paid.length} of ${record.payments.length} payments made${due ? `, payment ${record.payments.indexOf(due) + 1} due` : ""}`} />
         <span className="text-[13px] text-[#5C5C63]">{paid.length} of {record.payments.length} payments made · {money(remaining, record.currency)} remaining</span>
       </div>
-      {due ? (
+      <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-1 text-sm">
+        {record.payments.map((item) => (
+          <div
+            key={`${item.dueOn}-${item.label}`}
+            className={`flex flex-wrap items-center justify-between gap-2 border-t border-[#F0EDE8] py-2.5 first:border-t-0 ${item.status === "due" ? "font-bold text-[#A8131F]" : item.status === "upcoming" ? "text-[#5C5C63]" : ""}`}
+          >
+            <span className="min-w-0 flex-1">
+              {item.status === "paid" && item.label.includes("secure your seat")
+                ? formatLongDate(item.dueOn).replace(",", "") + " · secure your seat"
+                : item.label}
+            </span>
+            <span className="flex shrink-0 items-center gap-2">
+              <span className={item.status === "due" ? "" : "text-[#5C5C63]"}>
+                {item.status === "paid" ? "Paid" : item.status === "due" ? "Due" : "Upcoming"} · {money(item.amountCents, record.currency)}
+              </span>
+              {item.status === "due" && record.currency === "PHP" && record.planStatus !== "fully_paid" ? (
+                payingInstallment ? null : (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setError("");
+                      setPayingInstallment(true);
+                    }}
+                    className="rounded-full bg-[#D0202E] px-3 py-1.5 text-xs font-bold text-white disabled:bg-[#E4A0A6]"
+                  >
+                    Pay
+                  </button>
+                )
+              ) : null}
+              {item.status === "upcoming" ? (
+                <span className="rounded-full border border-[#D9D5CF] px-2 py-0.5 text-[11px] font-semibold tracking-wide text-[#5C5C63] uppercase">Locked</span>
+              ) : null}
+            </span>
+          </div>
+        ))}
+      </div>
+      {due && payingInstallment ? (
         <div className="flex flex-col gap-3 rounded-[14px] border-2 border-[#D0202E] bg-white p-4">
           <div className="flex items-center justify-between gap-3">
             <div className="flex flex-col gap-0.5">
-              <span className="text-xs font-bold tracking-[0.12em] text-[#A8131F] uppercase">Due {formatMonthDate(due.dueOn)}</span>
-              <span className="text-sm text-[#5C5C63]">Payment {record.payments.indexOf(due) + 1} of {record.payments.length}</span>
+              <span className="text-xs font-bold tracking-[0.12em] text-[#A8131F] uppercase">Payment {record.payments.indexOf(due) + 1} of {record.payments.length}</span>
+              <span className="text-sm font-normal text-[#5C5C63]">Due {formatMonthDate(due.dueOn)}</span>
             </div>
             <span className="font-archivo text-[26px] font-extrabold">{money(due.amountCents, record.currency)}</span>
           </div>
-          {record.currency === "PHP" ? (
-            <>
-              <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} />
-              <button type="button" disabled={busy || !channel} onClick={startPayment} className="rounded-full bg-[#D0202E] px-4 py-3 text-sm font-bold text-white disabled:bg-[#E4A0A6]">
-                {payActionLabel(channel, money(due.amountCents, record.currency), busy)}
-              </button>
-              {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
-            </>
-          ) : (
-            <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">UnionBank UPay collects peso payments. IBMC records this dollar payment separately.</p>
-          )}
+          <h2 className="m-0 text-[17px] font-bold">Choose how to pay</h2>
+          <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} />
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={busy || !channel}
+              onClick={startPayment}
+              className="rounded-full bg-[#D0202E] px-4 py-3 text-sm font-bold text-white disabled:bg-[#E4A0A6]"
+            >
+              {payActionLabel(channel, money(due.amountCents, record.currency), busy)}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setPayingInstallment(false);
+                setError("");
+              }}
+              className="rounded-full border border-[#D9D5CF] px-4 py-3 text-sm font-semibold"
+            >
+              Cancel
+            </button>
+          </div>
+          {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
           {keepUntil ? (
             <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">
               Pay by {formatMonthDate(keepUntil)} to keep your {money(record.totalCents, record.currency)} rate. After that, your ticket moves to the Regular rate of ₱18,000.
@@ -1937,24 +2058,38 @@ function Manage({ onStart, initialQuery = "" }: { onStart: () => void; initialQu
           ) : null}
         </div>
       ) : null}
-      <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-1 text-sm">
-        {record.payments.map((item) => (
-          <div key={`${item.dueOn}-${item.label}`} className={`flex justify-between gap-2 border-t border-[#F0EDE8] py-2.5 first:border-t-0 ${item.status === "due" ? "font-bold text-[#A8131F]" : item.status === "upcoming" ? "text-[#5C5C63]" : ""}`}>
-            <span>{item.status === "paid" && item.label.includes("secure your seat") ? formatLongDate(item.dueOn).replace(",", "") + " · secure your seat" : item.label}</span>
-            <span>
-              <span className={item.status === "due" ? "" : "text-[#5C5C63]"}>{item.status === "paid" ? "Paid" : item.status === "due" ? "Due" : "Upcoming"} · </span>
-              {money(item.amountCents, record.currency)}
-            </span>
-          </div>
-        ))}
-      </div>
+      {due && record.currency !== "PHP" ? (
+        <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">UnionBank UPay collects peso payments. IBMC records this dollar payment separately.</p>
+      ) : null}
     </Frame>
   );
+}
+
+function payReferenceFromPath(pathname: string) {
+  const match = pathname.match(/^\/pay\/([^/]+)/);
+  if (!match) return "";
+  try {
+    return decodeURIComponent(match[1]).trim();
+  } catch {
+    return match[1].trim();
+  }
 }
 
 export default function Registration() {
   const paySession = new URLSearchParams(window.location.search).get("paySession") || "";
   if (paySession) return <HitpayReturn sessionId={paySession} />;
+  const payReference = payReferenceFromPath(window.location.pathname);
+  if (payReference) {
+    return (
+      <Manage
+        payReference={payReference}
+        openPayOnLoad
+        onStart={() => {
+          window.location.assign("/register");
+        }}
+      />
+    );
+  }
   return <RegistrationWizard />;
 }
 

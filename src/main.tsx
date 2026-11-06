@@ -7,7 +7,13 @@ import Registration from './register/Registration.tsx';
 import './index.css';
 
 const path = window.location.pathname;
-const Page = path.startsWith('/admin') ? Admin : path.startsWith('/register') ? Registration : path.startsWith('/pass/') ? Pass : AmplifyHome;
+const Page = path.startsWith('/admin')
+  ? Admin
+  : path.startsWith('/register') || path.startsWith('/pay/')
+    ? Registration
+    : path.startsWith('/pass/')
+      ? Pass
+      : AmplifyHome;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

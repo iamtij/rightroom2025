@@ -23,8 +23,16 @@ function phoneKey(value) {
 }
 
 export function findRegistrationByContact(db, query) {
-  const value = String(query || "").trim().toLowerCase();
-  if (!value) return null;
+  const raw = String(query || "").trim();
+  if (!raw) return null;
+  const byReference = db
+    .prepare("SELECT id, status FROM registrations WHERE lower(reference) = ? ORDER BY id DESC")
+    .all(raw.toLowerCase());
+  if (byReference.length) {
+    const chosen = byReference.find((row) => row.status !== "cancelled") || byReference[0];
+    return getRegistration(db, chosen.id);
+  }
+  const value = raw.toLowerCase();
   const rows = value.includes("@")
     ? db.prepare("SELECT id, status FROM registrations WHERE lower(email) = ? ORDER BY id DESC").all(value)
     : db.prepare("SELECT id, status, mobile FROM registrations ORDER BY id DESC").all().filter((row) => phoneKey(row.mobile) === phoneKey(value) && phoneKey(value));
