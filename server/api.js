@@ -174,10 +174,28 @@ function writeAudit(database, adminId, action, target, amountCents = null) {
   `).run(adminId, action, target, amountCents);
 }
 
+function resumeCredential(req) {
+  return req.get("x-resume-token") || cookieValue(req.headers.cookie, "ibmc_resume");
+}
+
+function resumeCookie(token) {
+  const secure = process.env.NODE_ENV === "production" ? "; Secure" : "";
+  return `ibmc_resume=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${secure}`;
+}
+
+function attachResume(res, registration) {
+  if (registration?.resume_token) res.append("Set-Cookie", resumeCookie(registration.resume_token));
+}
+
 export function createApi() {
   const app = express();
   const router = express.Router();
   app.set("trust proxy", 1);
+  app.use((_req, res, next) => {
+    res.setHeader("X-Frame-Options", "DENY");
+    res.setHeader("Content-Security-Policy", "frame-ancestors 'none'");
+    next();
+  });
   app.use((req, res, next) => {
     const url = req.originalUrl || req.url || "";
     if (url.includes("/payments/upay/callback") || url.includes("/webhooks/hitpay")) return next();
@@ -317,6 +335,7 @@ export function createApi() {
   }
 
   function sendHitpay(res, result, created) {
+    if (result.resume) attachResume(res, result.registration);
     const body = {
       error: result.error,
       registration: result.registration ? present(result.registration, { contact: result.contact !== false, resume: result.resume === true }) : undefined,
@@ -338,6 +357,7 @@ export function createApi() {
       });
       return;
     }
+    if (result.resume) attachResume(res, result.registration);
     res.status(created ? 201 : 200).json({
       registration: present(result.registration, { contact: result.contact !== false, resume: result.resume === true }),
       upay: result.upay,
@@ -352,6 +372,7 @@ export function createApi() {
   router.post("/registrations", registerLimit, (req, res) => {
     try {
       const registration = createPublicRegistration(req.body || {});
+      attachResume(res, registration);
       res.status(201).json(present(registration, { resume: true }));
     } catch (error) {
       res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
@@ -400,7 +421,7 @@ export function createApi() {
       return;
     }
     const result = await startHitpayPayment(db(), registration, channel);
-    sendHitpay(res, { ...result, ...ownerAccess(registration, req.get("x-resume-token")) }, false);
+    sendHitpay(res, { ...result, ...ownerAccess(registration, resumeCredential(req)) }, false);
   });
 
   router.post("/registrations/:reference/upay", registerLimit, async (req, res) => {
@@ -415,7 +436,7 @@ export function createApi() {
       return;
     }
     const result = await startUpayPayment(db(), registration, req.body?.paymentMethod);
-    sendUpay(res, { ...result, ...ownerAccess(registration, req.get("x-resume-token")) }, false);
+    sendUpay(res, { ...result, ...ownerAccess(registration, resumeCredential(req)) }, false);
   });
 
   const upayPollLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 240 });
@@ -427,7 +448,7 @@ export function createApi() {
       return;
     }
     res.status(result.status && result.status !== 200 ? result.status : 200).json({
-      registration: present(result.registration, ownerAccess(result.registration, req.get("x-resume-token"))),
+      registration: present(result.registration, ownerAccess(result.registration, resumeCredential(req))),
       upay: result.upay,
       error: result.error,
     });
@@ -443,7 +464,7 @@ export function createApi() {
       return;
     }
     res.status(result.status && result.status !== 200 ? result.status : 200).json({
-      registration: present(result.registration, ownerAccess(result.registration, req.get("x-resume-token"))),
+      registration: present(result.registration, ownerAccess(result.registration, resumeCredential(req))),
       hitpay: result.hitpay,
       error: result.error,
     });
@@ -455,7 +476,7 @@ export function createApi() {
       res.status(result.status || 404).json({ error: result.error || "Payment not found" });
       return;
     }
-    sendHitpay(res, { ...result, ...ownerAccess(result.registration, req.get("x-resume-token")) }, false);
+    sendHitpay(res, { ...result, ...ownerAccess(result.registration, resumeCredential(req)) }, false);
   });
 
   router.post("/webhooks/hitpay", express.text({ type: "*/*", limit: "1mb" }), async (req, res) => {
@@ -516,6 +537,7 @@ export function createApi() {
       return;
     }
     const registration = ensureResumeToken(db(), result.registration);
+    attachResume(res, registration);
     res.json(present(registration, { resume: true }));
   });
 
@@ -549,7 +571,7 @@ export function createApi() {
       return;
     }
     const registration = getRegistration(db(), row.id);
-    if (!resumeTokenMatches(registration, req.get("x-resume-token"))) {
+    if (!resumeTokenMatches(registration, resumeCredential(req))) {
       res.status(401).json({ error: "Sign in again to edit your badge." });
       return;
     }
@@ -558,7 +580,9 @@ export function createApi() {
       return;
     }
     try {
-      res.json(present(updateBadge(db(), registration.id, req.body || {}), { resume: true }));
+      const updated = updateBadge(db(), registration.id, req.body || {});
+      attachResume(res, updated);
+      res.json(present(updated, { resume: true }));
     } catch (error) {
       res.status(error.status || 400).json({ error: clientError(error, "Badge was not saved") });
     }
@@ -571,7 +595,9 @@ export function createApi() {
       return;
     }
     const registration = getRegistration(db(), row.id);
-    res.json(present(registration, ownerAccess(registration, req.get("x-resume-token"))));
+    const access = ownerAccess(registration, resumeCredential(req));
+    if (access.resume) attachResume(res, registration);
+    res.json(present(registration, access));
   });
 
   router.post("/admin/login", loginLimit, (req, res) => {

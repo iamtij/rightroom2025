@@ -16,7 +16,9 @@ export function findMemberRow(db, query) {
   const value = String(query || "").trim().toLowerCase();
   if (!value) return null;
   if (value.includes("@")) return db.prepare("SELECT * FROM members WHERE lower(email) = ?").get(value) || null;
-  return db.prepare("SELECT * FROM members").all().find((member) => phoneKey(member.mobile) && phoneKey(member.mobile) === phoneKey(value)) || null;
+  const key = phoneKey(value);
+  if (!key) return null;
+  return db.prepare("SELECT * FROM members WHERE phone_key = ?").get(key) || null;
 }
 
 export function signMemberProof(memberId) {
@@ -109,12 +111,13 @@ export function saveMember(db, input) {
   const status = STATUSES.has(input.regStatus) ? input.regStatus : "updated";
   db.prepare(`
     INSERT INTO members (
-      full_name, email, mobile, chapter, category, business_name, ticket_type,
+      full_name, email, mobile, phone_key, chapter, category, business_name, ticket_type,
       reg_status, country, gold_club, registered_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(email) DO UPDATE SET
       full_name = excluded.full_name,
       mobile = excluded.mobile,
+      phone_key = excluded.phone_key,
       chapter = excluded.chapter,
       category = excluded.category,
       business_name = excluded.business_name,
@@ -128,6 +131,7 @@ export function saveMember(db, input) {
     input.fullName.trim(),
     input.email.trim().toLowerCase(),
     input.mobile.trim(),
+    phoneKey(input.mobile) || null,
     blank(input.chapter),
     blank(input.category),
     blank(input.businessName),
@@ -146,10 +150,8 @@ export function memberContactClash(db, { email, mobile, excludeId = 0 }) {
     if (emailOwner) return "That email is already on the roster.";
   }
   const key = phoneKey(mobile);
-  const digits = String(mobile || "").replace(/\D/g, "");
-  if (!key && !digits) return "";
-  const owner = db.prepare("SELECT id, mobile FROM members WHERE id != ?").all(excludeId)
-    .find((row) => sameMobile(row.mobile, mobile));
+  if (!key) return "";
+  const owner = db.prepare("SELECT id FROM members WHERE phone_key = ? AND id != ?").get(key, excludeId);
   if (owner) return "That mobile number is already on the roster.";
   return "";
 }
@@ -168,13 +170,14 @@ export function updateMemberRecord(db, id, input) {
   const status = STATUSES.has(input.regStatus) ? input.regStatus : existing.reg_status;
   db.prepare(`
     UPDATE members SET
-      full_name = ?, email = ?, mobile = ?, chapter = ?, category = ?, business_name = ?,
+      full_name = ?, email = ?, mobile = ?, phone_key = ?, chapter = ?, category = ?, business_name = ?,
       ticket_type = ?, reg_status = ?, country = ?, gold_club = ?, registered_at = ?, updated_at = datetime('now')
     WHERE id = ?
   `).run(
     fullName,
     email,
     mobile,
+    phoneKey(mobile) || null,
     blank(input.chapter),
     blank(input.category),
     blank(input.businessName),
@@ -208,9 +211,9 @@ export function updateMemberProfile(db, currentEmail, input) {
   if (clash) return { error: clash, status: 400 };
   db.prepare(`
     UPDATE members SET
-      full_name = ?, email = ?, mobile = ?, category = ?, business_name = ?, chapter = ?, updated_at = datetime('now')
+      full_name = ?, email = ?, mobile = ?, phone_key = ?, category = ?, business_name = ?, chapter = ?, updated_at = datetime('now')
     WHERE id = ?
-  `).run(fullName, nextEmail, mobile, industry, business, known?.name || chapter, existing.id);
+  `).run(fullName, nextEmail, mobile, phoneKey(mobile) || null, industry, business, known?.name || chapter, existing.id);
   const member = lookupMember(db, nextEmail);
   if (!member) return { error: "We couldn't find that membership", status: 404 };
   const { id, ...visible } = member;

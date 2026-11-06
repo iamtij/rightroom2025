@@ -122,6 +122,8 @@ try {
   });
   const body = await created.json();
   assert.equal(created.status, 201);
+  assert.match(created.headers.get("set-cookie") || "", /ibmc_resume=/);
+  assert.equal(created.headers.get("x-frame-options"), "DENY");
   assert.equal(body.attendee.email, "amina@example.com");
   assert.ok(body.resumeToken);
 

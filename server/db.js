@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS registrations (
   full_name TEXT NOT NULL,
   email TEXT NOT NULL,
   mobile TEXT NOT NULL,
+  phone_key TEXT,
   amount_due_cents INTEGER NOT NULL,
   currency TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'confirmed' CHECK (status IN ('pending', 'confirmed', 'cancelled')),
@@ -209,6 +210,7 @@ CREATE TABLE IF NOT EXISTS members (
   full_name TEXT NOT NULL,
   email TEXT NOT NULL UNIQUE,
   mobile TEXT NOT NULL,
+  phone_key TEXT,
   chapter TEXT,
   category TEXT,
   business_name TEXT,
@@ -291,6 +293,9 @@ CREATE TABLE IF NOT EXISTS pass_scans (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_pass_scans_registration ON pass_scans(registration_id, result);
+CREATE INDEX IF NOT EXISTS idx_members_phone ON members(phone_key);
+CREATE INDEX IF NOT EXISTS idx_registrations_phone ON registrations(phone_key);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_external ON payments(external_reference) WHERE external_reference IS NOT NULL;
 `;
 
 const PRODUCTS = [
@@ -398,6 +403,20 @@ export function testRegistrationEnabled() {
   return String(process.env.ALLOW_TEST_REGISTRATION || "").trim().toLowerCase() === "true";
 }
 
+function phoneKey(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : null;
+}
+
+function backfillPhoneKeys(db) {
+  const members = db.prepare("SELECT id, mobile FROM members WHERE phone_key IS NULL").all();
+  const updateMember = db.prepare("UPDATE members SET phone_key = ? WHERE id = ?");
+  for (const row of members) updateMember.run(phoneKey(row.mobile), row.id);
+  const registrations = db.prepare("SELECT id, mobile FROM registrations WHERE phone_key IS NULL").all();
+  const updateRegistration = db.prepare("UPDATE registrations SET phone_key = ? WHERE id = ?");
+  for (const row of registrations) updateRegistration.run(phoneKey(row.mobile), row.id);
+}
+
 function migrate(db) {
   migrateInstallmentDays(db);
   db.exec(`
@@ -433,6 +452,14 @@ function migrate(db) {
   const adminColumns = new Set(db.prepare("PRAGMA table_info(admin_users)").all().map((column) => column.name));
   if (!adminColumns.has("totp_secret")) db.exec("ALTER TABLE admin_users ADD COLUMN totp_secret TEXT");
   if (!adminColumns.has("totp_enabled")) db.exec("ALTER TABLE admin_users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0");
+  const registrationColumns = new Set(db.prepare("PRAGMA table_info(registrations)").all().map((column) => column.name));
+  if (!registrationColumns.has("phone_key")) db.exec("ALTER TABLE registrations ADD COLUMN phone_key TEXT");
+  const memberColumns = new Set(db.prepare("PRAGMA table_info(members)").all().map((column) => column.name));
+  if (!memberColumns.has("phone_key")) db.exec("ALTER TABLE members ADD COLUMN phone_key TEXT");
+  backfillPhoneKeys(db);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_members_phone ON members(phone_key)");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_registrations_phone ON registrations(phone_key)");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_external ON payments(external_reference) WHERE external_reference IS NOT NULL");
   if (testTicketEnabled()) ensureTestTicket(db);
   const names = new Set(db.prepare("PRAGMA table_info(registrations)").all().map((column) => column.name));
   const columns = [

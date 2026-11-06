@@ -35,7 +35,7 @@ export function findRegistrationByContact(db, query) {
   const value = raw.toLowerCase();
   const rows = value.includes("@")
     ? db.prepare("SELECT id, status FROM registrations WHERE lower(email) = ? ORDER BY id DESC").all(value)
-    : db.prepare("SELECT id, status, mobile FROM registrations ORDER BY id DESC").all().filter((row) => phoneKey(row.mobile) === phoneKey(value) && phoneKey(value));
+    : db.prepare("SELECT id, status FROM registrations WHERE phone_key = ? ORDER BY id DESC").all(phoneKey(value));
   if (!rows.length) return null;
   const chosen = rows.find((row) => row.status !== "cancelled") || rows[0];
   return getRegistration(db, chosen.id);
@@ -134,10 +134,10 @@ export function createRegistration(db, input) {
     if (priced.error) throw new Error(priced.error);
     const result = db.prepare(`
       INSERT INTO registrations (
-        reference, product_id, payment_plan, full_name, email, mobile,
+        reference, product_id, payment_plan, full_name, email, mobile, phone_key,
         amount_due_cents, currency, status, registered_on,
         attendee_type, business, industry, chapter, invited_by, plan_status, coupon_code, resume_token
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, 'active', ?, ?)
     `).run(
       reference(),
       product.id,
@@ -145,6 +145,7 @@ export function createRegistration(db, input) {
       input.fullName.trim(),
       input.email.trim().toLowerCase(),
       input.mobile.trim(),
+      phoneKey(input.mobile) || null,
       priced.totalCents,
       product.currency,
       input.registeredOn,
@@ -190,11 +191,11 @@ export function registrationContactClash(db, { email, mobile, excludeId = 0 }) {
     `).get(nextEmail, excludeId);
     if (emailOwner) return "That email is already on a registration.";
   }
-  const digits = String(mobile || "").replace(/\D/g, "");
-  if (!phoneKey(mobile) && !digits) return "";
+  const key = phoneKey(mobile);
+  if (!key) return "";
   const owner = db.prepare(`
-    SELECT id, mobile FROM registrations WHERE id != ? AND status != 'cancelled'
-  `).all(excludeId).find((row) => sameMobile(row.mobile, mobile));
+    SELECT id FROM registrations WHERE phone_key = ? AND id != ? AND status != 'cancelled'
+  `).get(key, excludeId);
   if (owner) return "That mobile number is already on a registration.";
   return "";
 }
@@ -228,12 +229,13 @@ export function updateRegistration(db, id, input) {
   if (clash) throw new Error(clash);
   db.prepare(`
     UPDATE registrations
-    SET full_name = ?, email = ?, mobile = ?, business = ?, industry = ?, chapter = ?
+    SET full_name = ?, email = ?, mobile = ?, phone_key = ?, business = ?, industry = ?, chapter = ?
     WHERE id = ?
   `).run(
     input.fullName.trim(),
     email,
     mobile,
+    phoneKey(mobile) || null,
     input.business?.trim() || null,
     input.industry?.trim() || null,
     input.chapter?.trim() || null,
