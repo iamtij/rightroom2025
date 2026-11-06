@@ -25,8 +25,9 @@ function aesKey() {
   return null;
 }
 
-function baseUrl() {
-  return (process.env.UPAY_BASE_URL || "https://api-uat.unionbankph.com/partners/sb").replace(/\/$/, "");
+function productionPageUrl() {
+  const base = String(process.env.UPAY_PAGE_URL || "https://sith.unionbankph.com/UPAY/Whitelabel").replace(/\/$/, "");
+  return `${base}/${encodeURIComponent(billerUuid())}`;
 }
 
 function callbackUrl() {
@@ -100,7 +101,7 @@ function unionbankMessage(body, status) {
   const info = body?.moreInformation || body?.httpMessage || body?.description || body?.message || body?.error;
   const text = Array.isArray(info) ? info.join(" ") : String(info || "");
   if (/not registered to plan/i.test(text)) {
-    return "UnionBank accepted the login, then refused UPay. This sandbox app is not subscribed to UPay by UnionBank. Ask your UnionBank API contact to turn that product on, then try the ₱10 payment again.";
+    return "UnionBank refused this UPay request. Checkout uses the production biller page, not the sandbox partner app.";
   }
   if (text) return `UnionBank could not start the payment. ${text}`;
   return `UnionBank could not start the payment (${status}).`;
@@ -116,7 +117,7 @@ async function partnerToken() {
     password: required("UPAY_PASSWORD"),
     scope: process.env.UPAY_SCOPE || "upay_payments",
   });
-  const response = await fetch(`${baseUrl()}/partners/v1/oauth2/token`, {
+  const response = await fetch(`${String(process.env.UPAY_BASE_URL || "").replace(/\/$/, "")}/partners/v1/oauth2/token`, {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -136,7 +137,7 @@ async function partnerToken() {
 }
 
 async function upayFetch(path, token, options = {}) {
-  const response = await fetch(`${baseUrl()}${path}`, {
+  const response = await fetch(`${String(process.env.UPAY_BASE_URL || "").replace(/\/$/, "")}${path}`, {
     method: options.method || "GET",
     headers: {
       Accept: "application/json",
@@ -163,7 +164,7 @@ function senderRefId() {
 async function loadReferences(token, input) {
   const response = await upayFetch(`/upay/payments/v1/billers/${encodeURIComponent(billerUuid())}/references`, token);
   if (response.status === 404) {
-    throw new Error("UnionBank does not have this biller in the sandbox yet.");
+    throw new Error("UnionBank does not have this biller on the payment page.");
   }
   if (!response.ok) throw new Error(unionbankMessage(response.body, response.status));
   return paymentReferences(response.body.references, input);
@@ -331,74 +332,24 @@ export async function startUpayPayment(db, registration, paymentMethod) {
   if (mobile.length < 10) {
     return { error: "Add a Philippine mobile number so UnionBank can send the receipt.", status: 400, registration };
   }
-  const input = {
-    fullName: registration.full_name,
-    email: registration.email,
-    mobile,
-    reference: registration.reference,
+  const sender = senderRefId();
+  const page = productionPageUrl();
+  const result = db.prepare(`
+    INSERT INTO upay_payments (
+      registration_id, installment_id, sender_ref_id, amount_cents, currency, payment_method,
+      status, unionbank_code, unionbank_state, transaction_id, transaction_uuid, qr, payment_url
+    ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL, NULL, NULL, ?)
+  `).run(
+    registration.id,
+    due.id,
+    sender,
     amountCents,
-  };
-  let token;
-  try {
-    token = await partnerToken();
-    const references = await loadReferences(token, input);
-    const sender = senderRefId();
-    const created = await upayFetch("/upay/payments/v1/transactions", token, {
-      method: "POST",
-      body: {
-        senderRefId: sender,
-        tranRequestDate: tranRequestDate(),
-        billerUuid: billerUuid(),
-        emailAddress: registration.email,
-        mobileNumber: mobile,
-        amount: pesosFromCents(amountCents),
-        paymentMethod,
-        callbackUrl: callbackUrl(),
-        references,
-      },
-    });
-    if (!created.ok) {
-      return { error: unionbankMessage(created.body, created.status), status: created.status === 400 ? 400 : 502, registration };
-    }
-    const outcome = upayOutcome(created.body);
-    const settlement = upaySettlement(created.body, amountCents);
-    if (outcome === "paid" && settlement !== "paid") {
-      console.error(`UPay amount was not confirmed for ${sender}`);
-    }
-    const result = db.prepare(`
-      INSERT INTO upay_payments (
-        registration_id, installment_id, sender_ref_id, amount_cents, currency, payment_method,
-        status, unionbank_code, unionbank_state, transaction_id, transaction_uuid, qr, payment_url
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      registration.id,
-      due.id,
-      sender,
-      amountCents,
-      registration.currency,
-      paymentMethod,
-      settlement === "failed" ? "failed" : "pending",
-      created.body.code || null,
-      created.body.state || null,
-      created.body.transactionId || null,
-      created.body.uuid || null,
-      qrText(created.body) || null,
-      paymentLink(created.body) || null,
-    );
-    let row = db.prepare("SELECT * FROM upay_payments WHERE id = ?").get(result.lastInsertRowid);
-    let current = registration;
-    if (settlement === "paid") {
-      current = settle(db, row);
-      row = saveUpay(db, row, { status: "paid" });
-    } else if (settlement === "failed") {
-      row = saveUpay(db, row, { status: "failed" });
-      return { error: created.body.state || "UnionBank declined the payment.", status: 402, registration: current, upay: await presentUpay(row) };
-    }
-    return { registration: current, upay: await presentUpay(row) };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "UnionBank could not start the payment.";
-    return { error: message, status: 502, registration };
-  }
+    registration.currency,
+    paymentMethod,
+    page,
+  );
+  const row = db.prepare("SELECT * FROM upay_payments WHERE id = ?").get(result.lastInsertRowid);
+  return { registration, upay: await presentUpay(row) };
 }
 
 export async function refreshUpayPayment(db, senderRefIdValue) {
