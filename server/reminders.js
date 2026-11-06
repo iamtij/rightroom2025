@@ -67,10 +67,20 @@ function insertDispatch(db, row, result) {
   );
 }
 
+function providerReady(channel) {
+  if (channel === "email") return Boolean(process.env.RESEND_API_KEY);
+  if (channel === "sms") return Boolean(process.env.SEMAPHORE_API_KEY);
+  return false;
+}
+
 async function queue(db, row, rendered) {
   if (row.templateKey === "installment_reminder" && !installmentStillDue(db, row.installmentId)) return false;
-  const existing = db.prepare("SELECT id FROM reminder_dispatches WHERE dispatch_key = ?").get(row.dispatchKey);
-  if (existing) return false;
+  const existing = db.prepare("SELECT id, status, error FROM reminder_dispatches WHERE dispatch_key = ?").get(row.dispatchKey);
+  if (existing) {
+    const retryable = existing.status !== "sent" && (existing.status === "skipped" || existing.error === "provider_not_configured") && providerReady(row.channel);
+    if (!retryable) return false;
+    db.prepare("DELETE FROM reminder_dispatches WHERE id = ?").run(existing.id);
+  }
   const pass = looksLikePass(rendered);
   if ((row.templateKey !== "entry_pass" && (rendered.includesQr || pass)) || (rendered.includesQr && registrationBalance(db, row.registrationId) !== 0)) {
     insertDispatch(db, { ...row, ...rendered, includesQr: false }, { status: "failed", error: "qr_blocked" });
