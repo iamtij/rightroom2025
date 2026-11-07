@@ -1,7 +1,7 @@
 import { createHmac, randomInt, timingSafeEqual } from "crypto";
 import { findMemberRow } from "./members.js";
 import { sendEmail } from "./providers.js";
-import { findRegistrationByContact } from "./registrations.js";
+import { findRegistrationByContact, resolveRegistrationByContact } from "./registrations.js";
 
 const TEN_MINUTES = 10 * 60 * 1000;
 const RESEND_WAIT = 30 * 1000;
@@ -111,7 +111,9 @@ export function memberEditToken(email) {
 }
 
 export function issueRegistrationOtp(db, query) {
-  const registration = findRegistrationByContact(db, query);
+  const resolved = resolveRegistrationByContact(db, query);
+  if (resolved.error) return { error: resolved.error, status: resolved.status || 400 };
+  const registration = resolved.registration;
   if (!registration) return { error: "We couldn't find a registration with that email or mobile.", status: 404 };
   const email = registration.email.trim().toLowerCase();
   const recent = db.prepare("SELECT created_at FROM registration_otps WHERE email = ? ORDER BY id DESC LIMIT 1").get(email);
@@ -152,7 +154,9 @@ export async function sendRegistrationOtp(db, query) {
 }
 
 export function verifyRegistrationOtp(db, query, code) {
-  const registration = findRegistrationByContact(db, query);
+  const resolved = resolveRegistrationByContact(db, query);
+  if (resolved.error) return { error: resolved.error, status: resolved.status || 400 };
+  const registration = resolved.registration;
   if (!registration) return { error: "We couldn't find a registration with that email or mobile.", status: 404 };
   const email = registration.email.trim().toLowerCase();
   const entered = String(code || "").replace(/\D/g, "");

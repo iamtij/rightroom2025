@@ -17,28 +17,68 @@ function token() {
   return crypto.randomBytes(18).toString("base64url");
 }
 
-function phoneKey(value) {
+/** Last 10 digits for PH mobile linkage; empty string when input is not a valid phone query. */
+export function registrationPhoneKey(value) {
   const digits = String(value || "").replace(/\D/g, "");
-  return digits.length >= 10 ? digits.slice(-10) : "";
+  if (digits.length < 10) return "";
+  return digits.slice(-10);
 }
 
-export function findRegistrationByContact(db, query) {
+function phoneKey(value) {
+  return registrationPhoneKey(value);
+}
+
+/**
+ * Resolve a registration by email, mobile, or reference. Fails closed on ambiguous mobile matches.
+ */
+export function resolveRegistrationByContact(db, query) {
   const raw = String(query || "").trim();
-  if (!raw) return null;
+  if (!raw) return { registration: null };
   const byReference = db
     .prepare("SELECT id, status FROM registrations WHERE lower(reference) = ? ORDER BY id DESC")
     .all(raw.toLowerCase());
   if (byReference.length) {
     const chosen = byReference.find((row) => row.status !== "cancelled") || byReference[0];
-    return getRegistration(db, chosen.id);
+    return { registration: getRegistration(db, chosen.id) };
   }
   const value = raw.toLowerCase();
-  const rows = value.includes("@")
-    ? db.prepare("SELECT id, status FROM registrations WHERE lower(email) = ? ORDER BY id DESC").all(value)
-    : db.prepare("SELECT id, status FROM registrations WHERE phone_key = ? ORDER BY id DESC").all(phoneKey(value));
-  if (!rows.length) return null;
-  const chosen = rows.find((row) => row.status !== "cancelled") || rows[0];
-  return getRegistration(db, chosen.id);
+  if (value.includes("@")) {
+    const rows = db.prepare("SELECT id, status FROM registrations WHERE lower(email) = ? ORDER BY id DESC").all(value);
+    if (!rows.length) return { registration: null };
+    const chosen = rows.find((row) => row.status !== "cancelled") || rows[0];
+    return { registration: getRegistration(db, chosen.id) };
+  }
+  const key = registrationPhoneKey(raw);
+  if (!key) return { registration: null };
+  const keyed = db.prepare(`
+    SELECT id, status, lower(email) AS email
+    FROM registrations
+    WHERE phone_key = ?
+  `).all(key);
+  const stale = db
+    .prepare("SELECT id, status, lower(email) AS email, mobile FROM registrations WHERE phone_key IS NULL")
+    .all()
+    .filter((row) => registrationPhoneKey(row.mobile) === key)
+    .map(({ id, status, email }) => ({ id, status, email }));
+  const merged = new Map();
+  for (const row of [...keyed, ...stale]) merged.set(row.id, row);
+  const rows = [...merged.values()].sort((a, b) => b.id - a.id);
+  if (!rows.length) return { registration: null };
+  const active = rows.filter((row) => row.status !== "cancelled");
+  const pool = active.length ? active : rows;
+  const distinctEmails = [...new Set(pool.map((row) => row.email).filter(Boolean))];
+  if (distinctEmails.length > 1) {
+    return {
+      registration: null,
+      error: "More than one registration uses this mobile. Use your email or registration reference instead.",
+      status: 409,
+    };
+  }
+  return { registration: getRegistration(db, pool[0].id) };
+}
+
+export function findRegistrationByContact(db, query) {
+  return resolveRegistrationByContact(db, query).registration;
 }
 
 export function getRegistration(db, id) {

@@ -28,6 +28,8 @@ For TJ/manual checkout while safe mode stays on:
 
 Routes: `POST /api/members/otp`, `POST /api/registrations/otp`. Auth unchanged (random code, verify required).
 
+Mobile registration lookup matches on `phone_key` (last 10 digits). If multiple non-cancelled registrations share that mobile with **different** emails, the API returns **409** and asks for email or reference — it does not pick a row or prefer allowlisted addresses.
+
 ## Not suppressed
 
 - Paynamics Workflow API calls (separate gates)
