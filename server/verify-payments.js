@@ -216,6 +216,8 @@ try {
   const looked = await verified.json();
   assert.equal(verified.status, 200);
   assert.equal(looked.member.email, "member.one@example.com");
+  assert.equal(looked.member.registered, false);
+  assert.equal(looked.registration, undefined);
   assert.ok(looked.member.memberToken);
 
   const proved = await fetch(`${base}/api/registrations`, {
@@ -238,6 +240,23 @@ try {
   assert.equal(proved.status, 201);
   assert.equal(provedBody.attendee.email, "member.one@example.com");
   assert.equal(provedBody.attendee.mobile, "09181234567");
+
+  const returnDb = openDatabase(file);
+  const returnCode = issueMemberOtp(returnDb, "member.one@example.com");
+  returnDb.close();
+  const returned = await fetch(`${base}/api/members/otp/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "member.one@example.com", code: returnCode.code }),
+  });
+  const returnedBody = await returned.json();
+  assert.equal(returned.status, 200);
+  assert.equal(returnedBody.member.registered, true);
+  assert.equal(returnedBody.registration.reference, provedBody.reference);
+  assert.equal(returnedBody.registration.attendee.fullName, "Member One");
+  assert.equal(returnedBody.registration.attendee.email, "member.one@example.com");
+  assert.equal(returnedBody.registration.resumeToken, provedBody.resumeToken);
+  assert.ok(String(returned.headers.get("set-cookie") || "").includes("ibmc_resume="));
 
   const hiddenPay = await fetch(`${base}/api/payments/upay/IBMCSECURITYTEST`);
   const hiddenPayBody = await hiddenPay.json();

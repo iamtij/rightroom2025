@@ -1,13 +1,10 @@
 import { Resend } from "resend";
+import { philippineMobile } from "./contact.js";
 import { outboundEmailSuppressed, outboundSmsSuppressed } from "./staging-safe.js";
 
 const SEMAPHORE_URL = "https://api.semaphore.co/api/v4/messages";
 
-export function philippineMobile(value) {
-  const digits = String(value || "").replace(/\D/g, "");
-  const local = digits.startsWith("63") ? `0${digits.slice(2)}` : digits.length === 10 ? `0${digits}` : digits;
-  return /^09\d{9}$/.test(local) ? local : null;
-}
+export { philippineMobile };
 
 function senderName() {
   const name = (process.env.SMS_SENDER_NAME || "").trim();

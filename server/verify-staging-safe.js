@@ -209,6 +209,13 @@ try {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query: "unknown-member" }),
   });
+  assert.equal(res.status, 400);
+  assert.equal((await res.json()).error, "Enter a valid email or mobile number.");
+  res = await fetch(`${base}/api/members/otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "missing.person@example.com" }),
+  });
   assert.equal(res.status, 404);
 } finally {
   await new Promise((resolve) => server.close(resolve));

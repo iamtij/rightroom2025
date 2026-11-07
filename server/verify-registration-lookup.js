@@ -8,16 +8,28 @@ import {
   registrationPhoneKey,
   resolveRegistrationByContact,
 } from "./registrations.js";
-import { sendRegistrationOtp } from "./otp.js";
+import { LOOKUP_CONTACT_ERROR, parseLookupContact } from "./contact.js";
+import { sendMemberOtp, sendRegistrationOtp } from "./otp.js";
 
 const VICTIM_MOBILE = "09171234567";
 const VICTIM_KEY = registrationPhoneKey(VICTIM_MOBILE);
 const ATTACKER_MOBILE = "09179999999";
 
+assert.equal(parseLookupContact("asdf").error, LOOKUP_CONTACT_ERROR);
+assert.equal(parseLookupContact("foo@bar").status, 400);
+assert.equal(parseLookupContact("abc09171234567").status, 400);
+assert.equal(parseLookupContact("name@business.com").value, "name@business.com");
+assert.equal(parseLookupContact("0917 123 4567").value, "09171234567");
+assert.equal(parseLookupContact("+63 917 123 4567").kind, "mobile");
+assert.equal(parseLookupContact("IBMC27-ab12cd", { reference: true }).kind, "reference");
+assert.equal(parseLookupContact("IBMC27-ab12cd").status, 400);
 assert.equal(registrationMobileMatchesPhoneQuery(VICTIM_MOBILE, VICTIM_KEY), true);
 assert.equal(registrationMobileMatchesPhoneQuery(ATTACKER_MOBILE, VICTIM_KEY), false);
 
 const db = openDatabase(":memory:");
+assert.equal((await sendRegistrationOtp(db, "not a contact")).status, 400);
+assert.equal((await sendMemberOtp(db, "zzzz")).error, LOOKUP_CONTACT_ERROR);
+assert.equal((await sendRegistrationOtp(db, "nobody@example.com")).status, 404);
 db.prepare("UPDATE ticket_products SET sales_start = '2020-01-01'").run();
 
 process.env.RAILWAY_ENVIRONMENT = "staging";

@@ -367,7 +367,7 @@ export function createApi() {
   router.post("/members/otp", otpLimit, async (req, res) => {
     const result = await sendMemberOtp(db(), req.body?.query || req.body?.email);
     if (result.error) {
-      if (result.status !== 404) console.error("Member code was not sent");
+      if (result.status !== 404 && result.status !== 400) console.error("Member code was not sent");
       res.status(result.status || 400).json({ error: result.error });
       return;
     }
@@ -389,16 +389,29 @@ export function createApi() {
       res.status(400).json({ error: "That code is wrong." });
       return;
     }
-    const registered = [member.email, member.mobile].some((contact) => {
+    const email = String(member.email || "").trim().toLowerCase();
+    const byEmail = email ? findRegistrationByContact(db(), email) : null;
+    const owned = byEmail
+      && byEmail.status === "confirmed"
+      && String(byEmail.email || "").trim().toLowerCase() === email
+      ? byEmail
+      : null;
+    const registered = Boolean(owned) || [member.mobile].some((contact) => {
       const registration = findRegistrationByContact(db(), contact);
       return Boolean(registration && registration.status === "confirmed");
     });
     const { id, ...visible } = member;
-    res.json({
+    const body = {
       ok: true,
       editToken: result.editToken,
       member: { ...visible, registered, memberToken: toPublicMember(member, registered).memberToken },
-    });
+    };
+    if (owned) {
+      const registration = ensureResumeToken(db(), owned);
+      attachResume(res, registration);
+      body.registration = present(registration, { resume: true });
+    }
+    res.json(body);
   });
 
   router.post("/members/details", otpLimit, (req, res) => {
@@ -775,7 +788,7 @@ export function createApi() {
     }
     const result = await sendRegistrationOtp(db(), query);
     if (result.error) {
-      if (result.status !== 404) console.error("Registration code was not sent");
+      if (result.status !== 404 && result.status !== 400) console.error("Registration code was not sent");
       res.status(result.status || 400).json({ error: result.error });
       return;
     }

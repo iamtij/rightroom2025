@@ -89,13 +89,11 @@ function InstallmentPlan({
   total,
   summary,
   rows,
-  note,
   tone,
 }: {
   total: string;
   summary: string;
   rows: string[][];
-  note?: string;
   tone: "red" | "neutral";
 }) {
   const [open, setOpen] = useState(false);
@@ -137,7 +135,6 @@ function InstallmentPlan({
               ))}
             </tbody>
           </table>
-          {note && <p className="m-0 border-t border-[#E4E1DC] px-3 py-2.5 text-[13px] leading-snug text-[#5C5C63]">{note}</p>}
         </>
       )}
     </div>
@@ -794,7 +791,7 @@ export default function AmplifyHome() {
           First Mover pricing ends November 30. After that, the price only goes up.
         </h2>
         <p className="m-0 max-w-[600px] text-lg leading-relaxed text-[#C9C7C2]">
-          The future isn't waiting — and neither is First Mover pricing. Your competitors will be in the room. Make sure you are too.
+          The future isn't waiting — and neither is First Mover pricing. Be in the room while this price is still open.
         </p>
         <a href="/register" className="rounded-full bg-[#D0202E] px-[30px] py-4 text-base font-semibold text-white no-underline">
           Lock in ₱12,000
@@ -879,7 +876,6 @@ export default function AmplifyHome() {
               total="₱16,000"
               summary="₱4,000 upon registration + four payments of ₱3,000"
               rows={EARLY_BIRD_PLAN}
-              note="Phase 2 payments begin in February for all Early Bird registrants."
               tone="neutral"
             />
             <span className="mt-auto rounded-full border border-[#D9D5CF] px-5 py-[15px] text-center text-base font-semibold text-[#5C5C63]">

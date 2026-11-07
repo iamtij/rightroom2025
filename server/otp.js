@@ -1,10 +1,11 @@
 import { createHmac, randomInt, timingSafeEqual } from "crypto";
+import { parseLookupContact } from "./contact.js";
 import { findMemberRow } from "./members.js";
 import { sendEmail } from "./providers.js";
 import { findRegistrationByContact, resolveRegistrationByContact } from "./registrations.js";
 
 const TEN_MINUTES = 10 * 60 * 1000;
-const RESEND_WAIT = 30 * 1000;
+const RESEND_WAIT = 60 * 1000;
 const MAX_ATTEMPTS = 5;
 
 function purposeSecret(envName, purpose) {
@@ -45,7 +46,9 @@ export function maskEmail(email) {
 }
 
 export function issueMemberOtp(db, query) {
-  const member = findMemberRow(db, query);
+  const contact = parseLookupContact(query);
+  if (contact.error) return contact;
+  const member = findMemberRow(db, contact.value);
   if (!member) return { error: "We couldn't find that membership", status: 404 };
   const normalized = member.email.trim().toLowerCase();
   const recent = db.prepare("SELECT created_at FROM member_otps WHERE email = ? ORDER BY id DESC LIMIT 1").get(normalized);
@@ -80,7 +83,9 @@ export async function sendMemberOtp(db, email) {
 }
 
 export function verifyMemberOtp(db, query, code) {
-  const member = findMemberRow(db, query);
+  const contact = parseLookupContact(query);
+  if (contact.error) return contact;
+  const member = findMemberRow(db, contact.value);
   if (!member) return { error: "We couldn't find that membership", status: 404 };
   const normalized = member.email.trim().toLowerCase();
   const entered = String(code || "").replace(/\D/g, "");
@@ -105,7 +110,9 @@ export function memberEditToken(email) {
 }
 
 export function issueRegistrationOtp(db, query) {
-  const resolved = resolveRegistrationByContact(db, query);
+  const contact = parseLookupContact(query, { reference: true });
+  if (contact.error) return contact;
+  const resolved = resolveRegistrationByContact(db, contact.value);
   if (resolved.error) return { error: resolved.error, status: resolved.status || 400 };
   const registration = resolved.registration;
   if (!registration) return { error: "We couldn't find a registration with that email or mobile.", status: 404 };
@@ -142,7 +149,9 @@ export async function sendRegistrationOtp(db, query) {
 }
 
 export function verifyRegistrationOtp(db, query, code) {
-  const resolved = resolveRegistrationByContact(db, query);
+  const contact = parseLookupContact(query, { reference: true });
+  if (contact.error) return contact;
+  const resolved = resolveRegistrationByContact(db, contact.value);
   if (resolved.error) return { error: resolved.error, status: resolved.status || 400 };
   const registration = resolved.registration;
   if (!registration) return { error: "We couldn't find a registration with that email or mobile.", status: 404 };

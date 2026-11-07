@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { parseLookupContact } from "../../server/contact.js";
 import { LevNote, type LevPose } from "./Lev";
 import {
   INDUSTRIES,
@@ -582,6 +583,49 @@ function memberAttendee(member: FoundMember, audience: Audience = "member"): Att
   };
 }
 
+const RESEND_WAIT_SECONDS = 60;
+
+function useResendCooldown() {
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const endsAt = useRef(0);
+  const cooling = secondsLeft > 0;
+
+  useEffect(() => {
+    if (!cooling) return undefined;
+    const timer = window.setInterval(() => {
+      const left = Math.max(0, Math.ceil((endsAt.current - Date.now()) / 1000));
+      setSecondsLeft((current) => (current === left ? current : left));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [cooling]);
+
+  const start = useCallback(() => {
+    endsAt.current = Date.now() + RESEND_WAIT_SECONDS * 1000;
+    setSecondsLeft(RESEND_WAIT_SECONDS);
+  }, []);
+
+  const reset = useCallback(() => {
+    endsAt.current = 0;
+    setSecondsLeft(0);
+  }, []);
+
+  return { secondsLeft, start, reset };
+}
+
+function ResendCodeButton({ secondsLeft, busy = false, onClick }: { secondsLeft: number; busy?: boolean; onClick: () => void }) {
+  const waiting = secondsLeft > 0;
+  return (
+    <button
+      type="button"
+      disabled={busy || waiting}
+      onClick={onClick}
+      className="min-w-[7.5rem] rounded-full border border-[#D9D5CF] px-4 py-2.5 text-sm font-semibold tabular-nums disabled:cursor-not-allowed disabled:text-[#9A9590]"
+    >
+      {waiting ? `Resend ${secondsLeft}s` : "Resend"}
+    </button>
+  );
+}
+
 function membershipHoldNote(member: FoundMember, editing: boolean) {
   if (member.profileReady) return "";
   const person = memberAttendee(member);
@@ -617,6 +661,7 @@ function RegistrationWizard() {
   const [otpCode, setOtpCode] = useState("");
   const [otpError, setOtpError] = useState("");
   const [otpBusy, setOtpBusy] = useState(false);
+  const { secondsLeft: resendSeconds, start: startResendCooldown, reset: resetResendCooldown } = useResendCooldown();
   const [editToken, setEditToken] = useState("");
   const [plan, setPlan] = useState<CheckoutPlan>("full");
   const [memberTest, setMemberTest] = useState(false);
@@ -637,6 +682,7 @@ function RegistrationWizard() {
   const [couponBusy, setCouponBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<StoredRegistration | null>(null);
+  const [managedRecord, setManagedRecord] = useState<StoredRegistration | null>(null);
   const [chapters, setChapters] = useState<string[]>([]);
   const [testMode, setTestMode] = useState(false);
   const [installmentTest, setInstallmentTest] = useState(false);
@@ -731,10 +777,16 @@ function RegistrationWizard() {
     setOtpCode("");
     setOtpError("");
     setEditToken("");
+    resetResendCooldown();
   }
 
   async function sendOtp() {
-    if (!member || otpBusy) return;
+    if (!member || otpBusy || resendSeconds > 0) return;
+    const contact = parseLookupContact(lookup.trim());
+    if ("error" in contact) {
+      setOtpError(contact.error);
+      return;
+    }
     setOtpBusy(true);
     setOtpError("");
     try {
@@ -747,6 +799,7 @@ function RegistrationWizard() {
       if (!response.ok) throw new Error(payload.error || "Could not send the code");
       setOtpSentTo(payload.maskedEmail || "your email");
       setOtpCode("");
+      startResendCooldown();
     } catch (error) {
       setOtpError(error instanceof Error ? error.message : "Could not send the code");
     } finally {
@@ -766,6 +819,19 @@ function RegistrationWizard() {
       });
       const payload = await response.json();
       if (!response.ok || !payload.member) throw new Error(payload.error || "That code is wrong.");
+      resetResendCooldown();
+      const registration = payload.registration as StoredRegistration | undefined;
+      if (payload.member.registered && registration?.reference) {
+        rememberRegistration(registration);
+        setSaved(registration);
+        setManagedRecord(registration);
+        setMember(payload.member);
+        setEditToken(payload.editToken || "");
+        setOtpSentTo("");
+        setStep("manage");
+        return;
+      }
+      setManagedRecord(null);
       setMember(payload.member);
       setEditToken(payload.editToken || "");
       setAttendee(memberAttendee(payload.member));
@@ -779,7 +845,14 @@ function RegistrationWizard() {
 
   async function searchMember() {
     const query = lookup.trim();
-    if (!query || searching) return;
+    if (!query || searching || resendSeconds > 0) return;
+    const contact = parseLookupContact(query);
+    if ("error" in contact) {
+      setMember(null);
+      clearOtp();
+      setLookupError(contact.error);
+      return;
+    }
     setSearching(true);
     setLookupError("");
     setOtpError("");
@@ -794,6 +867,7 @@ function RegistrationWizard() {
       if (!response.ok) throw new Error(payload.error || "Could not send the code");
       setOtpSentTo("your email");
       setOtpCode("");
+      startResendCooldown();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not send the code";
       if (otpSentTo) setOtpError(message);
@@ -1111,7 +1185,7 @@ function RegistrationWizard() {
         )}
         <p className="m-0 mt-auto text-center text-sm text-[#5C5C63]">
           Already registered?{" "}
-          <button type="button" className="font-semibold text-[#A8131F]" onClick={() => { setLookup(""); setStep("manage"); }}>
+          <button type="button" className="font-semibold text-[#A8131F]" onClick={() => { setLookup(""); setManagedRecord(null); setStep("manage"); }}>
             Manage my registration
           </button>
         </p>
@@ -1180,7 +1254,7 @@ function RegistrationWizard() {
           />
           <button
             type="button"
-            disabled={!lookup.trim() || searching}
+            disabled={!lookup.trim() || searching || resendSeconds > 0}
             onClick={searchMember}
             className="shrink-0 rounded-full bg-[#D0202E] px-5 text-base font-bold text-white disabled:bg-[#E4A0A6]"
           >
@@ -1212,7 +1286,7 @@ function RegistrationWizard() {
                 {otpError ? <p className="m-0 text-sm text-[#A8131F]">{otpError}</p> : null}
                 <div className="flex gap-2">
                   <button type="button" disabled={otpCode.length !== 6 || otpBusy} onClick={confirmOtp} className="rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]">Confirm code</button>
-                  <button type="button" disabled={otpBusy} onClick={sendOtp} className="rounded-full border border-[#D9D5CF] px-4 py-2.5 text-sm font-semibold">Resend</button>
+                  <ResendCodeButton secondsLeft={resendSeconds} busy={otpBusy} onClick={sendOtp} />
                 </div>
               </div>
             ) : (
@@ -1244,7 +1318,7 @@ function RegistrationWizard() {
             {otpError ? <p className="m-0 text-sm text-[#A8131F]">{otpError}</p> : null}
             <div className="flex gap-2">
               <button type="button" disabled={otpCode.length !== 6 || otpBusy} onClick={confirmOtp} className="rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]">Confirm code</button>
-              <button type="button" disabled={otpBusy || searching} onClick={searchMember} className="rounded-full border border-[#D9D5CF] px-4 py-2.5 text-sm font-semibold">Resend</button>
+              <ResendCodeButton secondsLeft={resendSeconds} busy={otpBusy || searching} onClick={searchMember} />
             </div>
           </div>
         ) : null}
@@ -1669,7 +1743,18 @@ function RegistrationWizard() {
     );
   }
   if (step === "done" && saved) return <Confirmed record={saved} onManage={() => setStep("manage")} />;
-  if (step === "manage") return <Manage initialQuery={lookup} onStart={() => setStep("start")} />;
+  if (step === "manage") {
+    return (
+      <Manage
+        initialQuery={lookup}
+        initialRecord={managedRecord}
+        onStart={() => {
+          setManagedRecord(null);
+          setStep("start");
+        }}
+      />
+    );
+  }
   return null;
 }
 
@@ -2346,15 +2431,17 @@ function Confirmed({ record, onManage }: { record: StoredRegistration; onManage:
 function Manage({
   onStart,
   initialQuery = "",
+  initialRecord = null,
   payReference = "",
   openPayOnLoad = false,
 }: {
   onStart: () => void;
   initialQuery?: string;
+  initialRecord?: StoredRegistration | null;
   payReference?: string;
   openPayOnLoad?: boolean;
 }) {
-  const [record, setRecord] = useState<StoredRegistration | null>(null);
+  const [record, setRecord] = useState<StoredRegistration | null>(initialRecord);
   const [query, setQuery] = useState(payReference || initialQuery);
   const [found, setFound] = useState<{ fullName: string; tierName: string; maskedEmail: string } | null>(null);
   const [lookedUp, setLookedUp] = useState(false);
@@ -2362,14 +2449,15 @@ function Manage({
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const { secondsLeft: resendSeconds, start: startResendCooldown, reset: resetResendCooldown } = useResendCooldown();
   const [method, setMethod] = useState<UpayMethod>("instapay");
   const { channels, channel, setChannel, paynamicsLiveChargeWarning, paynamicsCheckout, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
   const [payingInstallment, setPayingInstallment] = useState(false);
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
   const [paynamicsSession, setPaynamicsSession] = useState<PaynamicsSession | null>(null);
-  const [badgeName, setBadgeName] = useState("");
-  const [badgeCompany, setBadgeCompany] = useState("");
+  const [badgeName, setBadgeName] = useState(initialRecord?.attendee.fullName || "");
+  const [badgeCompany, setBadgeCompany] = useState(initialRecord?.attendee.business || "");
   const [badgeNote, setBadgeNote] = useState("");
   const [badgeError, setBadgeError] = useState("");
   const payIntent = Boolean(payReference || openPayOnLoad);
@@ -2413,6 +2501,7 @@ function Manage({
         if (stop) return;
         if (!sent.ok) throw new Error("Could not send the code");
         setMaskedEmail("your email");
+        startResendCooldown();
       } catch (lookupError) {
         if (!stop) setError(lookupError instanceof Error ? lookupError.message : "Search failed");
       } finally {
@@ -2430,11 +2519,21 @@ function Manage({
     setMaskedEmail("");
     setCode("");
     setError("");
+    resetResendCooldown();
   }
 
   async function findRegistration() {
     const contact = query.trim();
-    if (!contact || busy) return;
+    if (!contact || busy || resendSeconds > 0) return;
+    const parsed = parseLookupContact(contact, { reference: true });
+    if ("error" in parsed) {
+      setFound(null);
+      setLookedUp(false);
+      setMaskedEmail("");
+      setCode("");
+      setError(parsed.error);
+      return;
+    }
     setBusy(true);
     setError("");
     setFound(null);
@@ -2450,6 +2549,7 @@ function Manage({
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Could not send the code");
       setMaskedEmail("your email");
+      startResendCooldown();
     } catch (lookupError) {
       setError(lookupError instanceof Error ? lookupError.message : "Search failed");
     } finally {
@@ -2459,7 +2559,12 @@ function Manage({
 
   async function sendCode() {
     const contact = query.trim();
-    if (!contact || busy) return;
+    if (!contact || busy || resendSeconds > 0) return;
+    const parsed = parseLookupContact(contact, { reference: true });
+    if ("error" in parsed) {
+      setError(parsed.error);
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -2472,6 +2577,7 @@ function Manage({
       if (!response.ok) throw new Error(payload.error || "Could not send the code");
       setMaskedEmail("your email");
       setCode("");
+      startResendCooldown();
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Could not send the code");
     } finally {
@@ -2527,7 +2633,7 @@ function Manage({
             />
             <button
               type="button"
-              disabled={!query.trim() || busy}
+              disabled={!query.trim() || busy || resendSeconds > 0}
               onClick={findRegistration}
               className="shrink-0 rounded-full bg-[#141416] px-4 text-sm font-bold text-white disabled:bg-[#C8C4BE]"
             >
@@ -2564,7 +2670,7 @@ function Manage({
             {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
             <div className="flex gap-2">
               <button type="button" disabled={code.length !== 6 || busy} onClick={confirmCode} className="rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]">Confirm code</button>
-              <button type="button" disabled={busy} onClick={sendCode} className="rounded-full border border-[#D9D5CF] px-4 py-2.5 text-sm font-semibold">Resend</button>
+              <ResendCodeButton secondsLeft={resendSeconds} busy={busy} onClick={sendCode} />
             </div>
           </div>
         ) : null}
