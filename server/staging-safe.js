@@ -28,6 +28,10 @@ export function parseStagingSafeMembershipOtpAllowlist() {
 }
 
 export function stagingSafeMembershipOtpRecipientAllowed(email) {
+  return stagingSafeAllowlistedOtpRecipientAllowed(email);
+}
+
+export function stagingSafeAllowlistedOtpRecipientAllowed(email) {
   if (!ibmcStagingSafeModeEnabled()) return false;
   if (!assessStagingLiveDeploymentIdentity().allowed) return false;
   const normalized = String(email || "").trim().toLowerCase();
@@ -35,12 +39,14 @@ export function stagingSafeMembershipOtpRecipientAllowed(email) {
   return parseStagingSafeMembershipOtpAllowlist().includes(normalized);
 }
 
+const STAGING_SAFE_OTP_DELIVERY = new Set(["member_otp", "registration_otp"]);
+
 /**
- * When safe mode is on, block outbound email except allowlisted member-ownership OTP on verified staging identity.
+ * When safe mode is on, block outbound email except allowlisted ownership/resume OTP on verified staging identity.
  */
 export function outboundEmailSuppressed({ to, deliveryKind = "general" } = {}) {
   if (!ibmcStagingSafeModeEnabled()) return false;
-  if (deliveryKind === "member_otp" && stagingSafeMembershipOtpRecipientAllowed(to)) return false;
+  if (STAGING_SAFE_OTP_DELIVERY.has(deliveryKind) && stagingSafeAllowlistedOtpRecipientAllowed(to)) return false;
   return true;
 }
 

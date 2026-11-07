@@ -12,21 +12,21 @@ When off, behavior is unchanged from production.
 
 ## Suppressed when `IBMC_STAGING_SAFE_MODE=true`
 
-- Resend email except **allowlisted member-ownership OTP** (below)
+- Resend email except **allowlisted member + registration/resume OTP** (below)
 - All Semaphore SMS (`sendSms`)
 - Automatic encrypted nightly backups (`createEncryptedBackup`), including S3 **upload** and retention **prune**
 - Registration resume OTP, reminders, schedules, security alerts
 
-## Allowlisted member-ownership OTP (staging only)
+## Allowlisted ownership / resume OTP (staging only)
 
 For TJ/manual checkout while safe mode stays on:
 
 | Variable | Purpose |
 | --- | --- |
-| `IBMC_STAGING_SAFE_MEMBERSHIP_OTP_ALLOWLIST` | Comma-separated **exact** membership emails (no wildcards). Default empty = none sent. |
+| `IBMC_STAGING_SAFE_MEMBERSHIP_OTP_ALLOWLIST` | Comma-separated **exact** emails (no wildcards). Applies to **both** member lookup OTP and registration resume OTP (matched to stored member/registration email). Default empty = none sent. |
 | Staging deployment identity | Same rules as Paynamics staging-live: Railway must not report `production`/conflict/unknown; see `docs/paynamics-staging.md`. |
 
-Only `POST /api/members/otp` emails for members whose stored email matches an allowlist entry. Auth flow unchanged (random code, hashed in DB, verify required).
+Routes: `POST /api/members/otp`, `POST /api/registrations/otp`. Auth unchanged (random code, verify required).
 
 ## Not suppressed
 
@@ -36,8 +36,7 @@ Only `POST /api/members/otp` emails for members whose stored email matches an al
 
 ## Operational notes
 
-- Registration resume OTP stays blocked in safe mode.
-- `/api/members/otp` returns HTTP error JSON when delivery fails (not silent success).
+- `/api/members/otp` and `/api/registrations/otp` return HTTP error JSON when delivery fails (not silent success).
 - Boot logs: `IBMC_STAGING_SAFE_MODE: outbound email/SMS and automatic backups are suppressed`
 
 ## Verification
