@@ -24,7 +24,7 @@ process.env.RAILWAY_ENVIRONMENT = "staging";
 process.env.RAILWAY_ENVIRONMENT_NAME = "staging";
 process.env.IBMC_DEPLOYMENT_ENV = "staging";
 process.env.IBMC_STAGING_SAFE_MODE = "true";
-process.env.IBMC_STAGING_SAFE_MEMBERSHIP_OTP_ALLOWLIST = "victim.active@example.com,attacker.lonely@example.com";
+delete process.env.RESEND_API_KEY;
 
 createRegistration(db, {
   productCode: "first_mover",
@@ -61,7 +61,6 @@ createRegistration(db, {
   registeredOn: "2026-11-14",
 });
 assert.equal(findRegistrationByContact(db, VICTIM_MOBILE)?.email, "victim.active@example.com");
-process.env.IBMC_STAGING_SAFE_MEMBERSHIP_OTP_ALLOWLIST = "victim.active@example.com";
 const victimOtp = await sendRegistrationOtp(db, VICTIM_MOBILE);
 assert.notEqual(victimOtp.status, 404);
 assert.notEqual(victimOtp.status, 409);
@@ -71,8 +70,6 @@ fs.rmSync(httpDbPath, { force: true });
 process.env.IBMC_DB_PATH = httpDbPath;
 process.env.TURNSTILE_SITE_KEY = "";
 process.env.TURNSTILE_SECRET_KEY = "";
-process.env.IBMC_STAGING_SAFE_MEMBERSHIP_OTP_ALLOWLIST = "a@example.com,b@example.com";
-
 const httpDb = openDatabase(httpDbPath);
 httpDb.prepare("UPDATE ticket_products SET sales_start = '2020-01-01'").run();
 createRegistration(httpDb, {
@@ -127,6 +124,4 @@ delete process.env.IBMC_DB_PATH;
 delete process.env.IBMC_DEPLOYMENT_ENV;
 delete process.env.RAILWAY_ENVIRONMENT;
 delete process.env.RAILWAY_ENVIRONMENT_NAME;
-delete process.env.IBMC_STAGING_SAFE_MEMBERSHIP_OTP_ALLOWLIST;
-
 console.log("Registration contact lookup checks passed.");

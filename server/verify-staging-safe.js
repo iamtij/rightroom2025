@@ -12,7 +12,6 @@ import {
   ibmcStagingSafeModeEnabled,
   outboundEmailSuppressed,
   outboundSmsSuppressed,
-  stagingSafeMembershipOtpRecipientAllowed,
 } from "./staging-safe.js";
 
 const originalFetch = global.fetch;
@@ -23,7 +22,6 @@ function clearIdentityEnv() {
   delete process.env.RAILWAY_ENVIRONMENT;
   delete process.env.RAILWAY_ENVIRONMENT_NAME;
   delete process.env.RAILWAY_PROJECT_ID;
-  delete process.env.IBMC_STAGING_SAFE_MEMBERSHIP_OTP_ALLOWLIST;
 }
 
 delete process.env.IBMC_STAGING_SAFE_MODE;
@@ -58,17 +56,9 @@ assert.equal(email.status, "skipped");
 assert.equal(email.error, "staging_safe_mode");
 
 process.env.IBMC_DEPLOYMENT_ENV = "staging";
-process.env.IBMC_STAGING_SAFE_MEMBERSHIP_OTP_ALLOWLIST = "tj.tester@example.com";
-assert.equal(stagingSafeMembershipOtpRecipientAllowed("TJ.tester@example.com"), true);
-assert.equal(outboundEmailSuppressed({ to: "tj.tester@example.com", deliveryKind: "member_otp" }), false);
-email = await sendEmail({
-  to: "tj.tester@example.com",
-  subject: "x",
-  text: "y",
-  deliveryKind: "member_otp",
-});
-assert.notEqual(email.error, "staging_safe_mode");
-
+assert.equal(outboundEmailSuppressed({ to: "other@example.com", deliveryKind: "member_otp" }), false);
+assert.equal(outboundEmailSuppressed({ to: "other@example.com", deliveryKind: "registration_otp" }), false);
+delete process.env.RESEND_API_KEY;
 email = await sendEmail({
   to: "other@example.com",
   subject: "x",
@@ -76,16 +66,17 @@ email = await sendEmail({
   deliveryKind: "member_otp",
 });
 assert.equal(email.status, "skipped");
-assert.equal(email.error, "staging_safe_mode");
+assert.equal(email.error, "provider_not_configured");
 
 process.env.RAILWAY_ENVIRONMENT = "production";
 process.env.RAILWAY_ENVIRONMENT_NAME = "production";
-assert.equal(stagingSafeMembershipOtpRecipientAllowed("tj.tester@example.com"), false);
+assert.equal(outboundEmailSuppressed({ to: "tj.tester@example.com", deliveryKind: "member_otp" }), false);
+assert.equal(outboundEmailSuppressed({ to: "tj.tester@example.com", deliveryKind: "registration_otp" }), false);
+process.env.RESEND_API_KEY = "re_test_safe_mode";
 email = await sendEmail({
   to: "tj.tester@example.com",
   subject: "x",
   text: "y",
-  deliveryKind: "member_otp",
 });
 assert.equal(email.status, "skipped");
 assert.equal(email.error, "staging_safe_mode");
@@ -118,9 +109,10 @@ createRegistration(db, {
   mobile: "09179998877",
   registeredOn: "2026-11-12",
 });
+delete process.env.RESEND_API_KEY;
 const allowedRegOtp = await sendRegistrationOtp(db, "tj.tester@example.com");
-assert.notEqual(allowedRegOtp.error, "Email login codes are disabled for this address while staging safe mode is on. Ask ops to allowlist your registration email.");
 assert.notEqual(allowedRegOtp.status, 503);
+assert.equal(allowedRegOtp.status, 502);
 assert.equal((await sendRegistrationOtp(db, "blocked@example.com")).status, 404);
 createRegistration(db, {
   productCode: "first_mover",
@@ -130,8 +122,9 @@ createRegistration(db, {
   mobile: "09171112233",
   registeredOn: "2026-11-12",
 });
-const deniedRegOtp = await sendRegistrationOtp(db, "blocked@example.com");
-assert.equal(deniedRegOtp.status, 503);
+const openRegOtp = await sendRegistrationOtp(db, "blocked@example.com");
+assert.notEqual(openRegOtp.status, 503);
+assert.equal(openRegOtp.status, 502);
 
 email = await sendEmail({
   to: "tj.tester@example.com",
@@ -143,12 +136,12 @@ assert.equal(email.status, "skipped");
 assert.equal(email.error, "staging_safe_mode");
 
 email = await sendEmail({
-  to: "tj.tester@example.com",
+  to: "blocked@example.com",
   subject: "otp",
   text: "x",
   deliveryKind: "registration_otp",
 });
-assert.notEqual(email.error, "staging_safe_mode");
+assert.equal(email.error, "provider_not_configured");
 
 fetchCalls = 0;
 process.env.BACKUP_ENCRYPTION_KEY = "a".repeat(64);
@@ -177,7 +170,7 @@ process.env.IBMC_STAGING_SAFE_MODE = "true";
 process.env.IBMC_DEPLOYMENT_ENV = "staging";
 process.env.RAILWAY_ENVIRONMENT = "staging";
 process.env.RAILWAY_ENVIRONMENT_NAME = "staging";
-process.env.IBMC_STAGING_SAFE_MEMBERSHIP_OTP_ALLOWLIST = "tj.tester@example.com";
+delete process.env.RESEND_API_KEY;
 fs.rmSync(httpDbPath, { force: true });
 process.env.IBMC_DB_PATH = httpDbPath;
 process.env.TURNSTILE_SITE_KEY = "";
@@ -192,8 +185,8 @@ createRegistration(httpDb, {
   mobile: "09176667788",
   registeredOn: "2026-11-12",
 });
-process.env.IBMC_STAGING_SAFE_MEMBERSHIP_OTP_ALLOWLIST = "tj.tester@example.com,http-otp@example.com";
 const { createApi } = await import("./api.js");
+delete process.env.RESEND_API_KEY;
 const server = createApi().listen(0);
 const base = `http://127.0.0.1:${server.address().port}`;
 try {
@@ -209,9 +202,8 @@ try {
     body: JSON.stringify({ query: "http-otp@example.com" }),
   });
   const regPayload = await res.json();
-  assert.notEqual(res.status, 503);
-  if (res.status === 200) assert.ok(regPayload.maskedEmail || regPayload.ok);
-  else assert.notEqual(regPayload.error, "Email login codes are disabled for this address while staging safe mode is on. Ask ops to allowlist your registration email.");
+  assert.equal(res.status, 502);
+  assert.equal(regPayload.error, "We couldn't send the code. Try again.");
   res = await fetch(`${base}/api/members/otp`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

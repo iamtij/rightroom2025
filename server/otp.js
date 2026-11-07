@@ -74,12 +74,6 @@ export async function sendMemberOtp(db, email) {
   });
   if (delivery.status !== "sent") {
     db.prepare("DELETE FROM member_otps WHERE id = ?").run(issued.id);
-    if (delivery.error === "staging_safe_mode") {
-      return {
-        error: "Email login codes are disabled for this address while staging safe mode is on. Ask ops to allowlist your membership email.",
-        status: 503,
-      };
-    }
     return { error: "We couldn't send the code. Try again.", status: 502 };
   }
   return { maskedEmail: issued.maskedEmail };
@@ -142,12 +136,6 @@ export async function sendRegistrationOtp(db, query) {
   });
   if (delivery.status !== "sent") {
     db.prepare("DELETE FROM registration_otps WHERE id = ?").run(issued.id);
-    if (delivery.error === "staging_safe_mode") {
-      return {
-        error: "Email login codes are disabled for this address while staging safe mode is on. Ask ops to allowlist your registration email.",
-        status: 503,
-      };
-    }
     return { error: "We couldn't send the code. Try again.", status: 502 };
   }
   return { maskedEmail: issued.maskedEmail };
