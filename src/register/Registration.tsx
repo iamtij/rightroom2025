@@ -617,6 +617,11 @@ function RegistrationWizard() {
     }
   }
 
+  function resetTurnstileAfterSubmit() {
+    setTurnstileToken("");
+    setTurnstileMountKey((value) => value + 1);
+  }
+
   useEffect(() => {
     let stop = false;
     fetch("/api/registration-options")
@@ -922,10 +927,13 @@ function RegistrationWizard() {
     const hitpay = peso && channel && channel !== "paynamics" ? hitpayApiChannel(channel) : "";
     setSaving(true);
     setPayError("");
+    let needsFormChallenge = false;
+    let submittedWithTurnstile = false;
     try {
-      const needsFormChallenge = !peso || !checkoutReference;
+      needsFormChallenge = !peso || !checkoutReference;
       const challengeToken = needsFormChallenge ? await mintFormChallenge() : challenge;
       if (needsFormChallenge) setChallenge(challengeToken);
+      submittedWithTurnstile = Boolean(needsFormChallenge && turnstileSiteKey && turnstileToken);
       const registrationBody = {
         productCode: charging.code,
         paymentPlan: useInstallment ? "installment" : "full",
@@ -963,7 +971,29 @@ function RegistrationWizard() {
         setSaved(record);
         setCheckoutReference(record.reference);
       }
-      if (!response.ok) throw new Error(payload.error || "Registration was not saved");
+      if (!response.ok) {
+        if (submittedWithTurnstile && turnstileSiteKey) {
+          resetTurnstileAfterSubmit();
+        }
+        const serverMessage = payload.error || "Registration was not saved";
+        if (needsFormChallenge && serverMessage === "Refresh the page and try again.") {
+          try {
+            await mintFormChallenge();
+          } catch {
+            /* keep user-facing message */
+          }
+          setPayError("Your security check expired. Press Pay again after the human check below shows Success.");
+        } else if (submittedWithTurnstile && turnstileSiteKey) {
+          setPayError(
+            serverMessage === "Confirm you are a person and try again."
+              ? "Payment did not continue. Complete the human check below, then press Pay again."
+              : `${serverMessage} Complete the human check below, then press Pay again.`,
+          );
+        } else {
+          setPayError(serverMessage);
+        }
+        return;
+      }
       if (payload.upay?.senderRefId) {
         setHitpaySession(null);
         setPaynamicsSession(null);
@@ -991,24 +1021,12 @@ function RegistrationWizard() {
       }
       setStep("done");
     } catch (error) {
+      if (submittedWithTurnstile && turnstileSiteKey) {
+        resetTurnstileAfterSubmit();
+      }
       const message = error instanceof Error ? error.message : "Registration was not saved";
-      const challengeStale = message === "Refresh the page and try again.";
-      const turnstileRejected = message === "Confirm you are a person and try again.";
-      if (!checkoutReference && challengeStale) {
-        try {
-          await mintFormChallenge();
-        } catch {
-          /* keep user-facing message */
-        }
-        setPayError("Your security check expired. Press Pay again after the human check below shows Success.");
-        if (turnstileSiteKey) {
-          setTurnstileToken("");
-          setTurnstileMountKey((value) => value + 1);
-        }
-      } else if (turnstileRejected && turnstileSiteKey) {
-        setTurnstileToken("");
-        setTurnstileMountKey((value) => value + 1);
-        setPayError("Complete the human check below, then press Pay again.");
+      if (submittedWithTurnstile && turnstileSiteKey) {
+        setPayError(`${message} Complete the human check below, then press Pay again.`);
       } else {
         setPayError(message);
       }
