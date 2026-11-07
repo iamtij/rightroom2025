@@ -10,6 +10,7 @@
     "start": "node server.js",
     "reminders": "node server/reminders.js",
     "verify:reminders": "node server/verify-reminders.js",
+    "verify:paynamics": "node server/verify-paynamics.js",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"

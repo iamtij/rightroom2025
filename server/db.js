@@ -276,6 +276,26 @@ CREATE TABLE IF NOT EXISTS hitpay_payments (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_hitpay_gateway ON hitpay_payments(gateway_ref) WHERE gateway_ref IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_hitpay_installment ON hitpay_payments(installment_id, channel, status);
 
+CREATE TABLE IF NOT EXISTS paynamics_payments (
+  id INTEGER PRIMARY KEY,
+  registration_id INTEGER NOT NULL REFERENCES registrations(id),
+  installment_id INTEGER NOT NULL REFERENCES registration_installments(id),
+  request_id TEXT NOT NULL UNIQUE,
+  gateway_response_id TEXT,
+  amount_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed', 'expired', 'cancelled')),
+  gateway_response_code TEXT,
+  gateway_message TEXT,
+  payment_channel TEXT,
+  checkout_url TEXT NOT NULL,
+  payment_request TEXT NOT NULL,
+  expires_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_paynamics_installment ON paynamics_payments(installment_id, status);
+
 CREATE TABLE IF NOT EXISTS admin_audit (
   id INTEGER PRIMARY KEY,
   admin_id INTEGER,

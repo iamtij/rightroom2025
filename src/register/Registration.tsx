@@ -55,7 +55,7 @@ const UPAY_METHODS: { id: UpayMethod; label: string; detail: string }[] = [
   { id: "paygate", label: "Other banks", detail: "Pay through PCHC Paygate." },
 ];
 
-type PayChannelCode = "upay" | "hitpay_qr" | "hitpay_online";
+type PayChannelCode = "upay" | "hitpay_qr" | "hitpay_online" | "paynamics";
 
 type PayChannel = {
   code: PayChannelCode;
@@ -74,8 +74,18 @@ type HitpaySession = {
   canRefresh: boolean;
 };
 
+type PaynamicsSession = {
+  requestId: string;
+  status: "pending" | "paid" | "failed" | "expired" | "cancelled";
+  checkoutUrl: string;
+  paymentRequest: string;
+  gatewayResponseCode: string;
+  gatewayMessage: string;
+  expiresAt: string;
+};
+
 function isPayChannel(value: string): value is PayChannelCode {
-  return value === "upay" || value === "hitpay_qr" || value === "hitpay_online";
+  return value === "upay" || value === "hitpay_qr" || value === "hitpay_online" || value === "paynamics";
 }
 
 function safeHitpayUrl(value: string) {
@@ -96,10 +106,25 @@ function hitpayApiChannel(code: PayChannelCode) {
   return "";
 }
 
+function submitPaynamicsCheckout(session: PaynamicsSession) {
+  if (!session.checkoutUrl || !session.paymentRequest) return;
+  const form = document.createElement("form");
+  form.method = "POST";
+  form.action = session.checkoutUrl;
+  const input = document.createElement("input");
+  input.type = "hidden";
+  input.name = "paymentrequest";
+  input.value = session.paymentRequest;
+  form.appendChild(input);
+  document.body.appendChild(form);
+  form.submit();
+}
+
 function payActionLabel(channel: PayChannelCode | "", amount: string, busy: boolean) {
   if (busy) return channel === "upay" || !channel ? "Opening UnionBank" : "Opening payment";
   if (channel === "hitpay_qr") return `Pay with QR · ${amount}`;
   if (channel === "hitpay_online") return `Pay with online banking · ${amount}`;
+  if (channel === "paynamics") return `Pay with Paynamics · ${amount}`;
   return `Pay with UnionBank · ${amount}`;
 }
 
@@ -482,6 +507,7 @@ function RegistrationWizard() {
   const [checkoutReference, setCheckoutReference] = useState("");
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
+  const [paynamicsSession, setPaynamicsSession] = useState<PaynamicsSession | null>(null);
   const [ticketError, setTicketError] = useState("");
   const [guestError, setGuestError] = useState("");
   const [datesOpen, setDatesOpen] = useState(false);
@@ -779,7 +805,8 @@ function RegistrationWizard() {
     const useInstallment = plan === "installment" && Boolean(charging.installmentCents) && charging.rows.length > 0;
     const peso = charging.currency === "PHP";
     if (peso && !channel) return;
-    const hitpay = peso && channel ? hitpayApiChannel(channel) : "";
+    const paynamics = peso && channel === "paynamics";
+    const hitpay = peso && channel && channel !== "paynamics" ? hitpayApiChannel(channel) : "";
     setSaving(true);
     setPayError("");
     try {
@@ -802,10 +829,12 @@ function RegistrationWizard() {
       };
       const path = !peso
         ? "/api/registrations"
-        : hitpay
-          ? (checkoutReference ? `/api/registrations/${checkoutReference}/hitpay` : "/api/registrations/hitpay")
-          : (checkoutReference ? `/api/registrations/${checkoutReference}/upay` : "/api/registrations/upay");
-      const paymentBody = hitpay ? { channel: hitpay } : { paymentMethod: method };
+        : paynamics
+          ? (checkoutReference ? `/api/registrations/${checkoutReference}/paynamics` : "/api/registrations/paynamics")
+          : hitpay
+            ? (checkoutReference ? `/api/registrations/${checkoutReference}/hitpay` : "/api/registrations/hitpay")
+            : (checkoutReference ? `/api/registrations/${checkoutReference}/upay` : "/api/registrations/upay");
+      const paymentBody = paynamics ? {} : hitpay ? { channel: hitpay } : { paymentMethod: method };
       const response = await fetch(path, {
         method: "POST",
         headers: resumeHeaders({ "Content-Type": "application/json" }),
@@ -821,16 +850,26 @@ function RegistrationWizard() {
       if (!response.ok) throw new Error(payload.error || "Registration was not saved");
       if (payload.upay?.senderRefId) {
         setHitpaySession(null);
+        setPaynamicsSession(null);
         setUpaySession(payload.upay);
         setStep("paying");
         return;
       }
       if (payload.hitpay?.sessionId) {
         setUpaySession(null);
+        setPaynamicsSession(null);
         setHitpaySession(payload.hitpay);
         setStep("paying");
         const url = payload.hitpay.channel === "online" ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
         if (url) window.location.assign(url);
+        return;
+      }
+      if (payload.paynamics?.requestId) {
+        setUpaySession(null);
+        setHitpaySession(null);
+        setPaynamicsSession(payload.paynamics);
+        setStep("paying");
+        submitPaynamicsCheckout(payload.paynamics);
         return;
       }
       setStep("done");
@@ -1345,6 +1384,28 @@ function RegistrationWizard() {
     );
   }
 
+  if (step === "paying" && saved && paynamicsSession) {
+    return (
+      <PaynamicsPending
+        record={saved}
+        session={paynamicsSession}
+        onUpdate={(registration, session) => {
+          setSaved(registration);
+          setPaynamicsSession(session);
+          if (session.status === "paid") setStep("done");
+        }}
+        onLater={() => {
+          setPaynamicsSession(null);
+          setStep("form");
+        }}
+        onBack={() => {
+          setPaynamicsSession(null);
+          setStep("form");
+        }}
+      />
+    );
+  }
+
   if (step === "paying" && saved && hitpaySession) {
     return (
       <HitpayPending
@@ -1459,6 +1520,9 @@ function PaymentChoices({
       ) : null}
       {channel === "hitpay_online" ? (
         <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">You'll continue to HitPay to pay with UnionBank Online. That page closes after 5 minutes. Coming back here does not by itself mean the payment went through.</p>
+      ) : null}
+      {channel === "paynamics" ? (
+        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">You'll continue to Paynamics to choose a payment method. This page checks status with Paynamics; a return link alone does not confirm payment.</p>
       ) : null}
     </>
   );
@@ -1716,6 +1780,152 @@ function HitpayPending({
   );
 }
 
+function PaynamicsPending({
+  record,
+  session,
+  onUpdate,
+  onLater,
+  onBack,
+}: {
+  record: StoredRegistration;
+  session: PaynamicsSession;
+  onUpdate: (registration: StoredRegistration, session: PaynamicsSession) => void;
+  onLater: () => void;
+  onBack: () => void;
+}) {
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+  const [current, setCurrent] = useState(session);
+
+  useEffect(() => {
+    setCurrent(session);
+  }, [session]);
+
+  useEffect(() => {
+    if (current.status === "paid" || current.status === "failed" || current.status === "expired") return;
+    const timer = window.setInterval(() => {
+      fetch(`/api/payments/paynamics/${current.requestId}`, { headers: resumeHeaders() })
+        .then((response) => response.json())
+        .then((payload) => {
+          if (payload.registration && payload.paynamics) onUpdate(mergeStored(record, payload.registration), payload.paynamics);
+        })
+        .catch(() => {});
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [current.requestId, current.status, onUpdate, record]);
+
+  async function checkStatus() {
+    setChecking(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/payments/paynamics/${current.requestId}`, { headers: resumeHeaders() });
+      const payload = await response.json();
+      if (payload.registration && payload.paynamics) onUpdate(mergeStored(record, payload.registration), payload.paynamics);
+      if (payload.paynamics?.status === "failed") setError("This payment can't continue. Nothing was charged.");
+      else if (payload.error && payload.paynamics?.status === "pending") setError(payload.error);
+    } catch {
+      setError("Paynamics has not confirmed the payment yet.");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  if (current.status === "paid") {
+    return <Confirmed record={record} onManage={onBack} />;
+  }
+
+  return (
+    <Frame label="Payment">
+      <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Pay with Paynamics</h1>
+      <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">
+        Finish payment on Paynamics. This page only updates after Paynamics sends a verified server notification.
+      </p>
+      <div className="rounded-[14px] border border-[#E4E1DC] bg-white p-4 text-sm leading-normal text-[#3A3A40]">
+        {current.status === "expired"
+          ? "The Paynamics checkout window expired. Nothing was charged unless Paynamics confirms otherwise."
+          : "Waiting for Paynamics. Stay on this page if you already paid."}
+      </div>
+      {current.status === "failed" ? (
+        <p className="m-0 text-sm text-[#A8131F]">This payment can&apos;t continue. Nothing was charged.</p>
+      ) : null}
+      <button
+        type="button"
+        disabled={checking || current.status === "paid"}
+        className="self-start text-sm font-semibold text-[#A8131F] disabled:text-[#C8C4BE]"
+        onClick={checkStatus}
+      >
+        {checking ? "Checking payment status" : "I've paid — check again"}
+      </button>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="text-sm font-semibold text-[#3A3A40]" onClick={onLater}>
+          Pay later
+        </button>
+        {current.status === "pending" ? (
+          <button
+            type="button"
+            className="text-sm font-semibold text-[#A8131F]"
+            onClick={() => submitPaynamicsCheckout(current)}
+          >
+            Open Paynamics again
+          </button>
+        ) : null}
+      </div>
+      {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
+    </Frame>
+  );
+}
+
+function PaynamicsReturn({ requestId }: { requestId: string }) {
+  const [record, setRecord] = useState<StoredRegistration | null>(null);
+  const [session, setSession] = useState<PaynamicsSession | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let stop = false;
+    async function load() {
+      try {
+        const response = await fetch(`/api/payments/paynamics/${requestId}`, { headers: resumeHeaders() });
+        const payload = await response.json();
+        if (stop) return;
+        if (payload.registration) setRecord(payload.registration);
+        if (payload.paynamics) setSession(payload.paynamics);
+        if (!response.ok && !payload.paynamics) setError(payload.error || "Payment not found");
+      } catch {
+        if (!stop) setError("Checking payment status failed.");
+      }
+    }
+    load();
+    return () => {
+      stop = true;
+    };
+  }, [requestId]);
+
+  if (record && session?.status === "paid") {
+    return <Confirmed record={record} onManage={() => { window.location.href = "/register"; }} />;
+  }
+  if (record && session) {
+    return (
+      <PaynamicsPending
+        record={record}
+        session={session}
+        onUpdate={(registration, next) => {
+          setRecord(registration);
+          setSession(next);
+        }}
+        onLater={() => { window.location.href = "/register"; }}
+        onBack={() => { window.location.href = "/register"; }}
+      />
+    );
+  }
+  return (
+    <Frame label="Payment">
+      <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Checking payment status</h1>
+      <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">Your return from Paynamics does not confirm payment. This page waits for Paynamics&apos; signed server notification.</p>
+      {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
+    </Frame>
+  );
+}
+
 function HitpayReturn({ sessionId }: { sessionId: string }) {
   const [record, setRecord] = useState<StoredRegistration | null>(null);
   const [session, setSession] = useState<HitpaySession | null>(null);
@@ -1877,6 +2087,7 @@ function Manage({
   const [payingInstallment, setPayingInstallment] = useState(false);
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
+  const [paynamicsSession, setPaynamicsSession] = useState<PaynamicsSession | null>(null);
   const [badgeName, setBadgeName] = useState("");
   const [badgeCompany, setBadgeCompany] = useState("");
   const [badgeNote, setBadgeNote] = useState("");
@@ -2119,35 +2330,69 @@ function Manage({
 
   async function startPayment() {
     if (!record || busy || record.currency !== "PHP" || !channel) return;
-    const hitpay = hitpayApiChannel(channel);
+    const paynamics = channel === "paynamics";
+    const hitpay = paynamics ? "" : hitpayApiChannel(channel);
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(hitpay ? `/api/registrations/${record.reference}/hitpay` : `/api/registrations/${record.reference}/upay`, {
+      const path = paynamics
+        ? `/api/registrations/${record.reference}/paynamics`
+        : hitpay
+          ? `/api/registrations/${record.reference}/hitpay`
+          : `/api/registrations/${record.reference}/upay`;
+      const response = await fetch(path, {
         method: "POST",
         headers: resumeHeaders({ "Content-Type": "application/json" }, record.resumeToken),
-        body: JSON.stringify(hitpay ? { channel: hitpay } : { paymentMethod: method }),
+        body: JSON.stringify(paynamics ? {} : hitpay ? { channel: hitpay } : { paymentMethod: method }),
       });
       const payload = await response.json();
       if (payload.registration) setRecord(payload.registration);
       if (!response.ok) throw new Error(payload.error || "The payment could not be started.");
       if (payload.upay?.senderRefId) {
         setHitpaySession(null);
+        setPaynamicsSession(null);
         setUpaySession(payload.upay);
         setPayingInstallment(false);
       }
       if (payload.hitpay?.sessionId) {
         setUpaySession(null);
+        setPaynamicsSession(null);
         setHitpaySession(payload.hitpay);
         setPayingInstallment(false);
         const url = payload.hitpay.channel === "online" ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
         if (url) window.location.assign(url);
+      }
+      if (payload.paynamics?.requestId) {
+        setUpaySession(null);
+        setHitpaySession(null);
+        setPaynamicsSession(payload.paynamics);
+        setPayingInstallment(false);
+        submitPaynamicsCheckout(payload.paynamics);
       }
     } catch (payError) {
       setError(payError instanceof Error ? payError.message : "The payment could not be started.");
     } finally {
       setBusy(false);
     }
+  }
+
+  if (paynamicsSession) {
+    return (
+      <PaynamicsPending
+        record={record}
+        session={paynamicsSession}
+        onUpdate={(registration, session) => {
+          setRecord(registration);
+          setPaynamicsSession(session);
+          if (session.status === "paid") {
+            setPaynamicsSession(null);
+            setPayingInstallment(false);
+          }
+        }}
+        onLater={() => setPaynamicsSession(null)}
+        onBack={() => setPaynamicsSession(null)}
+      />
+    );
   }
 
   if (hitpaySession) {
@@ -2383,6 +2628,8 @@ function payReferenceFromPath(pathname: string) {
 }
 
 export default function Registration() {
+  const paynamicsRequest = new URLSearchParams(window.location.search).get("paynamicsRequest") || "";
+  if (paynamicsRequest) return <PaynamicsReturn requestId={paynamicsRequest} />;
   const paySession = new URLSearchParams(window.location.search).get("paySession") || "";
   if (paySession) return <HitpayReturn sessionId={paySession} />;
   const payReference = payReferenceFromPath(window.location.pathname);

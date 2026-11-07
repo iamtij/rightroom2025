@@ -13,7 +13,8 @@ import { rateLimit } from "./limits.js";
 import { formatLongDate, manilaParts } from "./time.js";
 import { handleUpayCallback, refreshUpayPayment, startUpayPayment } from "./upay.js";
 import { handleHitpayWebhook, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
-import { hitpayConfigured, listPaymentChannels, savePaymentChannels } from "./payment-channels.js";
+import { handlePaynamicsNotification, refreshPaynamicsPayment, startPaynamicsPayment } from "./paynamics.js";
+import { hitpayConfigured, listPaymentChannels, paynamicsConfigured, savePaymentChannels } from "./payment-channels.js";
 import { entryQrPng } from "./templates.js";
 import { recordSecurityEvent } from "./alerts.js";
 
@@ -200,7 +201,7 @@ export function createApi() {
   });
   app.use((req, res, next) => {
     const url = req.originalUrl || req.url || "";
-    if (url.includes("/payments/upay/callback") || url.includes("/webhooks/hitpay")) return next();
+    if (url.includes("/payments/upay/callback") || url.includes("/webhooks/hitpay") || url.includes("/webhooks/paynamics")) return next();
     express.json({ limit: "2mb" })(req, res, next);
   });
   const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, bucket: "login", db });
@@ -390,6 +391,20 @@ export function createApi() {
     res.status(created ? 201 : 200).json(body);
   }
 
+  function sendPaynamics(res, result, created) {
+    if (result.resume) attachResume(res, result.registration);
+    const body = {
+      error: result.error,
+      registration: result.registration ? present(result.registration, { contact: result.contact !== false, resume: result.resume === true }) : undefined,
+      paynamics: result.paynamics || undefined,
+    };
+    if (result.error) {
+      res.status(result.status || 502).json(body);
+      return;
+    }
+    res.status(created ? 201 : 200).json(body);
+  }
+
   function sendUpay(res, result, created) {
     if (result.error) {
       res.status(result.status || 502).json({
@@ -484,6 +499,34 @@ export function createApi() {
     sendUpay(res, { ...result, ...ownerAccess(registration, resumeCredential(req)) }, false);
   });
 
+  router.post("/registrations/paynamics", registerLimit, async (req, res) => {
+    if (await rejectBot(req, res)) return;
+    try {
+      const registration = createPublicRegistration(req.body || {});
+      const clientIp = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim();
+      const result = await startPaynamicsPayment(db(), registration, clientIp);
+      sendPaynamics(res, { ...result, resume: true }, true);
+    } catch (error) {
+      res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
+    }
+  });
+
+  router.post("/registrations/:reference/paynamics", registerLimit, async (req, res) => {
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    const registration = getRegistration(db(), row.id);
+    if (!registration || registration.status !== "confirmed") {
+      res.status(400).json({ error: "Registration is not payable" });
+      return;
+    }
+    const clientIp = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim();
+    const result = await startPaynamicsPayment(db(), registration, clientIp);
+    sendPaynamics(res, { ...result, ...ownerAccess(registration, resumeCredential(req)) }, false);
+  });
+
   const upayPollLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 240, bucket: "upay-poll", db });
 
   router.get("/payments/upay/:senderRefId", upayPollLimit, async (req, res) => {
@@ -524,6 +567,21 @@ export function createApi() {
     sendHitpay(res, { ...result, ...ownerAccess(result.registration, resumeCredential(req)) }, false);
   });
 
+  const paynamicsPollLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 240, bucket: "paynamics-poll", db });
+
+  router.get("/payments/paynamics/:requestId", paynamicsPollLimit, async (req, res) => {
+    const result = await refreshPaynamicsPayment(db(), req.params.requestId);
+    if (!result.registration) {
+      res.status(result.status || 404).json({ error: result.error || "Payment not found" });
+      return;
+    }
+    res.status(result.status && result.status !== 200 ? result.status : 200).json({
+      registration: present(result.registration, ownerAccess(result.registration, resumeCredential(req))),
+      paynamics: result.paynamics,
+      error: result.error,
+    });
+  });
+
   router.post("/webhooks/hitpay", express.text({ type: "*/*", limit: "1mb" }), async (req, res) => {
     const result = await handleHitpayWebhook(db(), String(req.body || ""), req.get("hitpay-signature"), {
       eventType: req.get("hitpay-event-type"),
@@ -531,6 +589,21 @@ export function createApi() {
     });
     res.status(result.status).json(result.body);
   });
+
+  const paynamicsNotifyLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 120, bucket: "paynamics-notify", db });
+
+  router.post(
+    "/webhooks/paynamics",
+    paynamicsNotifyLimit,
+    express.urlencoded({ extended: false, limit: "1mb" }),
+    express.text({ type: "*/*", limit: "1mb" }),
+    async (req, res) => {
+      const payload = typeof req.body === "object" && req.body ? req.body : { paymentresponse: String(req.body || "") };
+      const result = await handlePaynamicsNotification(db(), payload);
+      recordSecurityEvent(db(), "paynamics.notify", result.status === 200 ? "accepted" : "rejected");
+      res.status(result.status).type("text/plain").send(result.body);
+    },
+  );
 
   const upayCallbackLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, bucket: "upay-callback", db });
 
@@ -678,13 +751,21 @@ export function createApi() {
   });
 
   router.get("/admin/payment-channels", requireAdmin, (_req, res) => {
-    res.json({ channels: listPaymentChannels(db()), hitpayConfigured: hitpayConfigured() });
+    res.json({
+      channels: listPaymentChannels(db()),
+      hitpayConfigured: hitpayConfigured(),
+      paynamicsConfigured: paynamicsConfigured(),
+    });
   });
 
   router.patch("/admin/payment-channels", requireAdmin, (req, res) => {
     const channels = savePaymentChannels(db(), req.body || {});
     writeAudit(db(), req.admin.id, "payment_channel.update", "payment_channels");
-    res.json({ channels, hitpayConfigured: hitpayConfigured() });
+    res.json({
+      channels,
+      hitpayConfigured: hitpayConfigured(),
+      paynamicsConfigured: paynamicsConfigured(),
+    });
   });
 
   router.get("/admin/dashboard", requireAdmin, (_req, res) => {

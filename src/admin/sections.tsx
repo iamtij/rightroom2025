@@ -1046,12 +1046,14 @@ type PaymentChannelSetting = {
 function PaymentSettings({ onError }: { onError: (message: string) => void }) {
   const [channels, setChannels] = useState<PaymentChannelSetting[]>([]);
   const [hitpayConfigured, setHitpayConfigured] = useState(true);
+  const [paynamicsConfigured, setPaynamicsConfigured] = useState(true);
   const [saving, setSaving] = useState("");
 
   async function load() {
     const payload = await api("/api/admin/payment-channels");
     setChannels(payload.channels || []);
     setHitpayConfigured(Boolean(payload.hitpayConfigured));
+    setPaynamicsConfigured(Boolean(payload.paynamicsConfigured));
   }
 
   useEffect(() => {
@@ -1068,6 +1070,7 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
       });
       setChannels(payload.channels || []);
       setHitpayConfigured(Boolean(payload.hitpayConfigured));
+      setPaynamicsConfigured(Boolean(payload.paynamicsConfigured));
     } catch (error) {
       onError(error instanceof Error ? error.message : "Payment channels were not saved");
       await load().catch(() => {});
@@ -1104,6 +1107,11 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
         {hitpayConfigured ? null : (
           <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
             HitPay QR and HitPay online banking need HITPAY_API_KEY and HITPAY_SALT on the server before a buyer can be charged.
+          </p>
+        )}
+        {paynamicsConfigured ? null : (
+          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
+            Paynamics needs PAYNAMICS_MERCHANT_ID, PAYNAMICS_MERCHANT_KEY, and PAYNAMICS_MERCHANT_IP on the server before checkout can start.
           </p>
         )}
       </div>

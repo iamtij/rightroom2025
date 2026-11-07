@@ -14,12 +14,18 @@ export const PAYMENT_CHANNELS = [
     label: "HitPay online banking",
     detail: "UnionBank Online on HitPay's secure page.",
   },
+  {
+    code: "paynamics",
+    label: "Paynamics",
+    detail: "Cards, e-wallets, and online banking on Paynamics' secure page.",
+  },
 ];
 
 const DEFAULTS = {
   upay: 1,
   hitpay_qr: 0,
   hitpay_online: 0,
+  paynamics: 0,
 };
 
 export function seedPaymentChannels(db) {
@@ -55,4 +61,12 @@ export function savePaymentChannels(db, input) {
 
 export function hitpayConfigured() {
   return Boolean(String(process.env.HITPAY_API_KEY || "").trim() && String(process.env.HITPAY_SALT || "").trim());
+}
+
+export function paynamicsConfigured() {
+  return Boolean(
+    String(process.env.PAYNAMICS_MERCHANT_ID || "").trim()
+    && String(process.env.PAYNAMICS_MERCHANT_KEY || "").trim()
+    && String(process.env.PAYNAMICS_MERCHANT_IP || "").trim(),
+  );
 }
