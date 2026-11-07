@@ -11,6 +11,7 @@ import {
   assessPaynamicsApiAdmission,
   assessPaynamicsInboundTrust,
   assessPaynamicsQueryBody,
+  assessProductionLiveDeploymentIdentity,
   assessStagingLiveDeploymentIdentity,
   buildWorkflowCreateBody,
   canonicalPaynamicsApiOrigin,
@@ -204,8 +205,30 @@ assert.equal(assessPaynamicsApiAdmission().reason, "railway_production_environme
 assert.equal(JSON.stringify(assessPaynamicsApiAdmission()).includes("secret"), false);
 
 process.env.IBMC_DEPLOYMENT_ENV = "production";
+process.env.RAILWAY_ENVIRONMENT = "production";
+process.env.RAILWAY_ENVIRONMENT_NAME = "production";
 assert.equal(ibmcProductionDeployment(), true);
 assert.equal(assessPaynamicsApiAdmission().allowed, false);
+
+function setLiveProductionEnv(baseOrigin) {
+  process.env.IBMC_DEPLOYMENT_ENV = "production";
+  process.env.RAILWAY_ENVIRONMENT = "production";
+  process.env.RAILWAY_ENVIRONMENT_NAME = "production";
+  process.env.PAYNAMICS_API_ENV = "live";
+  process.env.PAYNAMICS_PRODUCTION_LIVE_MERCHANT = "true";
+  process.env.PAYNAMICS_API_LIVE_ACCOUNT_CONFIRMED = "true";
+  process.env.PAYNAMICS_LIVE_API_ORIGIN_ALLOWLIST = baseOrigin;
+  process.env.PAYNAMICS_API_BASE_URL = baseOrigin;
+  process.env.PAYNAMICS_API_CALLS_ENABLED = "true";
+  process.env.PAYNAMICS_API_ACCOUNT_CONFIRMED = "true";
+  delete process.env.PAYNAMICS_STAGING_LIVE_MERCHANT;
+}
+
+setLiveProductionEnv("https://live-workflow.example.test");
+assert.equal(assessProductionLiveDeploymentIdentity().allowed, true);
+assert.equal(assessPaynamicsApiAdmission().allowed, true);
+assert.equal(assessPaynamicsApiAdmission().reason, "production_live");
+assert.equal(paynamicsCheckoutMode(), "live");
 
 clearRailwayEnv();
 process.env.IBMC_DEPLOYMENT_ENV = "staging";

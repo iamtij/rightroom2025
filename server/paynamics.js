@@ -1,12 +1,19 @@
 import crypto from "crypto";
 import {
+  assessProductionLiveDeploymentIdentity,
   assessStagingLiveDeploymentIdentity,
   ibmcDeploymentEnv,
   railwayDeploymentClass,
   railwaySignalsPresent,
 } from "./deployment-identity.js";
 
-export { assessStagingLiveDeploymentIdentity, ibmcDeploymentEnv, railwayDeploymentClass, railwaySignalsPresent };
+export {
+  assessProductionLiveDeploymentIdentity,
+  assessStagingLiveDeploymentIdentity,
+  ibmcDeploymentEnv,
+  railwayDeploymentClass,
+  railwaySignalsPresent,
+};
 import { getRegistration, recordPayment } from "./registrations.js";
 import { isChannelEnabled } from "./payment-channels.js";
 
@@ -272,6 +279,14 @@ export function paynamicsApiAccountConfirmed() {
   return process.env.PAYNAMICS_API_ACCOUNT_CONFIRMED === "true";
 }
 
+function paynamicsWorkflowAccountConfirmed() {
+  const env = paynamicsApiEnv();
+  if (env === "live") {
+    return paynamicsLiveAccountConfirmed() || paynamicsApiAccountConfirmed();
+  }
+  return paynamicsApiAccountConfirmed();
+}
+
 export function paynamicsApiCallsEnabled() {
   return process.env.PAYNAMICS_API_CALLS_ENABLED === "true";
 }
@@ -297,7 +312,8 @@ export function ibmcStagingDeployment() {
 }
 
 export function ibmcProductionDeployment() {
-  return ibmcDeploymentEnv() === "production";
+  if (ibmcDeploymentEnv() === "production") return true;
+  return railwayDeploymentClass() === "production";
 }
 
 function canonicalAllowlistOrigin(entry) {
@@ -338,13 +354,23 @@ export function paynamicsStagingLiveMerchantAllowed() {
   return assessStagingLiveDeploymentIdentity().allowed;
 }
 
+export function paynamicsProductionLiveMerchantOptIn() {
+  return process.env.PAYNAMICS_PRODUCTION_LIVE_MERCHANT === "true";
+}
+
+export function paynamicsProductionLiveMerchantAllowed() {
+  if (!paynamicsProductionLiveMerchantOptIn()) return false;
+  if (!paynamicsLiveAccountConfirmed()) return false;
+  return assessProductionLiveDeploymentIdentity().allowed;
+}
+
 export function paynamicsApiEnv() {
   return String(process.env.PAYNAMICS_API_ENV || "").trim().toLowerCase();
 }
 
 function paynamicsApiCredentialsReady() {
   if (!paynamicsApiCallsEnabled()) return false;
-  if (!paynamicsApiAccountConfirmed()) return false;
+  if (!paynamicsWorkflowAccountConfirmed()) return false;
   const base = paynamicsApiBaseUrl();
   if (!base) return false;
   try {
@@ -361,7 +387,7 @@ function paynamicsApiCredentialsReady() {
 
 export function assessPaynamicsApiAdmission() {
   if (!paynamicsApiCallsEnabled()) return { allowed: false, reason: "api_calls_disabled" };
-  if (!paynamicsApiAccountConfirmed()) return { allowed: false, reason: "account_not_confirmed" };
+  if (!paynamicsWorkflowAccountConfirmed()) return { allowed: false, reason: "account_not_confirmed" };
   const parsed = canonicalPaynamicsApiOrigin();
   if (!parsed.ok) return { allowed: false, reason: parsed.reason };
   const origin = parsed.origin;
@@ -375,12 +401,16 @@ export function assessPaynamicsApiAdmission() {
     return { allowed: true, reason: "sandbox", mode: "sandbox" };
   }
   if (env === "live") {
+    if (!paynamicsLiveAccountConfirmed()) return { allowed: false, reason: "live_account_not_confirmed" };
+    if (!apiBaseMatchesLiveAllowlist(origin)) return { allowed: false, reason: "live_origin_not_allowlisted" };
+    if (paynamicsProductionLiveMerchantAllowed()) {
+      return { allowed: true, reason: "production_live", mode: "live" };
+    }
     const identity = assessStagingLiveDeploymentIdentity();
     if (!identity.allowed) return { allowed: false, reason: identity.reason };
-    if (!paynamicsStagingLiveMerchantOptIn() || !paynamicsLiveAccountConfirmed()) {
+    if (!paynamicsStagingLiveMerchantOptIn()) {
       return { allowed: false, reason: "staging_live_not_allowed" };
     }
-    if (!apiBaseMatchesLiveAllowlist(origin)) return { allowed: false, reason: "live_origin_not_allowlisted" };
     return { allowed: true, reason: "staging_live", mode: "live" };
   }
   return { allowed: false, reason: "unsupported_api_env" };
@@ -407,6 +437,7 @@ export function paynamicsPublicCheckoutInfo() {
     checkoutMode: mode,
     liveRealChargeWarning: mode === "live",
     stagingLiveMerchantArmed: paynamicsStagingLiveMerchantAllowed(),
+    productionLiveMerchantArmed: paynamicsProductionLiveMerchantAllowed(),
     apiAdmissionAllowed: admission.allowed,
     apiAdmissionReason: admission.allowed ? "" : admission.reason,
   };

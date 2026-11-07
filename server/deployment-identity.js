@@ -64,3 +64,30 @@ export function assessStagingLiveDeploymentIdentity() {
   if (custom !== "staging") return { allowed: false, reason: "deployment_identity_missing" };
   return { allowed: true, reason: "custom_staging" };
 }
+
+/**
+ * Whether live Paynamics Workflow may run on IBMC production (ibmcph.com).
+ */
+export function assessProductionLiveDeploymentIdentity() {
+  const custom = ibmcDeploymentEnv();
+  const railway = railwayDeploymentClass();
+
+  if (railwaySignalsPresent()) {
+    if (railway === "missing" || railway === "unknown" || railway === "conflicting") {
+      return { allowed: false, reason: `railway_identity_${railway}` };
+    }
+    if (railway === "production") {
+      return { allowed: true, reason: "railway_production" };
+    }
+    if (custom === "production") {
+      return { allowed: false, reason: "deployment_identity_conflict" };
+    }
+    if (railway === "staging") {
+      return { allowed: false, reason: "railway_staging_environment" };
+    }
+    return { allowed: false, reason: "unsupported_railway_identity" };
+  }
+
+  if (custom === "production") return { allowed: true, reason: "custom_production" };
+  return { allowed: false, reason: "production_identity_missing" };
+}
