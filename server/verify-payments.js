@@ -78,9 +78,12 @@ const testRegistration = createRegistration(db, {
 });
 const testPaid = recordPayment(db, { registrationId: testRegistration.id, amountCents: 5_000, method: "manual" });
 assert.ok(testPaid.qr_token);
-assert.equal(getEntryPass(db, testPaid.qr_token), null);
+const testPass = getEntryPass(db, testPaid.qr_token);
+assert.ok(testPass);
+assert.equal(testPass.fullName, "Test Person");
 delete process.env.ALLOW_TEST_REGISTRATION;
 delete process.env.IBMC_STAGING_EARLY_PAYMENTS;
+assert.equal(getEntryPass(db, testPaid.qr_token), null);
 
 const file = path.join(os.tmpdir(), `ibmc-verify-${process.pid}.sqlite`);
 fs.rmSync(file, { force: true });

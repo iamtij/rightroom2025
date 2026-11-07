@@ -322,6 +322,7 @@ type StoredRegistration = {
   totalCents: number;
   payments: StoredPayment[];
   planStatus: "active" | "fully_paid";
+  qrReady?: boolean;
   qrToken?: string;
 };
 
@@ -2970,7 +2971,7 @@ function Manage({
             {busy ? "Saving" : "Save badge"}
           </button>
         </div>
-        {record.planStatus === "fully_paid" && record.qrToken ? (
+        {record.qrReady && record.qrToken ? (
           <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-5">
             <span className="self-start text-[15px] font-bold">QR ticket</span>
             <img src={`/api/passes/${encodeURIComponent(record.qrToken)}/qr`} alt="QR ticket" className="h-56 w-56" />

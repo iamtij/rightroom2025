@@ -116,15 +116,27 @@ export function ensureResumeToken(db, registration) {
   return getRegistration(db, registration.id);
 }
 
+const TEST_ENTRY_PASS_PRODUCTS = new Set(["test", "test_50", "test_100", "test_200"]);
+
+export function entryPassProductAllowed(productCode) {
+  if (!TEST_ENTRY_PASS_PRODUCTS.has(productCode)) return true;
+  return stagingTestRegistrationAllowed();
+}
+
+export function entryPassEligible(registration) {
+  if (!registration) return false;
+  if (registration.status !== "confirmed" || !registration.fully_paid_at) return false;
+  if (registration.balance_cents !== 0 || !registration.qr_token) return false;
+  return entryPassProductAllowed(registration.product_code);
+}
+
 export function getEntryPass(db, qrToken) {
   const value = String(qrToken || "").trim();
   if (!value) return null;
   const row = db.prepare("SELECT id FROM registrations WHERE qr_token = ?").get(value);
   if (!row) return null;
   const registration = getRegistration(db, row.id);
-  if (!registration || registration.status !== "confirmed" || !registration.fully_paid_at) return null;
-  if (registration.balance_cents !== 0) return null;
-  if (["test", "test_50", "test_100", "test_200"].includes(registration.product_code)) return null;
+  if (!entryPassEligible(registration)) return null;
   return {
     fullName: registration.full_name,
     tierName: registration.product_name,

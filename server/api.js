@@ -7,7 +7,7 @@ import {
   stagingTestRegistrationAllowed,
 } from "./staging-early-payments.js";
 import { beginMfaSetup, clearSessionCookie, cookieValue, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
-import { admitPass, cancelRegistration, compRegistration, createRegistration, discardUnopenedRegistration, ensureResumeToken, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
+import { admitPass, cancelRegistration, compRegistration, createRegistration, discardUnopenedRegistration, ensureResumeToken, entryPassEligible, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
 import { listMembers, lookupMember, memberContactClash, memberFromProof, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
@@ -159,12 +159,12 @@ function present(registration, options = {}) {
     balanceCents: registration.balance_cents,
     status: registration.status,
     planStatus: registration.status === "cancelled" ? "cancelled" : registration.balance_cents === 0 ? "fully_paid" : registration.plan_status || "active",
-    qrReady: registration.balance_cents === 0 && Boolean(registration.qr_token),
+    qrReady: entryPassEligible(registration),
     registeredOn: registration.registered_on,
     payments,
     ...(options.transactions ? { transactions: options.transactions } : {}),
     ...(options.resume && registration.resume_token ? { resumeToken: registration.resume_token } : {}),
-    ...(options.resume && registration.balance_cents === 0 && registration.qr_token ? { qrToken: registration.qr_token } : {}),
+    ...(options.resume && entryPassEligible(registration) ? { qrToken: registration.qr_token } : {}),
   };
 }
 
