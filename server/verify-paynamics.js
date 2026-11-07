@@ -18,6 +18,7 @@ import {
   ibmcStagingDeployment,
   paynamicsApiCallsAllowed,
   paynamicsCheckoutMode,
+  paynamicsPublicCheckoutInfo,
   paynamicsCustomerSignature,
   paynamicsPaymentOutcome,
   paynamicsQuerySignature,
@@ -46,6 +47,10 @@ process.env.SITE_URL = "https://staging.example.test";
 
 assert.equal(paynamicsApiCallsAllowed(), false);
 assert.equal(paynamicsSettlementEnabled(), false);
+const publicCheckout = paynamicsPublicCheckoutInfo();
+assert.equal(publicCheckout.apiAdmissionAllowed, false);
+assert.equal(typeof publicCheckout.apiAdmissionReason, "string");
+assert.equal(JSON.stringify(publicCheckout).includes(TEST_KEY), false);
 
 const tx = {
   request_id: "req123",

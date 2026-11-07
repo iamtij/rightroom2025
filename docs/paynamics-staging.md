@@ -5,6 +5,22 @@ BNI onboarding: **Paynamics Checkout (Workflow)** — REST JSON, HTTP Basic auth
 Canonical contract extract: `docs/paynamics/wiki-contracts-extract.md`  
 Postman reference: `docs/paynamics/workflow.postman_collection.sanitized.json`
 
+## Local dev (`npm run dev` on localhost)
+
+Vite serves the UI and mounts the API from the same process (`vite.config.ts` → `createApi()`), so **server env vars come from `.env` in the repo root** (via `dotenv` in `server/api.js`). The browser calls `/api/*` on the same origin (e.g. `http://localhost:3000`).
+
+| Check | Endpoint / action |
+| --- | --- |
+| Turnstile exposed? | `GET /api/registration-options` → `turnstileConfigured`, `turnstileSiteKey` (empty when either key missing) |
+| Paynamics readiness | `GET /api/payment-channels` → `paynamics.checkoutMode` (`off` \| `sandbox` \| `live`), `apiAdmissionAllowed`, `apiAdmissionReason` |
+| Channel visible | Paynamics must be **enabled in admin** (`payment_channels`) even when API gates pass |
+
+Paynamics on localhost still requires the fail-closed env gates in this doc (sandbox: `PAYNAMICS_API_CALLS_ENABLED=true`, `PAYNAMICS_API_ACCOUNT_CONFIRMED=true`, `PAYNAMICS_API_BASE_URL=https://payin.payserv.net`, `PAYNAMICS_API_ENV=sandbox`, merchant + Basic auth vars). Set `PUBLIC_WEB_URL=http://localhost:3000` (or your dev port) for return/cancel URLs built by the server.
+
+**Callbacks on localhost:** Paynamics **notification** webhooks (`POST /api/webhooks/paynamics`) need a **public HTTPS URL** Paynamics can reach. A laptop-only `localhost` URL is not reachable from Paynamics’ servers unless you use a tunnel. Return links in the browser can still land on `localhost` for UX; **settlement remains disabled** in this branch (notifications do not `recordPayment`).
+
+Test registration tickets: `ALLOW_TEST_REGISTRATION=true` (see `.env.example`).
+
 ## Staging safe mode (shared mail/SMS/backup credentials)
 
 Before Paynamics sandbox testing on Railway staging that still has real Resend, Semaphore, or backup S3 variables, set **`IBMC_STAGING_SAFE_MODE=true`** (`docs/staging-safe-mode.md`). Paynamics Workflow API calls are **not** suppressed.

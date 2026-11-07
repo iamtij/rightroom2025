@@ -16,22 +16,59 @@ import {
   type Tier,
 } from "./plans";
 
-function Turnstile({ siteKey, onToken }: { siteKey: string; onToken: (token: string) => void }) {
+function Turnstile({
+  siteKey,
+  onToken,
+  onBlocked,
+}: {
+  siteKey: string;
+  onToken: (token: string) => void;
+  onBlocked?: (blocked: boolean) => void;
+}) {
   const holder = useRef<HTMLDivElement>(null);
+  const [widgetError, setWidgetError] = useState(false);
   useEffect(() => {
+    onBlocked?.(false);
+    setWidgetError(false);
     const script = document.createElement("script");
     script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
     script.async = true;
     script.onload = () => {
       const widget = (window as Window & { turnstile?: { render: (node: HTMLElement, options: object) => void } }).turnstile;
-      if (holder.current && widget) widget.render(holder.current, { sitekey: siteKey, callback: onToken });
+      if (holder.current && widget) {
+        widget.render(holder.current, {
+          sitekey: siteKey,
+          callback: (token: string) => {
+            setWidgetError(false);
+            onBlocked?.(false);
+            onToken(token);
+          },
+          "error-callback": () => {
+            setWidgetError(true);
+            onBlocked?.(true);
+          },
+          "expired-callback": () => onBlocked?.(true),
+          "timeout-callback": () => onBlocked?.(true),
+        });
+      }
     };
     document.head.appendChild(script);
     return () => {
       script.remove();
     };
-  }, [siteKey, onToken]);
-  return <div ref={holder} />;
+  }, [siteKey, onToken, onBlocked]);
+  return (
+    <div className="flex flex-col gap-2">
+      <div ref={holder} />
+      {widgetError ? (
+        <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] leading-normal text-[#A8131F]">
+          The human-check widget did not load on this page. If you see “Invalid sitekey” above, the server’s{" "}
+          <span className="font-semibold">TURNSTILE_SITE_KEY</span> may not be allowed for this hostname. For local dev you can leave{" "}
+          <span className="font-semibold">TURNSTILE_SITE_KEY</span> and <span className="font-semibold">TURNSTILE_SECRET_KEY</span> empty (no widget), or use Turnstile keys configured for localhost in Cloudflare. Registration cannot continue until the check succeeds or Turnstile is disabled on the server.
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 type Audience = "member" | "guest" | "international";
@@ -126,10 +163,18 @@ function payActionLabel(channel: PayChannelCode | "", amount: string, busy: bool
   return `Pay with UnionBank · ${amount}`;
 }
 
+type PaynamicsCheckoutPublic = {
+  checkoutMode: string;
+  apiAdmissionAllowed?: boolean;
+  apiAdmissionReason?: string;
+  liveRealChargeWarning?: boolean;
+};
+
 function usePaymentChannels() {
   const [channels, setChannels] = useState<PayChannel[] | null>(null);
   const [channel, setChannel] = useState<PayChannelCode | "">("");
   const [paynamicsLiveChargeWarning, setPaynamicsLiveChargeWarning] = useState(false);
+  const [paynamicsCheckout, setPaynamicsCheckout] = useState<PaynamicsCheckoutPublic>({ checkoutMode: "off" });
   useEffect(() => {
     let stop = false;
     fetch("/api/payment-channels")
@@ -139,7 +184,14 @@ function usePaymentChannels() {
         const list = (Array.isArray(payload.channels) ? payload.channels : []).filter((item: PayChannel) => item && isPayChannel(String(item.code)));
         setChannels(list);
         setChannel((current) => (current && list.some((item: PayChannel) => item.code === current) ? current : list[0]?.code || ""));
-        setPaynamicsLiveChargeWarning(Boolean(payload.paynamics?.liveRealChargeWarning));
+        const paynamics = payload.paynamics && typeof payload.paynamics === "object" ? payload.paynamics : {};
+        setPaynamicsLiveChargeWarning(Boolean(paynamics.liveRealChargeWarning));
+        setPaynamicsCheckout({
+          checkoutMode: String(paynamics.checkoutMode || "off"),
+          apiAdmissionAllowed: Boolean(paynamics.apiAdmissionAllowed),
+          apiAdmissionReason: String(paynamics.apiAdmissionReason || ""),
+          liveRealChargeWarning: Boolean(paynamics.liveRealChargeWarning),
+        });
       })
       .catch(() => {
         if (!stop) setChannels([]);
@@ -148,7 +200,7 @@ function usePaymentChannels() {
       stop = true;
     };
   }, []);
-  return { channels, channel, setChannel, paynamicsLiveChargeWarning };
+  return { channels, channel, setChannel, paynamicsLiveChargeWarning, paynamicsCheckout };
 }
 
 type Attendee = {
@@ -503,7 +555,7 @@ function RegistrationWizard() {
   const [memberTest, setMemberTest] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [method, setMethod] = useState<UpayMethod>("instapay");
-  const { channels, channel, setChannel, paynamicsLiveChargeWarning } = usePaymentChannels();
+  const { channels, channel, setChannel, paynamicsLiveChargeWarning, paynamicsCheckout } = usePaymentChannels();
   const [checkoutReference, setCheckoutReference] = useState("");
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
@@ -528,6 +580,7 @@ function RegistrationWizard() {
   const [testTicketOpen, setTestTicketOpen] = useState(false);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
   const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileBlocked, setTurnstileBlocked] = useState(false);
 
   useEffect(() => {
     let stop = false;
@@ -799,11 +852,20 @@ function RegistrationWizard() {
     const charging = checkoutTier();
     if (!attendee || !charging || saving || !charging.onSale) return;
     if (turnstileSiteKey && !turnstileToken) {
-      setPayError("Confirm you are a person and try again.");
+      setPayError(
+        turnstileBlocked
+          ? "Fix the human-check widget above (or disable Turnstile in server env) before paying."
+          : "Confirm you are a person and try again.",
+      );
       return;
     }
     const useInstallment = plan === "installment" && Boolean(charging.installmentCents) && charging.rows.length > 0;
     const peso = charging.currency === "PHP";
+    if (peso && channel === "paynamics" && paynamicsCheckout.checkoutMode === "off") {
+      const reason = paynamicsCheckout.apiAdmissionReason ? ` (${paynamicsCheckout.apiAdmissionReason})` : "";
+      setPayError(`Paynamics checkout is not enabled on this server${reason}. See docs/paynamics-staging.md for required env vars.`);
+      return;
+    }
     if (peso && !channel) return;
     const paynamics = peso && channel === "paynamics";
     const hitpay = peso && channel && channel !== "paynamics" ? hitpayApiChannel(channel) : "";
@@ -1318,7 +1380,7 @@ function RegistrationWizard() {
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep("ticket")}>← Back</button>
         <input className="absolute -left-[9999px] h-0 w-0" tabIndex={-1} autoComplete="off" aria-hidden="true" value={companyWebsite} onChange={(event) => setCompanyWebsite(event.target.value)} />
-        {turnstileSiteKey ? <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} /> : null}
+        {turnstileSiteKey ? <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} onBlocked={setTurnstileBlocked} /> : null}
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Payment</h1>
         <LevNote pose="focus" label="Lev holding a card">Secure payment. I've got this.</LevNote>
         <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-2">
@@ -1370,7 +1432,20 @@ function RegistrationWizard() {
         <h2 className="m-0 mt-1 text-[17px] font-bold">Pay with</h2>
         {charging.currency === "PHP" ? (
           <>
-            <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} paynamicsLiveChargeWarning={paynamicsLiveChargeWarning} />
+            <PaymentChoices
+              channels={channels}
+              channel={channel}
+              onChannel={setChannel}
+              method={method}
+              onMethod={setMethod}
+              paynamicsLiveChargeWarning={paynamicsLiveChargeWarning}
+              paynamicsCheckout={paynamicsCheckout}
+            />
+            {channel === "paynamics" && paynamicsCheckout.checkoutMode !== "off" ? (
+              <p className="m-0 text-[13px] font-semibold leading-normal text-[#3A3A40]">
+                When you are ready, use the red <span className="text-[#A8131F]">Pay with Paynamics</span> button at the bottom of this page to open Paynamics checkout.
+              </p>
+            ) : null}
             <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
               Receipt goes to {attendee.email} and {attendee.mobile}.
             </p>
@@ -1487,6 +1562,7 @@ function PaymentChoices({
   method,
   onMethod,
   paynamicsLiveChargeWarning,
+  paynamicsCheckout,
 }: {
   channels: PayChannel[] | null;
   channel: PayChannelCode | "";
@@ -1494,6 +1570,7 @@ function PaymentChoices({
   method: UpayMethod;
   onMethod: (method: UpayMethod) => void;
   paynamicsLiveChargeWarning?: boolean;
+  paynamicsCheckout?: PaynamicsCheckoutPublic;
 }) {
   if (channels === null) return <p className="m-0 text-sm text-[#5C5C63]">Loading payment options.</p>;
   if (channels.length === 0) return <p className="m-0 text-sm text-[#5C5C63]">Payment isn't open right now.</p>;
@@ -1526,6 +1603,14 @@ function PaymentChoices({
       ) : null}
       {channel === "paynamics" ? (
         <>
+          {paynamicsCheckout?.checkoutMode === "off" ? (
+            <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] leading-normal text-[#A8131F]">
+              Paynamics is listed here, but checkout API calls are gated off on this server
+              {paynamicsCheckout.apiAdmissionReason ? ` (${paynamicsCheckout.apiAdmissionReason})` : ""}
+              . Enable the Paynamics channel in admin <em>and</em> set the Workflow env vars from <code className="text-[12px]">docs/paynamics-staging.md</code>.{" "}
+              <span className="font-semibold">GET /api/payment-channels</span> shows <code className="text-[12px]">paynamics.checkoutMode</code> and <code className="text-[12px]">apiAdmissionReason</code>.
+            </p>
+          ) : null}
           {paynamicsLiveChargeWarning ? (
             <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] font-semibold leading-normal text-[#A8131F]">
               Staging live Paynamics: successful payments are real charges. Use only test cards/amounts you intend to pay.
@@ -2094,7 +2179,7 @@ function Manage({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [method, setMethod] = useState<UpayMethod>("instapay");
-  const { channels, channel, setChannel, paynamicsLiveChargeWarning } = usePaymentChannels();
+  const { channels, channel, setChannel, paynamicsLiveChargeWarning, paynamicsCheckout } = usePaymentChannels();
   const [payingInstallment, setPayingInstallment] = useState(false);
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
@@ -2341,6 +2426,11 @@ function Manage({
 
   async function startPayment() {
     if (!record || busy || record.currency !== "PHP" || !channel) return;
+    if (channel === "paynamics" && paynamicsCheckout.checkoutMode === "off") {
+      const reason = paynamicsCheckout.apiAdmissionReason ? ` (${paynamicsCheckout.apiAdmissionReason})` : "";
+      setError(`Paynamics checkout is not enabled on this server${reason}.`);
+      return;
+    }
     const paynamics = channel === "paynamics";
     const hitpay = paynamics ? "" : hitpayApiChannel(channel);
     setBusy(true);
@@ -2500,7 +2590,15 @@ function Manage({
             payingInstallment ? (
               <>
                 <h2 className="m-0 text-[17px] font-bold">Choose how to pay</h2>
-                <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} paynamicsLiveChargeWarning={paynamicsLiveChargeWarning} />
+                <PaymentChoices
+                  channels={channels}
+                  channel={channel}
+                  onChannel={setChannel}
+                  method={method}
+                  onMethod={setMethod}
+                  paynamicsLiveChargeWarning={paynamicsLiveChargeWarning}
+                  paynamicsCheckout={paynamicsCheckout}
+                />
                 <button
                   type="button"
                   disabled={busy || !channel}

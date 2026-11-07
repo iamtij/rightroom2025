@@ -385,11 +385,14 @@ export function paynamicsLiveRealChargeWarning() {
 }
 
 export function paynamicsPublicCheckoutInfo() {
+  const admission = assessPaynamicsApiAdmission();
   const mode = paynamicsCheckoutMode();
   return {
     checkoutMode: mode,
     liveRealChargeWarning: mode === "live",
     stagingLiveMerchantArmed: paynamicsStagingLiveMerchantAllowed(),
+    apiAdmissionAllowed: admission.allowed,
+    apiAdmissionReason: admission.allowed ? "" : admission.reason,
   };
 }
 

@@ -228,6 +228,7 @@ export function createApi() {
     res.json({
       tests: testRegistrationEnabled(),
       testTicket: testTicketEnabled(),
+      turnstileConfigured: Boolean(siteKey && secret),
       turnstileSiteKey: siteKey && secret ? siteKey : "",
     });
   });
