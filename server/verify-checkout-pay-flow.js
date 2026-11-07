@@ -59,7 +59,7 @@ try {
       attendeeType: "guest",
       challenge: await challenge(),
       turnstileToken: CAPTCHA,
-      pmethod: "wallet",
+      pchannel: "paymaya_ph",
       companyWebsite: "",
     }),
   });

@@ -17,7 +17,7 @@ export const PAYMENT_CHANNELS = [
   {
     code: "paynamics",
     label: "Paynamics",
-    detail: "E-wallet or online banking on Paynamics' secure page.",
+    detail: "Maya, GrabPay, BPI, UnionBank, or Landbank on Paynamics' secure page.",
   },
 ];
 

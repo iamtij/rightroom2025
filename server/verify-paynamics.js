@@ -17,6 +17,7 @@ import {
   ibmcProductionDeployment,
   ibmcStagingDeployment,
   paynamicsApiCallsAllowed,
+  paynamicsCheckoutChannel,
   paynamicsCheckoutMode,
   paynamicsPublicCheckoutInfo,
   paynamicsCustomerSignature,
@@ -119,7 +120,11 @@ const registration = createRegistration(db, {
   registeredOn: "2026-11-12",
 });
 
-assert.equal((await startPaynamicsPayment(db, registration, "wallet")).status, 503);
+assert.equal(paynamicsCheckoutChannel("gc"), null);
+assert.equal(paynamicsCheckoutChannel("wallet"), null);
+assert.deepEqual(paynamicsCheckoutChannel("paymaya_ph"), { pmethod: "wallet", pchannel: "paymaya_ph" });
+assert.deepEqual(paynamicsCheckoutChannel("bpi_online"), { pmethod: "onlinebanktransfer", pchannel: "bpi_online" });
+assert.equal((await startPaynamicsPayment(db, registration, "paymaya_ph")).status, 503);
 
 process.env.PAYNAMICS_BASIC_AUTH_USER = "workflow_user";
 process.env.PAYNAMICS_BASIC_AUTH_PASSWORD = "workflow_pass";
@@ -251,7 +256,7 @@ global.fetch = async (url, options = {}) => {
     const payload = JSON.parse(options.body || "{}");
     assert.equal(options.headers.Authorization.startsWith("Basic "), true);
     assert.equal(payload.transaction.pmethod, "wallet");
-    assert.equal(Object.hasOwn(payload.transaction, "pchannel"), false);
+    assert.equal(payload.transaction.pchannel, "paymaya_ph");
     const requestId = payload.transaction.request_id;
     return { ok: true, status: 200, json: async () => signedCreateResponse(requestId) };
   }
@@ -273,7 +278,7 @@ global.fetch = async (url, options = {}) => {
 const rejectedMethod = await startPaynamicsPayment(db, registration, "creditcard");
 assert.equal(rejectedMethod.status, 400);
 assert.equal(rejectedMethod.error, "Choose a Paynamics option.");
-const started = await startPaynamicsPayment(db, registration, "wallet");
+const started = await startPaynamicsPayment(db, registration, "paymaya_ph");
 assert.equal(started.paynamics?.status, "pending");
 assert.equal(fetchTarget.startsWith("https://payin.payserv.net/"), true);
 assert.equal(started.paynamics?.paymentUrl, "https://payin.payserv.net/hosted/checkout");

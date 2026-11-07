@@ -13,7 +13,13 @@ import { isChannelEnabled } from "./payment-channels.js";
 const locks = new Set();
 const DEFAULT_CHECKOUT_TTL_MINUTES = 30;
 const PAYMENT_ACTION = "url_link";
-const PAYNAMICS_CHECKOUT_METHODS = new Set(["wallet", "onlinebanktransfer"]);
+const PAYNAMICS_CHECKOUT_CHANNELS = {
+  paymaya_ph: "wallet",
+  grabpay_ph: "wallet",
+  bpi_online: "onlinebanktransfer",
+  ubp_online: "onlinebanktransfer",
+  br_landbank_ph: "onlinebanktransfer",
+};
 const WIKI_TEST_API_BASE = "https://payin.payserv.net";
 
 const TRANSACTION_SUCCESS = new Set(["GR001"]);
@@ -464,9 +470,10 @@ function amountLabel(cents) {
   return (Math.round(cents) / 100).toFixed(2);
 }
 
-export function paynamicsCheckoutMethod(value) {
-  const method = String(value || "").trim().toLowerCase();
-  return PAYNAMICS_CHECKOUT_METHODS.has(method) ? method : "";
+export function paynamicsCheckoutChannel(value) {
+  const pchannel = String(value || "").trim().toLowerCase();
+  const pmethod = PAYNAMICS_CHECKOUT_CHANNELS[pchannel];
+  return pmethod ? { pmethod, pchannel } : null;
 }
 
 export function buildWorkflowCreateBody({
@@ -476,6 +483,7 @@ export function buildWorkflowCreateBody({
   registration,
   amountCents,
   pmethod,
+  pchannel,
 }) {
   const phone = formatPhone(registration.mobile);
   const name = splitName(registration.full_name);
@@ -490,6 +498,7 @@ export function buildWorkflowCreateBody({
     response_url: response,
     cancel_url: cancel,
     pmethod,
+    ...(pchannel ? { pchannel } : {}),
     payment_action: PAYMENT_ACTION,
     collection_method: optional("PAYNAMICS_COLLECTION_METHOD", "single_pay"),
     payment_notification_status: optional("PAYNAMICS_PAYMENT_NOTIFICATION_STATUS", "1"),
@@ -768,9 +777,9 @@ async function queryWorkflowStatus(row) {
   }
 }
 
-export async function startPaynamicsPayment(db, registration, pmethod) {
-  const method = paynamicsCheckoutMethod(pmethod);
-  if (!method) return { error: "Choose a Paynamics option.", status: 400, registration };
+export async function startPaynamicsPayment(db, registration, pchannel) {
+  const selection = paynamicsCheckoutChannel(pchannel);
+  if (!selection) return { error: "Choose a Paynamics option.", status: 400, registration };
   if (!isChannelEnabled(db, "paynamics")) return { error: "That payment option is turned off.", status: 400, registration };
   if (registration.currency !== "PHP") return { error: "Paynamics collects peso payments.", status: 400, registration };
   if (!paynamicsApiCallsAllowed()) {
@@ -794,7 +803,7 @@ export async function startPaynamicsPayment(db, registration, pmethod) {
     `).get(due.id);
     if (open) {
       const expires = Date.parse(open.expires_at || "");
-      const sameMethod = String(open.payment_channel || "") === method;
+      const sameMethod = String(open.payment_channel || "") === selection.pchannel;
       if (sameMethod && (!Number.isFinite(expires) || Date.now() < expires)) {
         return view(db, registration, open);
       }
@@ -806,7 +815,15 @@ export async function startPaynamicsPayment(db, registration, pmethod) {
     const merchantId = required("PAYNAMICS_MERCHANT_ID");
     const merchantKey = required("PAYNAMICS_MERCHANT_KEY");
     const requestId = crypto.randomBytes(12).toString("hex");
-    const createBody = buildWorkflowCreateBody({ merchantId, merchantKey, requestId, registration, amountCents, pmethod: method });
+    const createBody = buildWorkflowCreateBody({
+      merchantId,
+      merchantKey,
+      requestId,
+      registration,
+      amountCents,
+      pmethod: selection.pmethod,
+      pchannel: selection.pchannel,
+    });
     let created;
     try {
       created = await paynamicsApiFetch("/paygate/transactions/", createBody);
@@ -833,7 +850,7 @@ export async function startPaynamicsPayment(db, registration, pmethod) {
       failed ? "failed" : "pending",
       response.response_code || (failed ? "create_failed" : null),
       response.response_message || (failed ? "unsigned/invalid hosted link" : null),
-      method,
+      selection.pchannel,
       paymentUrl || null,
       expiresAt(),
     );

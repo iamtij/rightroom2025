@@ -40,7 +40,7 @@ function registrationBody(challenge) {
     industry: "IT & Software",
     attendeeType: "guest",
     challenge,
-    pmethod: "wallet",
+    pchannel: "paymaya_ph",
     companyWebsite: "",
   };
 }

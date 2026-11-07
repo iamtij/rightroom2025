@@ -145,11 +145,14 @@ const UPAY_METHODS: { id: UpayMethod; label: string; detail: string }[] = [
   { id: "paygate", label: "Other banks", detail: "Pay through PCHC Paygate." },
 ];
 
-type PaynamicsMethod = "wallet" | "onlinebanktransfer";
+type PaynamicsChannel = "paymaya_ph" | "grabpay_ph" | "bpi_online" | "ubp_online" | "br_landbank_ph";
 
-const PAYNAMICS_METHODS: { id: PaynamicsMethod; label: string; detail: string }[] = [
-  { id: "wallet", label: "E-Wallet", detail: "GCash, Maya, GrabPay, and other e-wallets." },
-  { id: "onlinebanktransfer", label: "Online banking", detail: "Pay from your bank on Paynamics." },
+const PAYNAMICS_CHANNELS: { id: PaynamicsChannel; group: string; label: string; detail: string }[] = [
+  { id: "paymaya_ph", group: "E-Wallet", label: "Maya", detail: "Pay with Maya." },
+  { id: "grabpay_ph", group: "E-Wallet", label: "GrabPay", detail: "Pay with GrabPay." },
+  { id: "bpi_online", group: "Online banking", label: "BPI", detail: "Pay from a BPI account." },
+  { id: "ubp_online", group: "Online banking", label: "UnionBank Online", detail: "Pay from a UnionBank account." },
+  { id: "br_landbank_ph", group: "Online banking", label: "Landbank", detail: "Pay from a Landbank account." },
 ];
 
 type PayChannelCode = "upay" | "hitpay_qr" | "hitpay_online" | "paynamics";
@@ -215,11 +218,14 @@ function safePaynamicsUrl(value: string) {
   }
 }
 
-function payActionLabel(channel: PayChannelCode | "", amount: string, busy: boolean, paynamicsMethod: PaynamicsMethod = "wallet") {
+function payActionLabel(channel: PayChannelCode | "", amount: string, busy: boolean, paynamicsChannel: PaynamicsChannel = "paymaya_ph") {
   if (busy) return channel === "upay" || !channel ? "Opening UnionBank" : "Opening payment";
   if (channel === "hitpay_qr") return `Pay with QR · ${amount}`;
   if (channel === "hitpay_online") return `Pay with online banking · ${amount}`;
-  if (channel === "paynamics") return `Pay with ${paynamicsMethod === "onlinebanktransfer" ? "online banking" : "E-Wallet"} · ${amount}`;
+  if (channel === "paynamics") {
+    const label = PAYNAMICS_CHANNELS.find((item) => item.id === paynamicsChannel)?.label || "Paynamics";
+    return `Pay with ${label} · ${amount}`;
+  }
   return `Pay with UnionBank · ${amount}`;
 }
 
@@ -235,7 +241,7 @@ function usePaymentChannels() {
   const [channel, setChannel] = useState<PayChannelCode | "">("");
   const [paynamicsLiveChargeWarning, setPaynamicsLiveChargeWarning] = useState(false);
   const [paynamicsCheckout, setPaynamicsCheckout] = useState<PaynamicsCheckoutPublic>({ checkoutMode: "off" });
-  const [paynamicsMethod, setPaynamicsMethod] = useState<PaynamicsMethod>("wallet");
+  const [paynamicsChannel, setPaynamicsChannel] = useState<PaynamicsChannel>("paymaya_ph");
   useEffect(() => {
     let stop = false;
     fetch("/api/payment-channels")
@@ -261,7 +267,7 @@ function usePaymentChannels() {
       stop = true;
     };
   }, []);
-  return { channels, channel, setChannel, paynamicsLiveChargeWarning, paynamicsCheckout, paynamicsMethod, setPaynamicsMethod };
+  return { channels, channel, setChannel, paynamicsLiveChargeWarning, paynamicsCheckout, paynamicsChannel, setPaynamicsChannel };
 }
 
 type Attendee = {
@@ -616,7 +622,7 @@ function RegistrationWizard() {
   const [memberTest, setMemberTest] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [method, setMethod] = useState<UpayMethod>("instapay");
-  const { channels, channel, setChannel, paynamicsLiveChargeWarning, paynamicsCheckout, paynamicsMethod, setPaynamicsMethod } = usePaymentChannels();
+  const { channels, channel, setChannel, paynamicsLiveChargeWarning, paynamicsCheckout, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
   const [checkoutReference, setCheckoutReference] = useState("");
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
@@ -994,7 +1000,7 @@ function RegistrationWizard() {
           : hitpay
             ? (checkoutReference ? `/api/registrations/${checkoutReference}/hitpay` : "/api/registrations/hitpay")
             : (checkoutReference ? `/api/registrations/${checkoutReference}/upay` : "/api/registrations/upay");
-      const paymentBody = paynamics ? { pmethod: paynamicsMethod } : hitpay ? { channel: hitpay } : { paymentMethod: method };
+      const paymentBody = paynamics ? { pchannel: paynamicsChannel } : hitpay ? { channel: hitpay } : { paymentMethod: method };
       const captchaToken = turnstileToken;
       const response = await fetch(path, {
         method: "POST",
@@ -1514,7 +1520,7 @@ function RegistrationWizard() {
             >
               {charging.onSale
                 ? charging.currency === "PHP"
-                  ? payActionLabel(channel, money(dueToday, charging.currency), saving, paynamicsMethod)
+                  ? payActionLabel(channel, money(dueToday, charging.currency), saving, paynamicsChannel)
                   : `Submit registration · ${money(dueToday, charging.currency)} due`
                 : `Opens ${charging.opensLabel}`}
             </PrimaryButton>
@@ -1591,8 +1597,8 @@ function RegistrationWizard() {
               onChannel={setChannel}
               method={method}
               onMethod={setMethod}
-              paynamicsMethod={paynamicsMethod}
-              onPaynamicsMethod={setPaynamicsMethod}
+              paynamicsChannel={paynamicsChannel}
+              onPaynamicsChannel={setPaynamicsChannel}
               paynamicsLiveChargeWarning={paynamicsLiveChargeWarning}
               paynamicsCheckout={paynamicsCheckout}
             />
@@ -1710,8 +1716,8 @@ function PaymentChoices({
   onChannel,
   method,
   onMethod,
-  paynamicsMethod,
-  onPaynamicsMethod,
+  paynamicsChannel,
+  onPaynamicsChannel,
   paynamicsLiveChargeWarning,
   paynamicsCheckout,
 }: {
@@ -1720,8 +1726,8 @@ function PaymentChoices({
   onChannel: (channel: PayChannelCode) => void;
   method: UpayMethod;
   onMethod: (method: UpayMethod) => void;
-  paynamicsMethod: PaynamicsMethod;
-  onPaynamicsMethod: (method: PaynamicsMethod) => void;
+  paynamicsChannel: PaynamicsChannel;
+  onPaynamicsChannel: (channel: PaynamicsChannel) => void;
   paynamicsLiveChargeWarning?: boolean;
   paynamicsCheckout?: PaynamicsCheckoutPublic;
 }) {
@@ -1756,7 +1762,7 @@ function PaymentChoices({
       ) : null}
       {channel === "paynamics" ? (
         <>
-          <PaynamicsMethods method={paynamicsMethod} onChange={onPaynamicsMethod} />
+          <PaynamicsMethods channel={paynamicsChannel} onChange={onPaynamicsChannel} />
           {paynamicsCheckout?.checkoutMode === "off" ? (
             <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] leading-normal text-[#A8131F]">
               Paynamics checkout is not enabled on this server
@@ -1777,18 +1783,26 @@ function PaymentChoices({
   );
 }
 
-function PaynamicsMethods({ method, onChange }: { method: PaynamicsMethod; onChange: (method: PaynamicsMethod) => void }) {
+function PaynamicsMethods({ channel, onChange }: { channel: PaynamicsChannel; onChange: (channel: PaynamicsChannel) => void }) {
+  let group = "";
   return (
     <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF] bg-white">
-      {PAYNAMICS_METHODS.map((item) => (
-        <label key={item.id} className={`flex items-start gap-3 border-t border-[#E4E1DC] px-4 py-4 first:border-t-0 ${method === item.id ? "bg-[#FBE9EA]" : ""}`}>
-          <input type="radio" name="paynamics-method" className="mt-1 h-5 w-5 accent-[#D0202E]" checked={method === item.id} onChange={() => onChange(item.id)} />
-          <span className="flex flex-col gap-0.5">
-            <span className="text-[15px] font-semibold">{item.label}</span>
-            <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{item.detail}</span>
-          </span>
-        </label>
-      ))}
+      {PAYNAMICS_CHANNELS.map((item) => {
+        const heading = item.group !== group;
+        group = item.group;
+        return (
+          <div key={item.id}>
+            {heading ? <p className="m-0 border-t border-[#E4E1DC] px-4 pt-3 text-xs font-bold tracking-[0.12em] text-[#A8131F] uppercase first:border-t-0">{item.group}</p> : null}
+            <label className={`flex items-start gap-3 px-4 py-3 ${channel === item.id ? "bg-[#FBE9EA]" : ""}`}>
+              <input type="radio" name="paynamics-channel" className="mt-1 h-5 w-5 accent-[#D0202E]" checked={channel === item.id} onChange={() => onChange(item.id)} />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-[15px] font-semibold">{item.label}</span>
+                <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{item.detail}</span>
+              </span>
+            </label>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -2349,7 +2363,7 @@ function Manage({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [method, setMethod] = useState<UpayMethod>("instapay");
-  const { channels, channel, setChannel, paynamicsLiveChargeWarning, paynamicsCheckout, paynamicsMethod, setPaynamicsMethod } = usePaymentChannels();
+  const { channels, channel, setChannel, paynamicsLiveChargeWarning, paynamicsCheckout, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
   const [payingInstallment, setPayingInstallment] = useState(false);
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
@@ -2614,7 +2628,7 @@ function Manage({
       const response = await fetch(path, {
         method: "POST",
         headers: resumeHeaders({ "Content-Type": "application/json" }, record.resumeToken),
-        body: JSON.stringify(paynamics ? { pmethod: paynamicsMethod } : hitpay ? { channel: hitpay } : { paymentMethod: method }),
+        body: JSON.stringify(paynamics ? { pchannel: paynamicsChannel } : hitpay ? { channel: hitpay } : { paymentMethod: method }),
       });
       const payload = await response.json();
       if (payload.registration) setRecord(payload.registration);
@@ -2766,8 +2780,8 @@ function Manage({
                   onChannel={setChannel}
                   method={method}
                   onMethod={setMethod}
-                  paynamicsMethod={paynamicsMethod}
-                  onPaynamicsMethod={setPaynamicsMethod}
+                  paynamicsChannel={paynamicsChannel}
+                  onPaynamicsChannel={setPaynamicsChannel}
                   paynamicsLiveChargeWarning={paynamicsLiveChargeWarning}
                   paynamicsCheckout={paynamicsCheckout}
                 />
@@ -2777,7 +2791,7 @@ function Manage({
                   onClick={startPayment}
                   className="rounded-full bg-[#D0202E] px-4 py-3.5 text-base font-bold text-white disabled:bg-[#E4A0A6]"
                 >
-                  {payActionLabel(channel, money(due.amountCents, record.currency), busy, paynamicsMethod)}
+                  {payActionLabel(channel, money(due.amountCents, record.currency), busy, paynamicsChannel)}
                 </button>
                 <button
                   type="button"
