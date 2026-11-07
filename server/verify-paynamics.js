@@ -28,6 +28,8 @@ const TEST_KEY = "test_merchant_key_only_for_ci";
 const TEST_MID = "TESTMID";
 const originalFetch = global.fetch;
 
+process.env.IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE = "true";
+
 delete process.env.PAYNAMICS_API_CALLS_ENABLED;
 delete process.env.PAYNAMICS_API_ACCOUNT_CONFIRMED;
 process.env.PAYNAMICS_MERCHANT_ID = TEST_MID;
@@ -116,6 +118,25 @@ process.env.PAYNAMICS_API_ENV = "sandbox";
 
 assert.equal(paynamicsApiCallsAllowed(), true);
 
+process.env.PAYNAMICS_ALLOW_PRODUCTION = "true";
+process.env.PAYNAMICS_API_ENV = "production";
+assert.equal(paynamicsApiCallsAllowed(), false);
+
+process.env.PAYNAMICS_API_ENV = "sandbox";
+process.env.PAYNAMICS_API_BASE_URL = "https://paynamics.example.com";
+assert.equal(paynamicsApiCallsAllowed(), false);
+
+process.env.PAYNAMICS_API_BASE_URL = "http://payin.payserv.net";
+assert.equal(paynamicsApiCallsAllowed(), false);
+
+process.env.PAYNAMICS_API_BASE_URL = "https://payin.payserv.net";
+process.env.PAYNAMICS_ALLOW_PRODUCTION = "true";
+assert.equal(paynamicsApiCallsAllowed(), true);
+
+process.env.PAYNAMICS_ALLOW_PRODUCTION = "";
+delete process.env.PAYNAMICS_ALLOW_PRODUCTION;
+assert.equal(paynamicsApiCallsAllowed(), true);
+
 global.fetch = async (url, options = {}) => {
   const target = String(url);
   if (target.includes("/paygate/transactions/") && !target.includes("/query")) {
@@ -197,6 +218,17 @@ const unverifiedPaid = await handlePaynamicsNotification(db, {
 });
 assert.equal(unverifiedPaid.status, 200);
 assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE external_reference = ?").get(fixedRow.request_id).count, 0);
+
+delete process.env.IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE;
+applyPaynamicsStatus(db, fixedRow, {
+  merchant_id: TEST_MID,
+  request_id: fixedRow.request_id,
+  response_code: "GR001",
+  amount: amountLabel,
+  currency: "PHP",
+}, { allowSettle: true });
+assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE external_reference = ?").get(fixedRow.request_id).count, 0);
+process.env.IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE = "true";
 
 const settled = applyPaynamicsStatus(db, fixedRow, {
   merchant_id: TEST_MID,

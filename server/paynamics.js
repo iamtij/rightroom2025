@@ -258,9 +258,13 @@ export function paynamicsApiCallsAllowed() {
   if (!String(process.env.PAYNAMICS_MERCHANT_ID || "").trim()) return false;
   if (!String(process.env.PAYNAMICS_MERCHANT_KEY || "").trim()) return false;
   const env = String(process.env.PAYNAMICS_API_ENV || "").toLowerCase();
-  if (process.env.PAYNAMICS_ALLOW_PRODUCTION === "true") return true;
   if (env !== "sandbox") return false;
   return apiBaseMatchesWikiTest(base);
+}
+
+/** True only when API base origin exactly matches wiki §1.6 test Workflow host (no prod / alternate-host override). */
+export function paynamicsApiBaseIsWikiTestHost() {
+  return apiBaseMatchesWikiTest(paynamicsApiBaseUrl());
 }
 
 function basicAuthHeader() {
@@ -507,8 +511,12 @@ function currencyMatches(payload, { required = false } = {}) {
 
 /**
  * Status refresh only. Settlement requires independently verified notification/query contracts (currently disabled).
- * `allowSettle` is for unit tests that inject verified payloads directly — not used in production handlers.
+ * `allowSettle` is honored only when `IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE=true` (set in verify-paynamics.js only).
  */
+function paynamicsUnitTestSettleAllowed() {
+  return process.env.IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE === "true";
+}
+
 export function applyPaynamicsStatus(db, row, payload, { allowSettle = false, requireAmountCurrency = false } = {}) {
   if (!row || row.status === "paid") return row;
   if (!merchantMatches(row, payload)) {
@@ -537,7 +545,7 @@ export function applyPaynamicsStatus(db, row, payload, { allowSettle = false, re
   if (outcome === "query_ok") {
     return savePaynamics(db, row, { ...patch, status: row.status === "expired" ? "expired" : "pending", gatewayMessage: payload.response_message || "query ok" });
   }
-  if (outcome === "paid" && allowSettle) {
+  if (outcome === "paid" && allowSettle && paynamicsUnitTestSettleAllowed()) {
     settlePaynamics(db, row);
     return db.prepare("SELECT * FROM paynamics_payments WHERE id = ?").get(row.id);
   }

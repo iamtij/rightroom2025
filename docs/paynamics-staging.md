@@ -21,7 +21,7 @@ Outbound calls require **all** of:
 - `PAYNAMICS_API_CALLS_ENABLED=true`
 - `PAYNAMICS_API_ACCOUNT_CONFIRMED=true` (parent confirms BNI **test** package)
 - `PAYNAMICS_API_BASE_URL=https://payin.payserv.net` (sandbox mode only matches this origin)
-- `PAYNAMICS_API_ENV=sandbox` (or `PAYNAMICS_ALLOW_PRODUCTION=true` for a future confirmed live host)
+- `PAYNAMICS_API_ENV=sandbox` (required; there is no env override for production or non-test API hosts)
 - `PAYNAMICS_BASIC_AUTH_USER` / `PAYNAMICS_BASIC_AUTH_PASSWORD`
 - `PAYNAMICS_MERCHANT_ID` / `PAYNAMICS_MERCHANT_KEY` (signatures only — not Basic auth)
 
@@ -39,7 +39,7 @@ Outbound calls require **all** of:
 | `POST /api/webhooks/paynamics` | Updates status fields when merchant/request/amount/currency match; **never** `recordPayment` |
 | Query poll | `QM001` = query succeeded, **not paid**; may refresh inner status when present |
 
-There is **no** env flag to enable production settlement. Unit tests call `applyPaynamicsStatus(..., { allowSettle: true })` directly with mocked verified payloads.
+There is **no** env flag to enable production settlement. `recordPayment` is only reachable via `settlePaynamics` inside `applyPaynamicsStatus` when both `allowSettle: true` **and** `IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE=true` (set only in `server/verify-paynamics.js`). HTTP handlers always pass `allowSettle: false`.
 
 Webhook HTTP method, body schema, ACK/retry, and query-**response** signature formula remain **unverified** in wiki — ask Paynamics before enabling settlement.
 
