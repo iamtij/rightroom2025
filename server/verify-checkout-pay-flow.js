@@ -126,6 +126,30 @@ try {
   assert.notEqual(resumeBody.error, "Confirm you are a person and try again.");
   assert.notEqual(resumeBody.error, "Refresh the page and try again.");
   assert.ok(resumeBody.error);
+
+  const unopened = await fetch(`${base}/api/registrations/paynamics`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      productCode: "test_100",
+      paymentPlan: "full",
+      fullName: "Unopened QA",
+      email: "flow-unopened@example.com",
+      mobile: "09171234775",
+      business: "QA",
+      industry: "IT & Software",
+      attendeeType: "guest",
+      challenge: await challenge(),
+      turnstileToken: "cap-unopened",
+      pchannel: "paymaya_ph",
+      companyWebsite: "",
+    }),
+  });
+  const unopenedBody = await unopened.json();
+  assert.notEqual(unopened.status, 201);
+  assert.ok(unopenedBody.error);
+  assert.equal(unopenedBody.registration, undefined);
+  assert.equal(db.prepare("SELECT id FROM registrations WHERE email = ?").get("flow-unopened@example.com"), undefined);
 } finally {
   global.fetch = realFetch;
   await new Promise((resolve) => server.close(resolve));

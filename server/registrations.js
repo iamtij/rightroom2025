@@ -291,6 +291,24 @@ export function cancelRegistration(db, id) {
   return getRegistration(db, id);
 }
 
+export function discardUnopenedRegistration(db, id) {
+  const row = db.prepare("SELECT id, coupon_code FROM registrations WHERE id = ?").get(id);
+  if (!row) return false;
+  const paid = db.prepare("SELECT COUNT(*) AS n FROM payments WHERE registration_id = ?").get(id).n;
+  if (paid) return false;
+  const remove = db.transaction(() => {
+    if (row.coupon_code) {
+      db.prepare("UPDATE coupons SET usage_count = MAX(usage_count - 1, 0) WHERE code = ?").run(row.coupon_code);
+    }
+    for (const table of ["upay_payments", "hitpay_payments", "paynamics_payments", "pass_scans", "reminder_dispatches", "schedule_sends", "payments", "registration_installments"]) {
+      db.prepare(`DELETE FROM ${table} WHERE registration_id = ?`).run(id);
+    }
+    db.prepare("DELETE FROM registrations WHERE id = ?").run(id);
+  });
+  remove();
+  return true;
+}
+
 export function recordPayment(db, input) {
   const run = db.transaction(() => {
     const registration = getRegistration(db, input.registrationId);

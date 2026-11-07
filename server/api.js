@@ -7,7 +7,7 @@ import {
   stagingTestRegistrationAllowed,
 } from "./staging-early-payments.js";
 import { beginMfaSetup, clearSessionCookie, cookieValue, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
-import { admitPass, cancelRegistration, compRegistration, createRegistration, ensureResumeToken, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
+import { admitPass, cancelRegistration, compRegistration, createRegistration, discardUnopenedRegistration, ensureResumeToken, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
 import { listMembers, lookupMember, memberContactClash, memberFromProof, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
@@ -30,6 +30,92 @@ function db() {
     seedAdmin(database);
   }
   return database;
+}
+
+function channelLabel(value) {
+  const labels = {
+    paymaya_ph: "Maya",
+    grabpay_ph: "GrabPay",
+    bpi_online: "BPI",
+    ubp_online: "UnionBank Online",
+    br_landbank_ph: "Landbank",
+    gc: "GCash",
+    qr: "QR Ph",
+    online: "Online banking",
+    instapay: "InstaPay",
+    paygate: "Other banks",
+    "UB Online": "UnionBank Online",
+  };
+  const key = String(value || "").trim();
+  return labels[key] || key.replaceAll("_", " ");
+}
+
+function registrationTransactions(database, registrationId) {
+  const ledger = database.prepare(`
+    SELECT amount_cents, method, external_reference, recorded_at
+    FROM payments WHERE registration_id = ? ORDER BY id
+  `).all(registrationId);
+  const recorded = new Set(ledger.map((item) => item.external_reference).filter(Boolean));
+  const rows = [];
+  for (const item of database.prepare(`
+    SELECT request_id, amount_cents, status, gateway_response_code, gateway_message, payment_channel, created_at, updated_at
+    FROM paynamics_payments WHERE registration_id = ? ORDER BY id
+  `).all(registrationId)) {
+    rows.push({
+      at: item.updated_at || item.created_at,
+      provider: "Paynamics",
+      channel: channelLabel(item.payment_channel),
+      status: item.status,
+      amountCents: item.amount_cents,
+      reference: item.request_id,
+      gateway: [item.gateway_response_code, item.gateway_message].filter(Boolean).join(" · "),
+      recorded: recorded.has(item.request_id),
+    });
+  }
+  for (const item of database.prepare(`
+    SELECT session_id, gateway_ref, amount_cents, channel, status, gateway_status, created_at, updated_at
+    FROM hitpay_payments WHERE registration_id = ? ORDER BY id
+  `).all(registrationId)) {
+    rows.push({
+      at: item.updated_at || item.created_at,
+      provider: "HitPay",
+      channel: channelLabel(item.channel),
+      status: item.status,
+      amountCents: item.amount_cents,
+      reference: item.gateway_ref || item.session_id,
+      gateway: item.gateway_status || "",
+      recorded: recorded.has(item.session_id),
+    });
+  }
+  for (const item of database.prepare(`
+    SELECT sender_ref_id, amount_cents, payment_method, status, unionbank_code, unionbank_state, transaction_id, created_at, updated_at
+    FROM upay_payments WHERE registration_id = ? ORDER BY id
+  `).all(registrationId)) {
+    rows.push({
+      at: item.updated_at || item.created_at,
+      provider: "U Pay",
+      channel: channelLabel(item.payment_method),
+      status: item.status,
+      amountCents: item.amount_cents,
+      reference: item.transaction_id || item.sender_ref_id,
+      gateway: [item.unionbank_code, item.unionbank_state].filter(Boolean).join(" · "),
+      recorded: recorded.has(item.sender_ref_id),
+    });
+  }
+  for (const item of ledger) {
+    if (item.external_reference && rows.some((row) => row.reference === item.external_reference)) continue;
+    rows.push({
+      at: item.recorded_at,
+      provider: "Recorded",
+      channel: channelLabel(item.method),
+      status: "paid",
+      amountCents: item.amount_cents,
+      reference: item.external_reference || "",
+      gateway: "",
+      recorded: true,
+    });
+  }
+  return rows;
 }
 
 function present(registration, options = {}) {
@@ -76,6 +162,7 @@ function present(registration, options = {}) {
     qrReady: registration.balance_cents === 0 && Boolean(registration.qr_token),
     registeredOn: registration.registered_on,
     payments,
+    ...(options.transactions ? { transactions: options.transactions } : {}),
     ...(options.resume && registration.resume_token ? { resumeToken: registration.resume_token } : {}),
     ...(options.resume && registration.balance_cents === 0 && registration.qr_token ? { qrToken: registration.qr_token } : {}),
   };
@@ -444,6 +531,23 @@ export function createApi() {
     });
   }
 
+  function hostedCheckoutStarted(result) {
+    if (!result || result.error) return false;
+    if (result.paynamics) return Boolean(result.paynamics.paymentUrl);
+    if (result.hitpay) return Boolean(result.hitpay.sessionId);
+    if (result.upay) return Boolean(result.upay.senderRefId);
+    return false;
+  }
+
+  function finishNewCheckout(res, send, registration, result) {
+    if (hostedCheckoutStarted(result)) {
+      send(res, { ...result, resume: true }, true);
+      return;
+    }
+    discardUnopenedRegistration(db(), registration.id);
+    send(res, { ...result, registration: undefined, resume: false, error: result.error || "Payment did not start. Nothing was saved." }, true);
+  }
+
   function ownerAccess(registration, token) {
     const allowed = resumeTokenMatches(registration, token);
     return { contact: allowed, resume: allowed };
@@ -462,11 +566,13 @@ export function createApi() {
 
   router.post("/registrations/upay", registerLimit, async (req, res) => {
     if (await rejectBot(req, res)) return;
+    let registration;
     try {
-      const registration = createPublicRegistration(req.body || {});
+      registration = createPublicRegistration(req.body || {});
       const result = await startUpayPayment(db(), registration, req.body?.paymentMethod);
-      sendUpay(res, { ...result, resume: true }, true);
+      finishNewCheckout(res, sendUpay, registration, result);
     } catch (error) {
+      if (registration) discardUnopenedRegistration(db(), registration.id);
       res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
     }
   });
@@ -478,11 +584,13 @@ export function createApi() {
       res.status(400).json({ error: "Choose a payment option." });
       return;
     }
+    let registration;
     try {
-      const registration = createPublicRegistration(req.body || {});
+      registration = createPublicRegistration(req.body || {});
       const result = await startHitpayPayment(db(), registration, channel);
-      sendHitpay(res, { ...result, resume: true }, true);
+      finishNewCheckout(res, sendHitpay, registration, result);
     } catch (error) {
+      if (registration) discardUnopenedRegistration(db(), registration.id);
       res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
     }
   });
@@ -529,11 +637,13 @@ export function createApi() {
       res.status(400).json({ error: "Choose a Paynamics option." });
       return;
     }
+    let registration;
     try {
-      const registration = createPublicRegistration(req.body || {});
+      registration = createPublicRegistration(req.body || {});
       const result = await startPaynamicsPayment(db(), registration, selection.pchannel);
-      sendPaynamics(res, { ...result, resume: true }, true);
+      finishNewCheckout(res, sendPaynamics, registration, result);
     } catch (error) {
+      if (registration) discardUnopenedRegistration(db(), registration.id);
       res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
     }
   });
@@ -824,7 +934,10 @@ export function createApi() {
     `).all();
     writeAudit(db(), req.admin.id, "registration.list", "registrations");
     recordSecurityEvent(db(), "registration.list", "registration list");
-    res.json(rows.map((row) => present(getRegistration(db(), row.id))));
+    res.json(rows.map((row) => {
+      const registration = getRegistration(db(), row.id);
+      return present(registration, { transactions: registrationTransactions(db(), registration.id) });
+    }));
   });
 
   router.post("/admin/registrations/:reference/payments", requireAdmin, (req, res) => {
