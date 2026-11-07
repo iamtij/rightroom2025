@@ -31,11 +31,28 @@ const byMobile = findRegistrationByContact(db, "09171234567");
 assert.equal(byEmail?.id, byMobile?.id);
 assert.equal(byEmail?.email, "tj.primary@example.com");
 
-const staleId = byEmail.id;
-db.prepare("UPDATE registrations SET phone_key = NULL WHERE id = ?").run(staleId);
-assert.equal(findRegistrationByContact(db, "09171234567")?.id, staleId);
-db.prepare("UPDATE registrations SET phone_key = ? WHERE id = ?").run(registrationPhoneKey("09171234567"), staleId);
+const activeId = byEmail.id;
+db.prepare("UPDATE registrations SET phone_key = NULL WHERE id = ?").run(activeId);
+assert.equal(findRegistrationByContact(db, "09171234567")?.id, activeId);
 
+db.prepare(`
+  INSERT INTO registrations (
+    reference, product_id, payment_plan, full_name, email, mobile, phone_key,
+    amount_due_cents, currency, status, registered_on, attendee_type, plan_status
+  ) VALUES ('IBMC27-CANCEL1', 1, 'full', 'Cancelled Dup', 'old.cancelled@example.com', '09171234567', ?, 100, 'PHP', 'cancelled', '2020-01-01', 'guest', 'active')
+`).run(registrationPhoneKey("09171234567"));
+assert.equal(findRegistrationByContact(db, "09171234567")?.id, activeId);
+assert.equal(findRegistrationByContact(db, "09171234567")?.email, "tj.primary@example.com");
+
+db.prepare("UPDATE registrations SET phone_key = ? WHERE id = ?").run(registrationPhoneKey("09171234567"), activeId);
+
+db.prepare("UPDATE registrations SET phone_key = ? WHERE id = ?").run("0000000000", activeId);
+assert.equal(findRegistrationByContact(db, "09171234567")?.id, activeId);
+db.prepare("UPDATE registrations SET phone_key = ? WHERE id = ?").run(registrationPhoneKey("09171234567"), activeId);
+
+process.env.RAILWAY_ENVIRONMENT = "staging";
+process.env.RAILWAY_ENVIRONMENT_NAME = "staging";
+process.env.IBMC_DEPLOYMENT_ENV = "staging";
 process.env.IBMC_STAGING_SAFE_MODE = "true";
 process.env.IBMC_DEPLOYMENT_ENV = "staging";
 process.env.IBMC_STAGING_SAFE_MEMBERSHIP_OTP_ALLOWLIST = "tj.primary@example.com";

@@ -51,22 +51,21 @@ export function resolveRegistrationByContact(db, query) {
   const key = registrationPhoneKey(raw);
   if (!key) return { registration: null };
   const keyed = db.prepare(`
-    SELECT id, status, lower(email) AS email
+    SELECT id, status, lower(email) AS email, mobile
     FROM registrations
     WHERE phone_key = ?
   `).all(key);
-  const stale = db
-    .prepare("SELECT id, status, lower(email) AS email, mobile FROM registrations WHERE phone_key IS NULL")
+  const byMobile = db
+    .prepare("SELECT id, status, lower(email) AS email, mobile FROM registrations WHERE mobile IS NOT NULL AND trim(mobile) != ''")
     .all()
-    .filter((row) => registrationPhoneKey(row.mobile) === key)
-    .map(({ id, status, email }) => ({ id, status, email }));
+    .filter((row) => registrationPhoneKey(row.mobile) === key);
   const merged = new Map();
-  for (const row of [...keyed, ...stale]) merged.set(row.id, row);
-  const rows = [...merged.values()].sort((a, b) => b.id - a.id);
-  if (!rows.length) return { registration: null };
-  const active = rows.filter((row) => row.status !== "cancelled");
-  const pool = active.length ? active : rows;
-  const distinctEmails = [...new Set(pool.map((row) => row.email).filter(Boolean))];
+  for (const row of [...keyed, ...byMobile]) merged.set(row.id, row);
+  const active = [...merged.values()]
+    .filter((row) => row.status !== "cancelled")
+    .sort((a, b) => b.id - a.id);
+  if (!active.length) return { registration: null };
+  const distinctEmails = [...new Set(active.map((row) => row.email).filter(Boolean))];
   if (distinctEmails.length > 1) {
     return {
       registration: null,
@@ -74,7 +73,7 @@ export function resolveRegistrationByContact(db, query) {
       status: 409,
     };
   }
-  return { registration: getRegistration(db, pool[0].id) };
+  return { registration: getRegistration(db, active[0].id) };
 }
 
 export function findRegistrationByContact(db, query) {
