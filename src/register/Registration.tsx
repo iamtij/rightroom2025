@@ -17,6 +17,24 @@ import {
   type Tier,
 } from "./plans";
 
+function humanCheckPayError(message: string) {
+  return (
+    message.includes("Confirm you are a person")
+    || message.includes("human-check")
+    || message.includes("Refresh the page")
+    || message.includes("security check expired")
+  );
+}
+
+async function mintFormChallenge() {
+  const response = await fetch("/api/challenge");
+  if (!response.ok) throw new Error("Refresh the page and try again.");
+  const payload = await response.json();
+  const token = String(payload.token || "").trim();
+  if (!token) throw new Error("Refresh the page and try again.");
+  return token;
+}
+
 function Turnstile({
   siteKey,
   onToken,
@@ -48,8 +66,14 @@ function Turnstile({
             setWidgetError(true);
             onBlocked?.(true);
           },
-          "expired-callback": () => onBlocked?.(true),
-          "timeout-callback": () => onBlocked?.(true),
+          "expired-callback": () => {
+            onToken("");
+            onBlocked?.(true);
+          },
+          "timeout-callback": () => {
+            onToken("");
+            onBlocked?.(true);
+          },
         });
       }
     };
@@ -583,6 +607,15 @@ function RegistrationWizard() {
   const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
   const [turnstileToken, setTurnstileToken] = useState("");
   const [turnstileBlocked, setTurnstileBlocked] = useState(false);
+  const [turnstileMountKey, setTurnstileMountKey] = useState(0);
+
+  function applyTurnstileToken(token: string) {
+    setTurnstileToken(token);
+    if (token) {
+      setTurnstileBlocked(false);
+      setPayError((current) => (current && humanCheckPayError(current) ? "" : current));
+    }
+  }
 
   useEffect(() => {
     let stop = false;
@@ -890,6 +923,9 @@ function RegistrationWizard() {
     setSaving(true);
     setPayError("");
     try {
+      const needsFormChallenge = !peso || !checkoutReference;
+      const challengeToken = needsFormChallenge ? await mintFormChallenge() : challenge;
+      if (needsFormChallenge) setChallenge(challengeToken);
       const registrationBody = {
         productCode: charging.code,
         paymentPlan: useInstallment ? "installment" : "full",
@@ -903,7 +939,7 @@ function RegistrationWizard() {
         attendeeType: attendee.audience,
         couponCode: plan === "full" ? coupon?.code || "" : "",
         memberToken: memberProof || undefined,
-        challenge,
+        challenge: challengeToken,
         companyWebsite,
         turnstileToken,
       };
@@ -955,7 +991,27 @@ function RegistrationWizard() {
       }
       setStep("done");
     } catch (error) {
-      setPayError(error instanceof Error ? error.message : "Registration was not saved");
+      const message = error instanceof Error ? error.message : "Registration was not saved";
+      const challengeStale = message === "Refresh the page and try again.";
+      const turnstileRejected = message === "Confirm you are a person and try again.";
+      if (!checkoutReference && challengeStale) {
+        try {
+          await mintFormChallenge();
+        } catch {
+          /* keep user-facing message */
+        }
+        setPayError("Your security check expired. Press Pay again after the human check below shows Success.");
+        if (turnstileSiteKey) {
+          setTurnstileToken("");
+          setTurnstileMountKey((value) => value + 1);
+        }
+      } else if (turnstileRejected && turnstileSiteKey) {
+        setTurnstileToken("");
+        setTurnstileMountKey((value) => value + 1);
+        setPayError("Complete the human check below, then press Pay again.");
+      } else {
+        setPayError(message);
+      }
     } finally {
       setSaving(false);
     }
@@ -1396,7 +1452,12 @@ function RegistrationWizard() {
             </PrimaryButton>
             {turnstileSiteKey ? (
               <div className="pt-1">
-                <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} onBlocked={setTurnstileBlocked} />
+                <Turnstile
+                  key={turnstileMountKey}
+                  siteKey={turnstileSiteKey}
+                  onToken={applyTurnstileToken}
+                  onBlocked={setTurnstileBlocked}
+                />
               </div>
             ) : null}
             {payError ? <p className="m-0 text-center text-sm leading-normal text-[#A8131F]">{payError}</p> : null}
@@ -1465,13 +1526,8 @@ function RegistrationWizard() {
               paynamicsLiveChargeWarning={paynamicsLiveChargeWarning}
               paynamicsCheckout={paynamicsCheckout}
             />
-            {channel === "paynamics" && paynamicsCheckout.checkoutMode !== "off" ? (
-              <p className="m-0 text-[13px] font-semibold leading-normal text-[#3A3A40]">
-                When you are ready, use the red <span className="text-[#A8131F]">Pay with Paynamics</span> button at the bottom of this page to open Paynamics checkout.
-              </p>
-            ) : null}
             <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
-              Receipt goes to {attendee.email} and {attendee.mobile}.
+              Receipt · {attendee.email} · {attendee.mobile}
             </p>
           </>
         ) : (
@@ -1628,18 +1684,18 @@ function PaymentChoices({
         <>
           {paynamicsCheckout?.checkoutMode === "off" ? (
             <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] leading-normal text-[#A8131F]">
-              Paynamics is listed here, but checkout API calls are gated off on this server
+              Paynamics checkout is not enabled on this server
               {paynamicsCheckout.apiAdmissionReason ? ` (${paynamicsCheckout.apiAdmissionReason})` : ""}
-              . Enable the Paynamics channel in admin <em>and</em> set the Workflow env vars from <code className="text-[12px]">docs/paynamics-staging.md</code>.{" "}
-              <span className="font-semibold">GET /api/payment-channels</span> shows <code className="text-[12px]">paynamics.checkoutMode</code> and <code className="text-[12px]">apiAdmissionReason</code>.
+              . See <code className="text-[12px]">docs/paynamics-staging.md</code>.
             </p>
-          ) : null}
+          ) : (
+            <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Continue to Paynamics to pay securely.</p>
+          )}
           {paynamicsLiveChargeWarning ? (
             <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] font-semibold leading-normal text-[#A8131F]">
               Staging live Paynamics: successful payments are real charges. Use only test cards/amounts you intend to pay.
             </p>
           ) : null}
-          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">You'll continue to Paynamics to choose a payment method. This page checks status with Paynamics; a return link alone does not confirm payment.</p>
         </>
       ) : null}
     </>
