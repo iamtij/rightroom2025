@@ -87,6 +87,8 @@ delete process.env.ALLOW_TEST_REGISTRATION;
 process.env.ADMIN_EMAIL = "audit@example.com";
 process.env.ADMIN_PASSWORD = "correct-horse-battery";
 process.env.ADMIN_SESSION_SECRET = "security-audit-test-secret-32ch";
+process.env.TURNSTILE_SITE_KEY = "";
+process.env.TURNSTILE_SECRET_KEY = "";
 const { createApi } = await import("./api.js");
 const seeded = openDatabase(file);
 seeded.prepare("UPDATE ticket_products SET sales_start = '2020-01-01'").run();

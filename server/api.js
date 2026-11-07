@@ -281,11 +281,19 @@ export function createApi() {
       return;
     }
     const member = lookupMember(db(), result.email);
-    const { id, ...visible } = member || {};
+    if (!member) {
+      res.status(400).json({ error: "That code is wrong." });
+      return;
+    }
+    const registered = [member.email, member.mobile].some((contact) => {
+      const registration = findRegistrationByContact(db(), contact);
+      return Boolean(registration && registration.status === "confirmed");
+    });
+    const { id, ...visible } = member;
     res.json({
       ok: true,
       editToken: result.editToken,
-      member: member ? { ...visible, memberToken: toPublicMember(member, false).memberToken } : undefined,
+      member: { ...visible, registered, memberToken: toPublicMember(member, registered).memberToken },
     });
   });
 

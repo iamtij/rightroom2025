@@ -418,7 +418,6 @@ function RegistrationWizard() {
   const [step, setStep] = useState<Step>("start");
   const [attendee, setAttendee] = useState<Attendee | null>(null);
   const [lookup, setLookup] = useState("");
-  const [lookedUp, setLookedUp] = useState(false);
   const [searching, setSearching] = useState(false);
   const [lookupError, setLookupError] = useState("");
   const [member, setMember] = useState<FoundMember | null>(null);
@@ -573,8 +572,8 @@ function RegistrationWizard() {
     if (!query || searching) return;
     setSearching(true);
     setLookupError("");
+    setOtpError("");
     setMember(null);
-    clearOtp();
     try {
       const response = await fetch("/api/members/otp", {
         method: "POST",
@@ -584,7 +583,7 @@ function RegistrationWizard() {
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Could not send the code");
       setOtpSentTo("your email");
-      setLookedUp(true);
+      setOtpCode("");
     } catch (error) {
       setLookupError(error instanceof Error ? error.message : "Could not send the code");
     } finally {
@@ -640,7 +639,6 @@ function RegistrationWizard() {
     setMemberProof("");
     setMember(null);
     setLookup("");
-    setLookedUp(false);
     setLookupError("");
     clearOtp();
     setStep("member");
@@ -876,7 +874,6 @@ function RegistrationWizard() {
             placeholder="name@business.com or 0917…"
             onChange={(event) => {
               setLookup(event.target.value);
-              setLookedUp(false);
               setLookupError("");
               setMember(null);
               clearOtp();
@@ -933,13 +930,29 @@ function RegistrationWizard() {
             {otpError && !otpSentTo ? <p className="m-0 text-sm text-[#A8131F]">{otpError}</p> : null}
           </div>
         ) : null}
-        {lookupError ? <p className="m-0 text-sm text-[#A8131F]">{lookupError}</p> : null}
-        {lookedUp && lookup.trim() && !member ? (
-          <div className="rounded-[14px] border border-[#E4E1DC] bg-white p-4">
-            <p className="m-0 text-base font-bold">We couldn't find that membership</p>
-            <p className="mt-1.5 mb-0 text-sm leading-normal text-[#5C5C63]">Check the email or mobile on your BNI Connect profile. Guest registration opens February 1, 2027.</p>
+        {otpSentTo && !member ? (
+          <div className="flex flex-col gap-2 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+            <p className="m-0 text-sm text-[#5C5C63]">Enter the 6-digit code from your email.</p>
+            <input
+              className={inputClass}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              maxLength={6}
+              placeholder="6-digit code"
+              value={otpCode}
+              onChange={(event) => setOtpCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") confirmOtp();
+              }}
+            />
+            {otpError ? <p className="m-0 text-sm text-[#A8131F]">{otpError}</p> : null}
+            <div className="flex gap-2">
+              <button type="button" disabled={otpCode.length !== 6 || otpBusy} onClick={confirmOtp} className="rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]">Confirm code</button>
+              <button type="button" disabled={otpBusy || searching} onClick={searchMember} className="rounded-full border border-[#D9D5CF] px-4 py-2.5 text-sm font-semibold">Resend</button>
+            </div>
           </div>
         ) : null}
+        {lookupError ? <p className="m-0 text-sm text-[#A8131F]">{lookupError}</p> : null}
         {member ? null : (
           <p className="m-0 text-sm text-[#5C5C63]">
             {guestsOpen ? (
