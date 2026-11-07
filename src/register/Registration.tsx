@@ -2974,6 +2974,9 @@ function Manage({
         {record.qrReady && record.qrToken ? (
           <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-5">
             <span className="self-start text-[15px] font-bold">QR ticket</span>
+            <span className="font-archivo text-xl font-extrabold tracking-[0.04em] text-[#141416]">
+              IBMC <span className="text-[#D0202E]">2027</span>
+            </span>
             <img src={`/api/passes/${encodeURIComponent(record.qrToken)}/qr`} alt="QR ticket" className="h-56 w-56" />
             <span className="font-archivo text-lg font-extrabold">{record.reference}</span>
             <span className="text-center text-[13px] leading-snug text-[#5C5C63]">Show this at the door on both days.</span>

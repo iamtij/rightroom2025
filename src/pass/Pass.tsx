@@ -63,6 +63,9 @@ export default function Pass() {
                 <p className="m-0 text-[15px] leading-snug text-[#FFE3E5]">{pass.tierName}</p>
               </div>
               <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-5">
+                <span className="font-archivo text-xl font-extrabold tracking-[0.04em] text-[#141416]">
+                  IBMC <span className="text-[#D0202E]">2027</span>
+                </span>
                 <img src={`/api/passes/${encodeURIComponent(token)}/qr`} alt="QR ticket" className="h-56 w-56" />
                 <span className="text-sm text-[#5C5C63]">Reference</span>
                 <span className="font-archivo text-[22px] font-extrabold">{pass.reference}</span>
