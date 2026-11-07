@@ -258,6 +258,42 @@ try {
   assert.equal(returnedBody.registration.resumeToken, provedBody.resumeToken);
   assert.ok(String(returned.headers.get("set-cookie") || "").includes("ibmc_resume="));
 
+  const mobileDb = openDatabase(file);
+  mobileDb.prepare(`
+    INSERT INTO members (
+      full_name, email, mobile, phone_key, chapter, category, business_name, reg_status, registered_at
+    ) VALUES (
+      'Mobile Member', 'mobile.roster@example.com', '09175550000', '9175550000',
+      'Makati', 'Consulting', 'Mobile Co', 'updated', '2026-11-01'
+    )
+  `).run();
+  const mobileRegistration = createRegistration(mobileDb, {
+    productCode: "first_mover",
+    paymentPlan: "full",
+    fullName: "Mobile Member",
+    email: "ticket.email@example.com",
+    mobile: "09175550000",
+    business: "Mobile Co",
+    industry: "Consulting",
+    chapter: "Makati",
+    attendeeType: "member",
+    registeredOn: "2026-11-12",
+  });
+  const mobileCode = issueMemberOtp(mobileDb, "09175550000");
+  mobileDb.close();
+  const mobileVerified = await fetch(`${base}/api/members/otp/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "09175550000", code: mobileCode.code }),
+  });
+  const mobileBody = await mobileVerified.json();
+  assert.equal(mobileVerified.status, 200);
+  assert.equal(mobileBody.member.registered, true);
+  assert.equal(mobileBody.member.email, "mobile.roster@example.com");
+  assert.equal(mobileBody.registration.reference, mobileRegistration.reference);
+  assert.equal(mobileBody.registration.attendee.email, "ticket.email@example.com");
+  assert.ok(mobileBody.registration.resumeToken);
+
   const hiddenPay = await fetch(`${base}/api/payments/upay/IBMCSECURITYTEST`);
   const hiddenPayBody = await hiddenPay.json();
   assert.equal(hiddenPay.status, 200);

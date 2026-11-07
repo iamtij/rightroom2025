@@ -391,15 +391,15 @@ export function createApi() {
     }
     const email = String(member.email || "").trim().toLowerCase();
     const byEmail = email ? findRegistrationByContact(db(), email) : null;
-    const owned = byEmail
+    const emailOwned = byEmail
       && byEmail.status === "confirmed"
       && String(byEmail.email || "").trim().toLowerCase() === email
       ? byEmail
       : null;
-    const registered = Boolean(owned) || [member.mobile].some((contact) => {
-      const registration = findRegistrationByContact(db(), contact);
-      return Boolean(registration && registration.status === "confirmed");
-    });
+    const byMobile = member.mobile ? findRegistrationByContact(db(), member.mobile) : null;
+    const mobileOwned = byMobile && byMobile.status === "confirmed" ? byMobile : null;
+    const owned = emailOwned || mobileOwned;
+    const registered = Boolean(owned);
     const { id, ...visible } = member;
     const body = {
       ok: true,
