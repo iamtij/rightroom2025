@@ -8,6 +8,7 @@ import {
 } from "./staging-early-payments.js";
 import { beginMfaSetup, clearSessionCookie, cookieValue, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
 import { admitPass, cancelRegistration, compRegistration, createRegistration, discardUnopenedRegistration, ensureResumeToken, entryPassEligible, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
+import { sendEntryPassForRegistration } from "./reminders.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
 import { listMembers, lookupMember, memberContactClash, memberFromProof, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
@@ -1003,6 +1004,21 @@ export function createApi() {
     } catch (error) {
       res.status(error.status || 400).json({ error: clientError(error, "The complimentary ticket was not saved") });
     }
+  });
+
+  router.post("/admin/registrations/:reference/resend-entry-pass", requireAdmin, async (req, res) => {
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    const result = await sendEntryPassForRegistration(db(), row.id, { force: true });
+    if (!result.ok) {
+      res.status(result.error === "not_fully_paid" ? 400 : 502).json({ error: result.error || "QR ticket email was not sent", ...result });
+      return;
+    }
+    writeAudit(db(), req.admin.id, "registration.entry_pass_resend", req.params.reference);
+    res.json({ sent: true, reference: req.params.reference });
   });
 
   router.post("/admin/passes/check-in", requireAdmin, (req, res) => {

@@ -17,14 +17,14 @@ export function outboundNotificationsSuppressed() {
   return ibmcStagingSafeModeEnabled();
 }
 
-const STAGING_SAFE_OTP_DELIVERY = new Set(["member_otp", "registration_otp"]);
+const STAGING_SAFE_ALLOWED_EMAIL = new Set(["member_otp", "registration_otp", "entry_pass"]);
 
 /**
- * When safe mode is on, block outbound email except member and registration login codes.
+ * When safe mode is on, block outbound email except login codes and fully-paid QR tickets.
  */
 export function outboundEmailSuppressed({ deliveryKind = "general" } = {}) {
   if (!ibmcStagingSafeModeEnabled()) return false;
-  if (STAGING_SAFE_OTP_DELIVERY.has(deliveryKind)) return false;
+  if (STAGING_SAFE_ALLOWED_EMAIL.has(deliveryKind)) return false;
   return true;
 }
 

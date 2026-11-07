@@ -135,6 +135,17 @@ email = await sendEmail({
 assert.equal(email.status, "skipped");
 assert.equal(email.error, "staging_safe_mode");
 
+process.env.RESEND_API_KEY = "re_test_safe_mode";
+email = await sendEmail({
+  to: "tj.tester@example.com",
+  subject: "IBMC 2027 · Your QR ticket",
+  text: "QR ticket",
+  deliveryKind: "entry_pass",
+});
+assert.notEqual(email.error, "staging_safe_mode");
+assert.notEqual(email.status, "skipped");
+
+delete process.env.RESEND_API_KEY;
 email = await sendEmail({
   to: "blocked@example.com",
   subject: "otp",

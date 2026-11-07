@@ -378,7 +378,12 @@ export function recordPayment(db, input) {
     }
     return registration.id;
   });
-  return getRegistration(db, run());
+  const registrationId = run();
+  const updated = getRegistration(db, registrationId);
+  if (updated.balance_cents === 0 && updated.fully_paid_at && updated.qr_token) {
+    import("./reminders.js").then(({ queueEntryPassAfterPayment }) => queueEntryPassAfterPayment(db, registrationId));
+  }
+  return updated;
 }
 
 export function compRegistration(db, registrationId, adminUserId) {
