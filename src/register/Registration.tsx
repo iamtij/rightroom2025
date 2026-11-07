@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LevNote, type LevPose } from "./Lev";
 import {
   INDUSTRIES,
@@ -35,6 +35,11 @@ async function mintFormChallenge() {
   return token;
 }
 
+type TurnstileGlobal = {
+  render: (node: HTMLElement, options: object) => string;
+  remove?: (widgetId: string) => void;
+};
+
 function Turnstile({
   siteKey,
   onToken,
@@ -45,43 +50,66 @@ function Turnstile({
   onBlocked?: (blocked: boolean) => void;
 }) {
   const holder = useRef<HTMLDivElement>(null);
+  const widgetIdRef = useRef<string | null>(null);
+  const onTokenRef = useRef(onToken);
+  const onBlockedRef = useRef(onBlocked);
+  onTokenRef.current = onToken;
+  onBlockedRef.current = onBlocked;
   const [widgetError, setWidgetError] = useState(false);
   useEffect(() => {
-    onBlocked?.(false);
+    onBlockedRef.current?.(false);
     setWidgetError(false);
-    const script = document.createElement("script");
-    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-    script.async = true;
-    script.onload = () => {
-      const widget = (window as Window & { turnstile?: { render: (node: HTMLElement, options: object) => void } }).turnstile;
-      if (holder.current && widget) {
-        widget.render(holder.current, {
-          sitekey: siteKey,
-          callback: (token: string) => {
-            setWidgetError(false);
-            onBlocked?.(false);
-            onToken(token);
-          },
-          "error-callback": () => {
-            setWidgetError(true);
-            onBlocked?.(true);
-          },
-          "expired-callback": () => {
-            onToken("");
-            onBlocked?.(true);
-          },
-          "timeout-callback": () => {
-            onToken("");
-            onBlocked?.(true);
-          },
-        });
+    let cancelled = false;
+    const mountWidget = () => {
+      const widget = (window as Window & { turnstile?: TurnstileGlobal }).turnstile;
+      if (cancelled || !holder.current || !widget) return;
+      if (widgetIdRef.current && widget.remove) {
+        widget.remove(widgetIdRef.current);
+        widgetIdRef.current = null;
+      }
+      widgetIdRef.current = widget.render(holder.current, {
+        sitekey: siteKey,
+        callback: (token: string) => {
+          setWidgetError(false);
+          onBlockedRef.current?.(false);
+          onTokenRef.current(token);
+        },
+        "error-callback": () => {
+          setWidgetError(true);
+          onBlockedRef.current?.(true);
+        },
+        "expired-callback": () => {
+          onTokenRef.current("");
+          onBlockedRef.current?.(true);
+        },
+        "timeout-callback": () => {
+          onTokenRef.current("");
+          onBlockedRef.current?.(true);
+        },
+      });
+    };
+    const existing = document.querySelector("script[data-ibmc-turnstile]");
+    if ((window as Window & { turnstile?: TurnstileGlobal }).turnstile) {
+      mountWidget();
+    } else if (existing) {
+      existing.addEventListener("load", mountWidget);
+    } else {
+      const script = document.createElement("script");
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.async = true;
+      script.dataset.ibmcTurnstile = "1";
+      script.onload = mountWidget;
+      document.head.appendChild(script);
+    }
+    return () => {
+      cancelled = true;
+      const widget = (window as Window & { turnstile?: TurnstileGlobal }).turnstile;
+      if (widgetIdRef.current && widget?.remove) {
+        widget.remove(widgetIdRef.current);
+        widgetIdRef.current = null;
       }
     };
-    document.head.appendChild(script);
-    return () => {
-      script.remove();
-    };
-  }, [siteKey, onToken, onBlocked]);
+  }, [siteKey]);
   return (
     <div className="flex flex-col gap-2">
       <div ref={holder} />
@@ -609,18 +637,18 @@ function RegistrationWizard() {
   const [turnstileBlocked, setTurnstileBlocked] = useState(false);
   const [turnstileMountKey, setTurnstileMountKey] = useState(0);
 
-  function applyTurnstileToken(token: string) {
+  const applyTurnstileToken = useCallback((token: string) => {
     setTurnstileToken(token);
     if (token) {
       setTurnstileBlocked(false);
       setPayError((current) => (current && humanCheckPayError(current) ? "" : current));
     }
-  }
+  }, []);
 
-  function resetTurnstileAfterSubmit() {
+  const resetTurnstileAfterSubmit = useCallback(() => {
     setTurnstileToken("");
     setTurnstileMountKey((value) => value + 1);
-  }
+  }, []);
 
   useEffect(() => {
     let stop = false;
@@ -959,36 +987,48 @@ function RegistrationWizard() {
             ? (checkoutReference ? `/api/registrations/${checkoutReference}/hitpay` : "/api/registrations/hitpay")
             : (checkoutReference ? `/api/registrations/${checkoutReference}/upay` : "/api/registrations/upay");
       const paymentBody = paynamics ? {} : hitpay ? { channel: hitpay } : { paymentMethod: method };
+      const captchaToken = turnstileToken;
       const response = await fetch(path, {
         method: "POST",
         headers: resumeHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(peso && checkoutReference ? paymentBody : peso ? { ...registrationBody, ...paymentBody } : registrationBody),
+        body: JSON.stringify(
+          peso && checkoutReference
+            ? paymentBody
+            : peso
+              ? { ...registrationBody, ...paymentBody, turnstileToken: captchaToken }
+              : { ...registrationBody, turnstileToken: captchaToken },
+        ),
       });
-      const payload = await response.json();
-      const record = payload.registration || (payload.reference ? payload : null);
+      let payload: Record<string, unknown> = {};
+      try {
+        payload = await response.json();
+      } catch {
+        throw new Error("Payment did not continue. Try again.");
+      }
+      const record = (payload.registration as { reference?: string } | undefined) || (payload.reference ? payload : null);
       if (record?.reference) {
-        rememberRegistration(record);
-        setSaved(record);
-        setCheckoutReference(record.reference);
+        rememberRegistration(record as StoredRegistration);
+        setSaved(record as StoredRegistration);
+        setCheckoutReference(String(record.reference));
       }
       if (!response.ok) {
-        if (submittedWithTurnstile && turnstileSiteKey) {
+        const serverMessage = String(payload.error || "Registration was not saved");
+        const errorCode = String(payload.code || "");
+        const challengeRejected = errorCode === "form_challenge_invalid" || serverMessage === "Refresh the page and try again.";
+        const turnstileRejected = errorCode === "turnstile_rejected" || serverMessage === "Confirm you are a person and try again.";
+        const captchaLikelyConsumed = submittedWithTurnstile && !challengeRejected && !turnstileRejected;
+        if ((turnstileRejected || captchaLikelyConsumed) && turnstileSiteKey) {
           resetTurnstileAfterSubmit();
         }
-        const serverMessage = payload.error || "Registration was not saved";
-        if (needsFormChallenge && serverMessage === "Refresh the page and try again.") {
+        if (challengeRejected) {
           try {
             await mintFormChallenge();
           } catch {
             /* keep user-facing message */
           }
-          setPayError("Your security check expired. Press Pay again after the human check below shows Success.");
-        } else if (submittedWithTurnstile && turnstileSiteKey) {
-          setPayError(
-            serverMessage === "Confirm you are a person and try again."
-              ? "Payment did not continue. Complete the human check below, then press Pay again."
-              : `${serverMessage} Complete the human check below, then press Pay again.`,
-          );
+          setPayError("Your session check expired. Press Pay again after the human check below shows Success.");
+        } else if (turnstileRejected) {
+          setPayError("Human check was not accepted. Wait for Success below, then press Pay again.");
         } else {
           setPayError(serverMessage);
         }
@@ -1010,26 +1050,20 @@ function RegistrationWizard() {
         if (url) window.location.assign(url);
         return;
       }
-      if (payload.paynamics?.requestId) {
+      const paynamicsPayload = payload.paynamics as { requestId?: string; paymentUrl?: string } | undefined;
+      if (paynamicsPayload?.requestId) {
         setUpaySession(null);
         setHitpaySession(null);
-        setPaynamicsSession(payload.paynamics);
+        setPaynamicsSession(paynamicsPayload as PaynamicsSession);
         setStep("paying");
-        const url = safePaynamicsUrl(payload.paynamics.paymentUrl);
+        const url = safePaynamicsUrl(String(paynamicsPayload.paymentUrl || ""));
         if (url) window.location.assign(url);
         return;
       }
       setStep("done");
     } catch (error) {
-      if (submittedWithTurnstile && turnstileSiteKey) {
-        resetTurnstileAfterSubmit();
-      }
       const message = error instanceof Error ? error.message : "Registration was not saved";
-      if (submittedWithTurnstile && turnstileSiteKey) {
-        setPayError(`${message} Complete the human check below, then press Pay again.`);
-      } else {
-        setPayError(message);
-      }
+      setPayError(message);
     } finally {
       setSaving(false);
     }
@@ -1461,7 +1495,15 @@ function RegistrationWizard() {
         step={3}
         footer={
           <div className="flex flex-col gap-3">
-            <PrimaryButton disabled={!charging.onSale || saving || (charging.currency === "PHP" && !channel)} onClick={pay}>
+            <PrimaryButton
+              disabled={
+                !charging.onSale
+                || saving
+                || (charging.currency === "PHP" && !channel)
+                || Boolean(turnstileSiteKey && !turnstileToken)
+              }
+              onClick={pay}
+            >
               {charging.onSale
                 ? charging.currency === "PHP"
                   ? payActionLabel(channel, money(dueToday, charging.currency), saving)

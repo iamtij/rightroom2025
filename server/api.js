@@ -253,7 +253,7 @@ export function createApi() {
     const token = String(req.body?.challenge || "");
     const row = token ? db().prepare("SELECT expires_at FROM form_challenges WHERE token = ?").get(token) : null;
     if (!row || row.expires_at < Date.now()) {
-      res.status(400).json({ error: "Refresh the page and try again." });
+      res.status(400).json({ error: "Refresh the page and try again.", code: "form_challenge_invalid" });
       return true;
     }
     db().prepare("DELETE FROM form_challenges WHERE token = ?").run(token);
@@ -266,7 +266,7 @@ export function createApi() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!payload.success) {
-        res.status(400).json({ error: "Confirm you are a person and try again." });
+        res.status(400).json({ error: "Confirm you are a person and try again.", code: "turnstile_rejected" });
         return true;
       }
     }
