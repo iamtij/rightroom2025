@@ -9,6 +9,8 @@ import {
   allowedPaymentRedirectUrl,
   applyPaynamicsStatus,
   assessPaynamicsApiAdmission,
+  assessPaynamicsInboundTrust,
+  assessPaynamicsQueryBody,
   assessStagingLiveDeploymentIdentity,
   buildWorkflowCreateBody,
   canonicalPaynamicsApiOrigin,
@@ -48,6 +50,16 @@ process.env.SITE_URL = "https://staging.example.test";
 
 assert.equal(paynamicsApiCallsAllowed(), false);
 assert.equal(paynamicsSettlementEnabled(), false);
+process.env.PAYNAMICS_API_CALLS_ENABLED = "true";
+process.env.PAYNAMICS_API_ACCOUNT_CONFIRMED = "true";
+process.env.PAYNAMICS_API_BASE_URL = "https://payin.payserv.net";
+process.env.PAYNAMICS_API_ENV = "sandbox";
+process.env.PAYNAMICS_BASIC_AUTH_USER = "workflow_user";
+process.env.PAYNAMICS_BASIC_AUTH_PASSWORD = "workflow_pass";
+process.env.IBMC_DEPLOYMENT_ENV = "staging";
+assert.equal(paynamicsSettlementEnabled(), true);
+delete process.env.PAYNAMICS_API_CALLS_ENABLED;
+delete process.env.IBMC_DEPLOYMENT_ENV;
 const publicCheckout = paynamicsPublicCheckoutInfo();
 assert.equal(publicCheckout.apiAdmissionAllowed, false);
 assert.equal(typeof publicCheckout.apiAdmissionReason, "string");
@@ -354,6 +366,83 @@ assert.equal(unverifiedPaid.status, 200);
 assert.equal(db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(fixedRow.id).status, "pending");
 assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE external_reference = ?").get(fixedRow.request_id).count, 0);
 
+process.env.PAYNAMICS_API_CALLS_ENABLED = "true";
+process.env.PAYNAMICS_API_ACCOUNT_CONFIRMED = "true";
+process.env.PAYNAMICS_API_BASE_URL = "https://payin.payserv.net";
+process.env.PAYNAMICS_API_ENV = "sandbox";
+process.env.PAYNAMICS_BASIC_AUTH_USER = "workflow_user";
+process.env.PAYNAMICS_BASIC_AUTH_PASSWORD = "workflow_pass";
+process.env.IBMC_DEPLOYMENT_ENV = "staging";
+
+const nested = parseNotificationPayload({
+  transaction: {
+    merchant_id: TEST_MID,
+    request_id: fixedRow.request_id,
+    response_code: "GR033",
+  },
+});
+assert.equal(nested.request_id, fixedRow.request_id);
+
+const verifiedPaidSig = {
+  merchant_id: TEST_MID,
+  request_id: fixedRow.request_id,
+  response_id: "NTF2",
+  gateway_id: "",
+  response_code: "GR001",
+  response_message: "paid",
+  response_advise: "",
+  timestamp: "2026-11-07T10:02:00.000+08:00",
+  processor_response_id: "",
+  processor_response_authcode: "",
+  pay_reference: "",
+};
+const verifiedPaidBody = {
+  ...verifiedPaidSig,
+  amount: amountLabel,
+  currency: "PHP",
+  signature: paynamicsWorkflowResponseSignature(verifiedPaidSig, TEST_KEY),
+};
+const verifiedPaidTrust = assessPaynamicsInboundTrust(fixedRow, verifiedPaidBody, TEST_KEY, { requireAmountCurrency: false });
+assert.equal(verifiedPaidTrust.trusted, true, verifiedPaidTrust.reason);
+const verifiedPaid = await handlePaynamicsNotification(db, verifiedPaidBody);
+assert.equal(verifiedPaid.status, 200);
+assert.equal(db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(fixedRow.id).status, "paid");
+assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE external_reference = ?").get(fixedRow.request_id).count, 1);
+
+const paidInner = {
+  merchant_id: TEST_MID,
+  request_id: fixedRow.request_id,
+  response_id: "INNER1",
+  gateway_id: "",
+  response_code: "GR001",
+  response_message: "paid",
+  response_advise: "",
+  timestamp: "2026-11-07T10:03:00.000+08:00",
+  processor_response_id: "",
+  processor_response_authcode: "",
+  pay_reference: "",
+  amount: amountLabel,
+  currency: "PHP",
+};
+paidInner.signature = paynamicsWorkflowResponseSignature(paidInner, TEST_KEY);
+const queryOuter = {
+  merchant_id: TEST_MID,
+  request_id: "QINNER",
+  response_id: "QOUT2",
+  gateway_id: "",
+  response_code: "QM001",
+  response_message: "Query Successful",
+  response_advise: "",
+  timestamp: "2026-11-07T10:03:00.000+08:00",
+  processor_response_id: "",
+  processor_response_authcode: "",
+  pay_reference: "",
+};
+queryOuter.signature = paynamicsWorkflowResponseSignature(queryOuter, TEST_KEY);
+const queryTrust = assessPaynamicsQueryBody(fixedRow, { ...queryOuter, transaction: paidInner }, TEST_KEY);
+assert.equal(queryTrust.trusted, true);
+assert.equal(queryTrust.payload.response_code, "GR001");
+
 let queryMode = "default";
 const defaultFetch = global.fetch;
 global.fetch = async (url, options = {}) => {
@@ -402,45 +491,73 @@ global.fetch = async (url, options = {}) => {
   return defaultFetch(url, options);
 };
 queryMode = "unsigned_inner_gr003";
-const beforeRefresh = db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(fixedRow.id).status;
-const badRefresh = await refreshPaynamicsPayment(db, fixedRow.request_id);
+const probeRegistration = createRegistration(db, {
+  productCode: "first_mover",
+  paymentPlan: "full",
+  fullName: "Probe Settle",
+  email: "probe-settle@example.com",
+  mobile: "09171234568",
+  registeredOn: "2026-11-12",
+});
+const probeInstallment = db.prepare(`
+  SELECT id, amount_cents FROM registration_installments
+  WHERE registration_id = ? AND status = 'due' ORDER BY sequence LIMIT 1
+`).get(probeRegistration.id);
+const probeAmountLabel = (probeInstallment.amount_cents / 100).toFixed(2);
+const settleProbe = db.prepare(`
+  INSERT INTO paynamics_payments (
+    registration_id, installment_id, request_id, amount_cents, currency, status, expires_at, payment_url
+  ) VALUES (?, ?, ?, ?, 'PHP', 'pending', datetime('now', '+1 hour'), 'https://payin.payserv.net/hosted/probe')
+`).run(probeRegistration.id, probeInstallment.id, `probe${crypto.randomBytes(6).toString("hex")}`, probeInstallment.amount_cents);
+const probeRow = db.prepare("SELECT * FROM paynamics_payments WHERE id = ?").get(settleProbe.lastInsertRowid);
+const beforeRefresh = db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(probeRow.id).status;
+const badRefresh = await refreshPaynamicsPayment(db, probeRow.request_id);
 assert.equal(badRefresh.paynamics?.status, beforeRefresh);
-assert.equal(db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(fixedRow.id).status, "pending");
+assert.equal(db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(probeRow.id).status, "pending");
 queryMode = "default";
 global.fetch = defaultFetch;
 
 delete process.env.PAYNAMICS_API_CALLS_ENABLED;
-const apiOffRefresh = await refreshPaynamicsPayment(db, fixedRow.request_id);
+const apiOffRefresh = await refreshPaynamicsPayment(db, probeRow.request_id);
 assert.equal(apiOffRefresh.paynamics?.status, "pending");
 process.env.PAYNAMICS_API_CALLS_ENABLED = "true";
 
+const settleGate = db.prepare(`
+  INSERT INTO paynamics_payments (
+    registration_id, installment_id, request_id, amount_cents, currency, status, expires_at, payment_url
+  ) VALUES (?, ?, ?, ?, 'PHP', 'pending', datetime('now', '+1 hour'), 'https://payin.payserv.net/hosted/gate')
+`).run(probeRegistration.id, probeInstallment.id, `gate${crypto.randomBytes(6).toString("hex")}`, probeInstallment.amount_cents);
+const settleGateRow = db.prepare("SELECT * FROM paynamics_payments WHERE id = ?").get(settleGate.lastInsertRowid);
+
+process.env.PAYNAMICS_SETTLEMENT_ENABLED = "false";
 delete process.env.IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE;
-applyPaynamicsStatus(db, fixedRow, {
+applyPaynamicsStatus(db, settleGateRow, {
   merchant_id: TEST_MID,
-  request_id: fixedRow.request_id,
+  request_id: settleGateRow.request_id,
   response_code: "GR001",
-  amount: amountLabel,
+  amount: probeAmountLabel,
   currency: "PHP",
 }, { allowSettle: true });
-assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE external_reference = ?").get(fixedRow.request_id).count, 0);
+assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE external_reference = ?").get(settleGateRow.request_id).count, 0);
+delete process.env.PAYNAMICS_SETTLEMENT_ENABLED;
 process.env.IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE = "true";
 
-const settled = applyPaynamicsStatus(db, fixedRow, {
+const settled = applyPaynamicsStatus(db, settleGateRow, {
   merchant_id: TEST_MID,
-  request_id: fixedRow.request_id,
+  request_id: settleGateRow.request_id,
   response_code: "GR001",
-  amount: amountLabel,
+  amount: probeAmountLabel,
   currency: "PHP",
 }, { allowSettle: true });
 assert.equal(settled.status, "paid");
 applyPaynamicsStatus(db, settled, {
   merchant_id: TEST_MID,
-  request_id: fixedRow.request_id,
+  request_id: settleGateRow.request_id,
   response_code: "GR001",
-  amount: amountLabel,
+  amount: probeAmountLabel,
   currency: "PHP",
 }, { allowSettle: true });
-assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE external_reference = ?").get(fixedRow.request_id).count, 1);
+assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE external_reference = ?").get(settleGateRow.request_id).count, 1);
 
 assert.equal(workflowResponseSignatureValid(signedCreateResponse("x"), TEST_KEY, { requestId: "x" }), true);
 assert.equal(parseNotificationPayload({ request_id: "abc", response_code: "GR033" }).request_id, "abc");

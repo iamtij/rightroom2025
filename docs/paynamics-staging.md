@@ -84,17 +84,17 @@ Checkout/admin show a **real charge** warning when live mode is armed. Use `IBMC
 - Initial response **§10.3 signature** must validate before redirect.
 - **`payment_action_info` is not in the response signature concatenation** — even with a valid signature, redirect only proceeds on **HTTPS** URLs whose host matches `PAYNAMICS_PAYMENT_HOST_ALLOWLIST` (default `payserv.net`).
 
-## Settlement (disabled)
+## Settlement
 
 | Path | Behavior |
 | --- | --- |
-| Browser `response_url` | UX only — never settles |
-| `POST /api/webhooks/paynamics` | §10.3 signature + merchant/request/amount/currency must validate before status changes; untrusted payloads quarantined in `untrusted_inbound_json` only; **never** `recordPayment` |
-| Query poll | Same trust gate on query/inner transaction payloads; `QM001` = query succeeded, **not paid** |
+| Browser `response_url` | UX only — triggers a status poll, never settles on its own |
+| `POST /api/webhooks/paynamics` | §10.3 signature + merchant/request must validate; signed `GR001` with matching amount/currency records payment when settlement is enabled |
+| `GET /api/payments/paynamics/:requestId` | Workflow query; outer `QM001` must be signed, inner transaction must be signed; signed inner `GR001` records payment when settlement is enabled |
 
-There is **no** env flag to enable production settlement. `recordPayment` is only reachable via `settlePaynamics` inside `applyPaynamicsStatus` when both `allowSettle: true` **and** `IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE=true` (set only in `server/verify-paynamics.js`). HTTP handlers always pass `allowSettle: false`.
+Settlement is **on** when Paynamics API admission passes (`paynamicsApiCallsAllowed`) and the deployment is not IBMC production. Set `PAYNAMICS_SETTLEMENT_ENABLED=false` to force off, or `PAYNAMICS_SETTLEMENT_ENABLED=true` on production when Paynamics confirms live webhooks.
 
-Webhook HTTP method, body schema, ACK/retry, and query-**response** signature formula remain **unverified** in wiki — ask Paynamics before enabling settlement.
+Notifications may nest fields under `transaction` (Workflow create shape) — the server unwraps that before verification.
 
 ## Staging URLs (`PUBLIC_WEB_URL`)
 

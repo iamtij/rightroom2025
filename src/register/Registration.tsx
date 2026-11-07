@@ -2207,7 +2207,9 @@ function PaynamicsPending({
         </p>
       ) : null}
       <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">
-        Finish payment on Paynamics. This page does not confirm payment from a return link alone; settlement waits for a verified provider notification contract.
+        {current.settlementDisabled
+          ? "Finish payment on Paynamics. This page does not confirm payment from a return link alone; settlement waits for a verified provider notification contract."
+          : "Finish payment on Paynamics. This page checks with Paynamics every few seconds and when you tap check again — your return from Paynamics alone does not confirm payment."}
       </p>
       <div className="rounded-[14px] border border-[#E4E1DC] bg-white p-4 text-sm leading-normal text-[#3A3A40]">
         {current.status === "expired"
