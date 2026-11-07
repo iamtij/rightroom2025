@@ -28,7 +28,7 @@ For TJ/manual checkout while safe mode stays on:
 
 Routes: `POST /api/members/otp`, `POST /api/registrations/otp`. Auth unchanged (random code, verify required).
 
-Mobile lookup uses last-10-digit normalization on the query and on each row’s stored `mobile` (not `phone_key` alone). **Cancelled** registrations are never used for resume OTP. If multiple **active** rows share the mobile with different emails, the API returns **409** (use email or reference).
+Mobile lookup matches only when `registrationPhoneKey(mobile)` equals the query key — a stale or attacker-controlled `phone_key` column alone never selects a row. **Cancelled** rows are excluded. Multiple active rows with the same normalized mobile but different emails return **409** (use email or reference).
 
 ## Not suppressed
 

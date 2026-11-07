@@ -656,7 +656,9 @@ export function createApi() {
     const query = String(req.body?.query || "").trim();
     const result = verifyRegistrationOtp(db(), query, req.body?.code);
     if (result.error) {
-      res.status(400).json({ error: "That code is wrong." });
+      const status = result.status || 400;
+      const message = status === 400 ? "That code is wrong." : result.error;
+      res.status(status).json({ error: message });
       return;
     }
     const registration = ensureResumeToken(db(), result.registration);

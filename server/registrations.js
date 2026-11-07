@@ -24,6 +24,14 @@ export function registrationPhoneKey(value) {
   return digits.slice(-10);
 }
 
+/** True only when stored mobile normalizes to the query key (ignores stale phone_key column). */
+export function registrationMobileMatchesPhoneQuery(mobile, queryKey) {
+  const key = String(queryKey || "").trim();
+  if (!key) return false;
+  const mobileKey = registrationPhoneKey(mobile);
+  return mobileKey !== "" && mobileKey === key;
+}
+
 function phoneKey(value) {
   return registrationPhoneKey(value);
 }
@@ -50,19 +58,10 @@ export function resolveRegistrationByContact(db, query) {
   }
   const key = registrationPhoneKey(raw);
   if (!key) return { registration: null };
-  const keyed = db.prepare(`
-    SELECT id, status, lower(email) AS email, mobile
-    FROM registrations
-    WHERE phone_key = ?
-  `).all(key);
-  const byMobile = db
-    .prepare("SELECT id, status, lower(email) AS email, mobile FROM registrations WHERE mobile IS NOT NULL AND trim(mobile) != ''")
+  const active = db
+    .prepare("SELECT id, status, lower(email) AS email, mobile, phone_key FROM registrations WHERE mobile IS NOT NULL AND trim(mobile) != ''")
     .all()
-    .filter((row) => registrationPhoneKey(row.mobile) === key);
-  const merged = new Map();
-  for (const row of [...keyed, ...byMobile]) merged.set(row.id, row);
-  const active = [...merged.values()]
-    .filter((row) => row.status !== "cancelled")
+    .filter((row) => row.status !== "cancelled" && registrationMobileMatchesPhoneQuery(row.mobile, key))
     .sort((a, b) => b.id - a.id);
   if (!active.length) return { registration: null };
   const distinctEmails = [...new Set(active.map((row) => row.email).filter(Boolean))];
