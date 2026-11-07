@@ -164,7 +164,7 @@ export function parseWorkflowResponse(body) {
     request_id: root.request_id || "",
     response_id: root.response_id || "",
     gateway_id: root.gateway_id || "",
-    response_code: root.response_code || "",
+    response_code: root.response_code || root.response_status || "",
     response_message: root.response_message || "",
     response_advise: root.response_advise || "",
     timestamp: root.timestamp || "",
@@ -710,7 +710,49 @@ function quarantinePaynamicsInbound(db, row, payload, reason) {
     SET untrusted_inbound_json = ?, updated_at = datetime('now')
     WHERE id = ?
   `).run(JSON.stringify(snapshot), row.id);
+  console.warn(
+    `paynamics quarantine request=${row.request_id} reason=${String(reason || "untrusted")} code=${String(payload?.response_code || "")}`,
+  );
   return db.prepare("SELECT * FROM paynamics_payments WHERE id = ?").get(row.id);
+}
+
+function paynamicsQueryNestedTransaction(body) {
+  if (!body || typeof body !== "object") return null;
+  const nested = body.transaction || body.data || body.result;
+  if (nested && typeof nested === "object") return nested;
+  if (Array.isArray(body.transactions) && body.transactions[0] && typeof body.transactions[0] === "object") {
+    return body.transactions[0];
+  }
+  return null;
+}
+
+/** Live query often returns signed QM001 with an inner status row that has no signature. */
+function assessPaynamicsQm001Inner(row, outer, nested, merchantKey) {
+  const inner = {
+    ...parseWorkflowResponse(nested),
+    merchant_id: outer.merchant_id || nested.merchant_id || nested.merchantid || "",
+  };
+  if (inner.signature) {
+    const trust = assessPaynamicsInboundTrust(row, inner, merchantKey, { requireAmountCurrency: false });
+    return { trusted: trust.trusted, reason: trust.reason, payload: inner };
+  }
+  if (!referenceMatches(row, inner)) return { trusted: false, reason: "inner_request_mismatch", payload: inner };
+  if (!merchantMatches(row, inner)) return { trusted: false, reason: "inner_merchant_mismatch", payload: inner };
+  if (inner.amount && !amountMatches(row, inner, { required: true })) {
+    return { trusted: false, reason: "inner_amount_mismatch", payload: inner };
+  }
+  if (inner.currency && !currencyMatches(inner, { required: true })) {
+    return { trusted: false, reason: "inner_currency_mismatch", payload: inner };
+  }
+  return { trusted: true, reason: "qm001_outer_signed_inner_assoc", payload: inner };
+}
+
+function enrichPaidPayloadFromRow(row, payload) {
+  const next = { ...payload };
+  if (paynamicsPaymentOutcome(next.response_code) !== "paid") return next;
+  if (!next.amount) next.amount = (row.amount_cents / 100).toFixed(2);
+  if (!next.currency) next.currency = "PHP";
+  return next;
 }
 
 function paynamicsUnitTestSettleAllowed() {
@@ -771,9 +813,9 @@ export function applyPaynamicsStatus(db, row, payload, { allowSettle = false, re
 function resolveInnerQueryPayload(body) {
   const outer = parseWorkflowResponse(body);
   if (outer.response_code !== "QM001") return outer;
-  const nested = body?.transaction || body?.data || body?.result;
-  if (nested && typeof nested === "object") {
-    return { ...parseWorkflowResponse(nested), merchant_id: outer.merchant_id || nested.merchant_id };
+  const nested = paynamicsQueryNestedTransaction(body);
+  if (nested) {
+    return { ...parseWorkflowResponse(nested), merchant_id: outer.merchant_id || nested.merchant_id || nested.merchantid };
   }
   return outer;
 }
@@ -788,13 +830,12 @@ export function assessPaynamicsQueryBody(row, body, merchantKey) {
     const trust = assessPaynamicsInboundTrust(row, outer, merchantKey, { requireAmountCurrency: false });
     return { trusted: trust.trusted, reason: trust.reason, payload: outer };
   }
-  const nested = body?.transaction || body?.data || body?.result;
-  if (!nested || typeof nested !== "object") {
+  const nested = paynamicsQueryNestedTransaction(body);
+  if (!nested) {
     return { trusted: false, reason: "missing_inner_transaction", payload: outer };
   }
-  const inner = { ...parseWorkflowResponse(nested), merchant_id: outer.merchant_id || nested.merchant_id };
-  const trust = assessPaynamicsInboundTrust(row, inner, merchantKey, { requireAmountCurrency: false });
-  return { trusted: trust.trusted, reason: trust.reason, payload: inner };
+  const trust = assessPaynamicsQm001Inner(row, outer, nested, merchantKey);
+  return { trusted: trust.trusted, reason: trust.reason, payload: trust.payload };
 }
 
 async function queryWorkflowStatus(row) {
@@ -921,7 +962,8 @@ export async function refreshPaynamicsPayment(db, requestId) {
     if (remote?.body) {
       const assessed = assessPaynamicsQueryBody(current, remote.body, merchantKey);
       if (assessed.trusted) {
-        current = applyPaynamicsStatus(db, current, assessed.payload, { allowSettle: true, requireAmountCurrency: false }) || current;
+        const payload = enrichPaidPayloadFromRow(current, assessed.payload);
+        current = applyPaynamicsStatus(db, current, payload, { allowSettle: true, requireAmountCurrency: false }) || current;
       } else {
         const payload = resolveInnerQueryPayload(remote.body);
         quarantinePaynamicsInbound(db, current, payload, assessed.reason);
@@ -944,7 +986,7 @@ export async function handlePaynamicsNotification(db, body) {
       quarantinePaynamicsInbound(db, row, payload, trust.reason);
       return { status: 200, body: "OK" };
     }
-    applyPaynamicsStatus(db, row, payload, { allowSettle: true, requireAmountCurrency: false });
+    applyPaynamicsStatus(db, row, enrichPaidPayloadFromRow(row, payload), { allowSettle: true, requireAmountCurrency: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("No installment is due") || message.includes("not payable")) {

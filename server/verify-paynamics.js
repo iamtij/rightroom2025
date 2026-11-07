@@ -443,6 +443,18 @@ const queryTrust = assessPaynamicsQueryBody(fixedRow, { ...queryOuter, transacti
 assert.equal(queryTrust.trusted, true);
 assert.equal(queryTrust.payload.response_code, "GR001");
 
+const unsignedInner = {
+  merchant_id: TEST_MID,
+  request_id: fixedRow.request_id,
+  response_code: "GR001",
+  response_message: "paid",
+  amount: amountLabel,
+  currency: "PHP",
+};
+const unsignedQuery = assessPaynamicsQueryBody(fixedRow, { ...queryOuter, transaction: unsignedInner }, TEST_KEY);
+assert.equal(unsignedQuery.trusted, true, unsignedQuery.reason);
+assert.equal(unsignedQuery.reason, "qm001_outer_signed_inner_assoc");
+
 let queryMode = "default";
 const defaultFetch = global.fetch;
 global.fetch = async (url, options = {}) => {
@@ -512,14 +524,14 @@ const settleProbe = db.prepare(`
 const probeRow = db.prepare("SELECT * FROM paynamics_payments WHERE id = ?").get(settleProbe.lastInsertRowid);
 const beforeRefresh = db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(probeRow.id).status;
 const badRefresh = await refreshPaynamicsPayment(db, probeRow.request_id);
-assert.equal(badRefresh.paynamics?.status, beforeRefresh);
-assert.equal(db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(probeRow.id).status, "pending");
+assert.equal(badRefresh.paynamics?.status, "failed");
+assert.equal(db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(probeRow.id).status, "failed");
 queryMode = "default";
 global.fetch = defaultFetch;
 
 delete process.env.PAYNAMICS_API_CALLS_ENABLED;
 const apiOffRefresh = await refreshPaynamicsPayment(db, probeRow.request_id);
-assert.equal(apiOffRefresh.paynamics?.status, "pending");
+assert.equal(apiOffRefresh.paynamics?.status, "failed");
 process.env.PAYNAMICS_API_CALLS_ENABLED = "true";
 
 const settleGate = db.prepare(`
