@@ -1020,7 +1020,7 @@ function RegistrationWizard() {
         throw new Error("Payment did not continue. Try again.");
       }
       const record = (payload.registration as { reference?: string } | undefined) || (payload.reference ? payload : null);
-      if (record?.reference) {
+      if (response.ok && record?.reference) {
         rememberRegistration(record as StoredRegistration);
         setSaved(record as StoredRegistration);
         setCheckoutReference(String(record.reference));
