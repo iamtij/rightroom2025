@@ -305,11 +305,33 @@ function Frame({
   );
 }
 
-function PageSection({ title, children }: { title: string; children: ReactNode }) {
+function PageSection({
+  title,
+  summary,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  summary?: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
-    <section className="flex flex-col gap-3">
-      <h2 className="m-0 text-xs font-bold tracking-[0.16em] text-[#A8131F] uppercase">{title}</h2>
-      {children}
+    <section className="overflow-hidden rounded-[14px] border border-[#E4E1DC] bg-white">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3.5 text-left"
+      >
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-xs font-bold tracking-[0.16em] text-[#A8131F] uppercase">{title}</span>
+          {summary && !open ? <span className="truncate text-sm font-normal text-[#5C5C63]">{summary}</span> : null}
+        </span>
+        <span aria-hidden="true" className="text-lg leading-none text-[#5C5C63]">{open ? "–" : "+"}</span>
+      </button>
+      {open ? <div className="flex flex-col gap-3 border-t border-[#F0EDE8] px-4 pt-3 pb-4">{children}</div> : null}
     </section>
   );
 }
@@ -2180,7 +2202,11 @@ function Manage({
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Hi {first}</h1>
         <p className="m-0 text-[15px] text-[#5C5C63]">{record.tierName} · {record.plan === "installment" ? "installment plan" : "paid in full"}</p>
       </div>
-      <PageSection title="Payment">
+      <PageSection
+        title="Payment"
+        summary={due ? `${money(due.amountCents, record.currency)} due` : `${money(paidCents, record.currency)} paid`}
+        defaultOpen={Boolean(due)}
+      >
       <LevNote
         pose={record.planStatus === "fully_paid" ? "thumb" : due ? "alert" : "smile"}
         bars={record.planStatus === "fully_paid" ? 5 : due ? 2 : Math.min(5, Math.max(paid.length, 1))}
@@ -2289,17 +2315,17 @@ function Manage({
         })}
       </div>
       </PageSection>
-      <PageSection title="Event">
+      <PageSection title="Event" summary="June 16–17, 2027" defaultOpen={!due}>
         <div className="flex flex-col gap-2 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
           <p className="m-0 text-base font-bold">June 16–17, 2027</p>
           <p className="m-0 text-sm leading-snug text-[#5C5C63]">Newport Performing Arts Theater, Pasay City</p>
           <a href={CALENDAR_URL} target="_blank" rel="noreferrer" className="self-start text-sm font-semibold text-[#A8131F]">Add to calendar</a>
         </div>
         <div className="flex flex-col gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
-          <div className="flex flex-col items-center gap-1 rounded-[14px] bg-[#141416] px-5 py-6 text-center text-white">
-            <span className="text-[11px] font-bold tracking-[0.16em] text-[#FF4D5A] uppercase">IBMC 2027</span>
+          <div className="flex flex-col items-center gap-1 rounded-[14px] border border-[#E4E1DC] bg-white px-5 py-6 text-center text-[#141416]">
+            <span className="text-[11px] font-bold tracking-[0.16em] text-[#D0202E] uppercase">IBMC 2027</span>
             <span className="font-archivo text-[26px] leading-tight font-extrabold">{shownBadgeName}</span>
-            <span className="text-sm text-[#C9C7C2]">{shownBadgeCompany}</span>
+            <span className="text-sm text-[#5C5C63]">{shownBadgeCompany}</span>
           </div>
           <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">This name and company appear on your badge.</p>
           <Field label="Name">
@@ -2331,7 +2357,7 @@ function Manage({
           </div>
         )}
       </PageSection>
-      <PageSection title="Upcoming activities">
+      <PageSection title="Upcoming activities" summary="December 2026 – May 2027">
         <p className="m-0 text-sm leading-snug text-[#5C5C63]">Monthly networking on Zoom, December 2026 through May 2027. Each session link will show here when it is ready.</p>
         <ul className="m-0 flex list-none flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-1">
           {NETWORKING_SESSIONS.map((month) => (
