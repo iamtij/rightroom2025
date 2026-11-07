@@ -132,3 +132,7 @@ Sandbox E2E: parent provisions **test** Basic auth + merchant id/key on staging 
 2. Set test Workflow vars; **never** prod credentials from user paste.
 3. `PAYNAMICS_API_BASE_URL=https://payin.payserv.net`, `PAYNAMICS_API_ENV=sandbox`.
 4. Enable Paynamics channel in admin after gates pass.
+
+## Production (ibmcph.com)
+
+See **`docs/paynamics-production.md`** — copy live Workflow secrets from Railway staging to production; arm with `PAYNAMICS_PRODUCTION_LIVE_MERCHANT=true` (not `PAYNAMICS_STAGING_LIVE_MERCHANT`).
