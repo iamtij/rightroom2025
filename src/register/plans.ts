@@ -230,7 +230,7 @@ export function tierFor(today: string, international: boolean): Tier | null {
       rows: EARLY_BIRD_ROWS,
       saveLabel: "One payment today. Save ₱3,000 against Regular.",
       installmentSummary: "₱4,000 today, then ₱3,000 a month, Feb to May.",
-      note: null,
+      note: "Phase 2 payments begin in February for all Early Bird registrants.",
     };
   }
   return {
