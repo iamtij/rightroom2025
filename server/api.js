@@ -19,7 +19,7 @@ import { formatLongDate, manilaParts } from "./time.js";
 import { handleUpayCallback, refreshUpayPayment, startUpayPayment } from "./upay.js";
 import { handleHitpayWebhook, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
 import { handlePaynamicsNotification, paynamicsCheckoutChannel, paynamicsPublicCheckoutInfo, refreshPaynamicsPayment, startPaynamicsPayment } from "./paynamics.js";
-import { hitpayConfigured, listPaymentChannels, paynamicsConfigured, savePaymentChannels } from "./payment-channels.js";
+import { buyerPaymentChannels, hitpayConfigured, listPaymentChannels, paynamicsConfigured, savePaymentChannels } from "./payment-channels.js";
 import { entryQrPng } from "./templates.js";
 import { recordSecurityEvent } from "./alerts.js";
 
@@ -309,7 +309,7 @@ export function createApi() {
 
   router.get("/payment-channels", (_req, res) => {
     res.json({
-      channels: listPaymentChannels(db(), { enabledOnly: true }).map(({ code, label, detail }) => ({ code, label, detail })),
+      channels: buyerPaymentChannels(db()),
       paynamics: paynamicsPublicCheckoutInfo(),
     });
   });
@@ -926,7 +926,14 @@ export function createApi() {
   });
 
   router.patch("/admin/payment-channels", requireAdmin, (req, res) => {
-    const channels = savePaymentChannels(db(), req.body || {});
+    let channels;
+    try {
+      channels = savePaymentChannels(db(), req.body || {});
+    } catch (error) {
+      const status = error.status === 400 ? 400 : 500;
+      res.status(status).json({ error: status === 400 ? error.message : "Payment channels were not saved." });
+      return;
+    }
     writeAudit(db(), req.admin.id, "payment_channel.update", "payment_channels");
     res.json({
       channels,

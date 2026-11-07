@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { openDatabase } from "./db.js";
 import { cancelRegistration, createRegistration, recordPayment } from "./registrations.js";
 import { dashboardStats } from "./dashboard.js";
+import { savePaymentChannels } from "./payment-channels.js";
 
 const db = openDatabase(":memory:");
 db.prepare("UPDATE ticket_products SET sales_start = '2020-01-01', sales_end = '2027-12-31'").run();
@@ -124,5 +125,16 @@ const phpCollected = methods.filter((row) => row.currency === "PHP").reduce((sum
 assert.equal(phpCollected, stats.money.find((row) => row.currency === "PHP").collectedCents);
 assert.equal(stats.money.find((row) => row.currency === "USD").collectedCents, 10_000);
 assert.equal(phpCollected, 264_000);
+
+savePaymentChannels(db, { upay: { label: "UnionBank" }, hitpay_qr: { label: "QR Ph" } });
+const renamed = dashboardStats(db).paymentMethods;
+assert.equal(renamed.find((row) => row.channel === "upay").label, "UnionBank");
+assert.equal(renamed.find((row) => row.channel === "hitpay_qr").label, "QR Ph");
+assert.deepEqual(renamed.find((row) => row.channel === "upay").methods.map((row) => row.label), [
+  "InstaPay",
+  "UnionBank Online",
+  "Other banks",
+  "Custom",
+]);
 
 console.log("Dashboard payment totals passed.");

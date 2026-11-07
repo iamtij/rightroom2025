@@ -1,3 +1,4 @@
+import { listPaymentChannels } from "./payment-channels.js";
 import { addDays, manilaParts } from "./time.js";
 
 function percent(part, whole) {
@@ -111,6 +112,9 @@ function classifyPayment(method, detail) {
 }
 
 function paymentMethodTotals(db) {
+  const customLabels = new Map(
+    listPaymentChannels(db).flatMap((channel) => (channel.customLabel ? [[channel.code, channel.customLabel]] : [])),
+  );
   const rows = db.prepare(`
     SELECT
       COALESCE(NULLIF(TRIM(p.method), ''), 'unknown') AS method,
@@ -187,7 +191,7 @@ function paymentMethodTotals(db) {
     const hideMethods = Boolean(sole && (sole.code === DEFAULT_METHOD[group.channel] || group.channel === "other"));
     return [{
       channel: group.channel,
-      label: hideMethods && group.channel === "other" ? sole.label : group.label,
+      label: customLabels.get(group.channel) || (hideMethods && group.channel === "other" ? sole.label : group.label),
       currency: group.currency,
       count,
       cents,

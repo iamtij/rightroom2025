@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 const field = "rounded-[10px] border border-[#D9D5CF] bg-white px-3 py-2.5 text-sm font-normal text-[#141416]";
 const labelClass = "flex flex-col gap-1 text-[13px] font-semibold text-[#3A3A40]";
@@ -1265,50 +1265,108 @@ function Members({ onError }: { onError: (message: string) => void }) {
 type PaymentChannelSetting = {
   code: string;
   label: string;
+  customLabel?: string;
   detail: string;
   enabled: boolean;
 };
 
+type PaymentChannelPayload = {
+  channels?: PaymentChannelSetting[];
+  hitpayConfigured?: boolean;
+  paynamicsConfigured?: boolean;
+  paynamics?: { liveRealChargeWarning?: boolean; checkoutMode?: string };
+};
+
 function PaymentSettings({ onError }: { onError: (message: string) => void }) {
   const [channels, setChannels] = useState<PaymentChannelSetting[]>([]);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [hitpayConfigured, setHitpayConfigured] = useState(true);
   const [paynamicsConfigured, setPaynamicsConfigured] = useState(true);
   const [paynamicsLiveWarning, setPaynamicsLiveWarning] = useState(false);
   const [paynamicsCheckoutMode, setPaynamicsCheckoutMode] = useState<"sandbox" | "live" | "off">("off");
   const [saving, setSaving] = useState("");
+  const draftsRef = useRef<Record<string, string>>({});
+  const channelsRef = useRef<PaymentChannelSetting[]>([]);
+  const saveQueue = useRef(Promise.resolve());
 
-  async function load() {
-    const payload = await api("/api/admin/payment-channels");
-    setChannels(payload.channels || []);
+  function enqueue(task: () => Promise<void>) {
+    const run = saveQueue.current.then(task, task);
+    saveQueue.current = run.then(() => undefined, () => undefined);
+    return run;
+  }
+
+  function applyPayload(payload: PaymentChannelPayload) {
+    const next = payload.channels || [];
+    const previousChannels = channelsRef.current;
+    channelsRef.current = next;
+    setChannels(next);
+    setDrafts((current) => {
+      const merged = { ...current };
+      for (const item of next) {
+        const saved = item.customLabel || "";
+        const previous = (previousChannels.find((channel) => channel.code === item.code)?.customLabel || "").trim();
+        const draft = (current[item.code] ?? "").replace(/\s+/g, " ").trim();
+        if (current[item.code] === undefined || draft === previous || draft === saved) merged[item.code] = saved;
+      }
+      draftsRef.current = merged;
+      return merged;
+    });
     setHitpayConfigured(Boolean(payload.hitpayConfigured));
     setPaynamicsConfigured(Boolean(payload.paynamicsConfigured));
     setPaynamicsLiveWarning(Boolean(payload.paynamics?.liveRealChargeWarning));
     setPaynamicsCheckoutMode(payload.paynamics?.checkoutMode === "live" || payload.paynamics?.checkoutMode === "sandbox" ? payload.paynamics.checkoutMode : "off");
   }
 
+  async function load() {
+    applyPayload(await api("/api/admin/payment-channels"));
+  }
+
   useEffect(() => {
     load().catch((error) => onError(error.message));
   }, []);
 
-  async function toggle(code: string, enabled: boolean) {
-    setSaving(code);
+  function toggle(code: string, enabled: boolean) {
     setChannels((current) => current.map((item) => (item.code === code ? { ...item, enabled } : item)));
-    try {
-      const payload = await api("/api/admin/payment-channels", {
-        method: "PATCH",
-        body: JSON.stringify({ [code]: enabled }),
-      });
-      setChannels(payload.channels || []);
-      setHitpayConfigured(Boolean(payload.hitpayConfigured));
-      setPaynamicsConfigured(Boolean(payload.paynamicsConfigured));
-    setPaynamicsLiveWarning(Boolean(payload.paynamics?.liveRealChargeWarning));
-    setPaynamicsCheckoutMode(payload.paynamics?.checkoutMode === "live" || payload.paynamics?.checkoutMode === "sandbox" ? payload.paynamics.checkoutMode : "off");
-    } catch (error) {
-      onError(error instanceof Error ? error.message : "Payment channels were not saved");
-      await load().catch(() => {});
-    } finally {
-      setSaving("");
-    }
+    return enqueue(async () => {
+      setSaving(code);
+      try {
+        applyPayload(await api("/api/admin/payment-channels", {
+          method: "PATCH",
+          body: JSON.stringify({ [code]: { enabled, label: draftsRef.current[code] ?? "" } }),
+        }));
+      } catch (error) {
+        onError(error instanceof Error ? error.message : "Payment channels were not saved");
+        await load().catch(() => {});
+      } finally {
+        setSaving("");
+      }
+    });
+  }
+
+  function saveLabel(code: string) {
+    return enqueue(async () => {
+      const label = (draftsRef.current[code] ?? "").replace(/\s+/g, " ").trim();
+      const current = (channelsRef.current.find((item) => item.code === code)?.customLabel || "").trim();
+      if (label === current) {
+        if ((draftsRef.current[code] ?? "") !== current) {
+          draftsRef.current = { ...draftsRef.current, [code]: current };
+          setDrafts(draftsRef.current);
+        }
+        return;
+      }
+      setSaving(code);
+      try {
+        applyPayload(await api("/api/admin/payment-channels", {
+          method: "PATCH",
+          body: JSON.stringify({ [code]: { label } }),
+        }));
+      } catch (error) {
+        onError(error instanceof Error ? error.message : "Buyer label was not saved");
+        await load().catch(() => {});
+      } finally {
+        setSaving("");
+      }
+    });
   }
 
   return (
@@ -1317,23 +1375,47 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
       <div className="flex max-w-[640px] flex-col gap-4 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
         <div className="flex flex-col gap-1">
           <h2 className="m-0 text-[17px] font-bold">Payment channels</h2>
-          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Checked channels are the ones a buyer can use when paying.</p>
+          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Checked channels are the ones a buyer can use when paying. Buyer label is the name on checkout. Leave it blank to keep the name above.</p>
         </div>
         <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF]">
           {channels.map((channel) => (
-            <label key={channel.code} className={`flex items-start gap-3 border-t border-[#E4E1DC] px-4 py-4 first:border-t-0 ${channel.enabled ? "bg-[#FBE9EA]" : ""}`}>
-              <input
-                type="checkbox"
-                className="mt-1 h-5 w-5 accent-[#D0202E]"
-                checked={channel.enabled}
-                disabled={saving === channel.code}
-                onChange={(event) => toggle(channel.code, event.target.checked)}
-              />
-              <span className="flex flex-col gap-0.5">
-                <span className="text-[15px] font-semibold">{channel.label}</span>
-                <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{channel.detail}</span>
-              </span>
-            </label>
+            <div key={channel.code} className={`flex flex-col gap-3 border-t border-[#E4E1DC] px-4 py-4 first:border-t-0 ${channel.enabled ? "bg-[#FBE9EA]" : ""}`}>
+              <label className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-5 w-5 accent-[#D0202E]"
+                  checked={channel.enabled}
+                  disabled={saving === channel.code}
+                  onChange={(event) => toggle(channel.code, event.target.checked)}
+                />
+                <span className="flex flex-col gap-0.5">
+                  <span className="text-[15px] font-semibold">{channel.label}</span>
+                  <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{channel.detail}</span>
+                </span>
+              </label>
+              <label className="ml-8 flex flex-col gap-1 text-[12px] font-semibold text-[#5C5C63]">
+                Buyer label
+                <input
+                  className={`${field} w-full`}
+                  value={drafts[channel.code] ?? ""}
+                  placeholder={channel.label}
+                  maxLength={80}
+                  autoComplete="off"
+                  disabled={saving === channel.code}
+                  onChange={(event) => {
+                    draftsRef.current = { ...draftsRef.current, [channel.code]: event.target.value };
+                    setDrafts(draftsRef.current);
+                  }}
+                  onBlur={() => saveLabel(channel.code)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      event.currentTarget.blur();
+                    }
+                  }}
+                />
+              </label>
+            </div>
           ))}
         </div>
         {hitpayConfigured ? null : (
