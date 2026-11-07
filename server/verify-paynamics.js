@@ -119,7 +119,7 @@ const registration = createRegistration(db, {
   registeredOn: "2026-11-12",
 });
 
-assert.equal((await startPaynamicsPayment(db, registration)).status, 503);
+assert.equal((await startPaynamicsPayment(db, registration, "wallet")).status, 503);
 
 process.env.PAYNAMICS_BASIC_AUTH_USER = "workflow_user";
 process.env.PAYNAMICS_BASIC_AUTH_PASSWORD = "workflow_pass";
@@ -250,6 +250,8 @@ global.fetch = async (url, options = {}) => {
   if (target.includes("/paygate/transactions/") && !target.includes("/query")) {
     const payload = JSON.parse(options.body || "{}");
     assert.equal(options.headers.Authorization.startsWith("Basic "), true);
+    assert.equal(payload.transaction.pmethod, "wallet");
+    assert.equal(Object.hasOwn(payload.transaction, "pchannel"), false);
     const requestId = payload.transaction.request_id;
     return { ok: true, status: 200, json: async () => signedCreateResponse(requestId) };
   }
@@ -268,7 +270,10 @@ global.fetch = async (url, options = {}) => {
   throw new Error(`unexpected fetch ${target}`);
 };
 
-const started = await startPaynamicsPayment(db, registration);
+const rejectedMethod = await startPaynamicsPayment(db, registration, "creditcard");
+assert.equal(rejectedMethod.status, 400);
+assert.equal(rejectedMethod.error, "Choose a Paynamics option.");
+const started = await startPaynamicsPayment(db, registration, "wallet");
 assert.equal(started.paynamics?.status, "pending");
 assert.equal(fetchTarget.startsWith("https://payin.payserv.net/"), true);
 assert.equal(started.paynamics?.paymentUrl, "https://payin.payserv.net/hosted/checkout");

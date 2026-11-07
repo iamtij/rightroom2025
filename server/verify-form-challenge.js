@@ -40,6 +40,7 @@ function registrationBody(challenge) {
     industry: "IT & Software",
     attendeeType: "guest",
     challenge,
+    pmethod: "wallet",
     companyWebsite: "",
   };
 }

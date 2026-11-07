@@ -59,6 +59,7 @@ try {
       attendeeType: "guest",
       challenge: await challenge(),
       turnstileToken: CAPTCHA,
+      pmethod: "wallet",
       companyWebsite: "",
     }),
   });

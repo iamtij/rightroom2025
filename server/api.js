@@ -17,7 +17,7 @@ import { rateLimit } from "./limits.js";
 import { formatLongDate, manilaParts } from "./time.js";
 import { handleUpayCallback, refreshUpayPayment, startUpayPayment } from "./upay.js";
 import { handleHitpayWebhook, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
-import { handlePaynamicsNotification, paynamicsPublicCheckoutInfo, refreshPaynamicsPayment, startPaynamicsPayment } from "./paynamics.js";
+import { handlePaynamicsNotification, paynamicsCheckoutMethod, paynamicsPublicCheckoutInfo, refreshPaynamicsPayment, startPaynamicsPayment } from "./paynamics.js";
 import { hitpayConfigured, listPaymentChannels, paynamicsConfigured, savePaymentChannels } from "./payment-channels.js";
 import { entryQrPng } from "./templates.js";
 import { recordSecurityEvent } from "./alerts.js";
@@ -524,9 +524,14 @@ export function createApi() {
 
   router.post("/registrations/paynamics", registerLimit, async (req, res) => {
     if (await rejectBot(req, res)) return;
+    const pmethod = paynamicsCheckoutMethod(req.body?.pmethod);
+    if (!pmethod) {
+      res.status(400).json({ error: "Choose a Paynamics option." });
+      return;
+    }
     try {
       const registration = createPublicRegistration(req.body || {});
-      const result = await startPaynamicsPayment(db(), registration);
+      const result = await startPaynamicsPayment(db(), registration, pmethod);
       sendPaynamics(res, { ...result, resume: true }, true);
     } catch (error) {
       res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
@@ -534,6 +539,11 @@ export function createApi() {
   });
 
   router.post("/registrations/:reference/paynamics", registerLimit, async (req, res) => {
+    const pmethod = paynamicsCheckoutMethod(req.body?.pmethod);
+    if (!pmethod) {
+      res.status(400).json({ error: "Choose a Paynamics option." });
+      return;
+    }
     const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
     if (!row) {
       res.status(404).json({ error: "Registration not found" });
@@ -544,7 +554,7 @@ export function createApi() {
       res.status(400).json({ error: "Registration is not payable" });
       return;
     }
-    const result = await startPaynamicsPayment(db(), registration);
+    const result = await startPaynamicsPayment(db(), registration, pmethod);
     sendPaynamics(res, { ...result, ...ownerAccess(registration, resumeCredential(req)) }, false);
   });
 

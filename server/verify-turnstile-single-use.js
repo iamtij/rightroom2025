@@ -60,6 +60,7 @@ function payBody(challengeToken, captcha) {
     attendeeType: "guest",
     challenge: challengeToken,
     turnstileToken: captcha,
+    pmethod: "wallet",
     companyWebsite: "",
   };
 }

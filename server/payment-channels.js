@@ -17,7 +17,7 @@ export const PAYMENT_CHANNELS = [
   {
     code: "paynamics",
     label: "Paynamics",
-    detail: "Cards, e-wallets, and online banking on Paynamics' secure page.",
+    detail: "E-wallet or online banking on Paynamics' secure page.",
   },
 ];
 

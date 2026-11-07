@@ -13,6 +13,7 @@ import { isChannelEnabled } from "./payment-channels.js";
 const locks = new Set();
 const DEFAULT_CHECKOUT_TTL_MINUTES = 30;
 const PAYMENT_ACTION = "url_link";
+const PAYNAMICS_CHECKOUT_METHODS = new Set(["wallet", "onlinebanktransfer"]);
 const WIKI_TEST_API_BASE = "https://payin.payserv.net";
 
 const TRANSACTION_SUCCESS = new Set(["GR001"]);
@@ -463,12 +464,18 @@ function amountLabel(cents) {
   return (Math.round(cents) / 100).toFixed(2);
 }
 
+export function paynamicsCheckoutMethod(value) {
+  const method = String(value || "").trim().toLowerCase();
+  return PAYNAMICS_CHECKOUT_METHODS.has(method) ? method : "";
+}
+
 export function buildWorkflowCreateBody({
   merchantId,
   merchantKey,
   requestId,
   registration,
   amountCents,
+  pmethod,
 }) {
   const phone = formatPhone(registration.mobile);
   const name = splitName(registration.full_name);
@@ -476,8 +483,6 @@ export function buildWorkflowCreateBody({
   const notification = notificationUrl();
   const response = responseUrl(requestId);
   const cancel = cancelUrl();
-  const pmethod = optional("PAYNAMICS_PMETHOD");
-  const pchannel = optional("PAYNAMICS_PCHANNEL");
   const descriptor = optional("PAYNAMICS_DESCRIPTOR", `IBMC 2027 ${registration.reference}`);
   const transaction = {
     request_id: requestId,
@@ -485,7 +490,6 @@ export function buildWorkflowCreateBody({
     response_url: response,
     cancel_url: cancel,
     pmethod,
-    ...(pchannel ? { pchannel } : {}),
     payment_action: PAYMENT_ACTION,
     collection_method: optional("PAYNAMICS_COLLECTION_METHOD", "single_pay"),
     payment_notification_status: optional("PAYNAMICS_PAYMENT_NOTIFICATION_STATUS", "1"),
@@ -764,7 +768,9 @@ async function queryWorkflowStatus(row) {
   }
 }
 
-export async function startPaynamicsPayment(db, registration) {
+export async function startPaynamicsPayment(db, registration, pmethod) {
+  const method = paynamicsCheckoutMethod(pmethod);
+  if (!method) return { error: "Choose a Paynamics option.", status: 400, registration };
   if (!isChannelEnabled(db, "paynamics")) return { error: "That payment option is turned off.", status: 400, registration };
   if (registration.currency !== "PHP") return { error: "Paynamics collects peso payments.", status: 400, registration };
   if (!paynamicsApiCallsAllowed()) {
@@ -788,7 +794,8 @@ export async function startPaynamicsPayment(db, registration) {
     `).get(due.id);
     if (open) {
       const expires = Date.parse(open.expires_at || "");
-      if (!Number.isFinite(expires) || Date.now() < expires) {
+      const sameMethod = String(open.payment_channel || "") === method;
+      if (sameMethod && (!Number.isFinite(expires) || Date.now() < expires)) {
         return view(db, registration, open);
       }
       db.prepare(`
@@ -799,7 +806,7 @@ export async function startPaynamicsPayment(db, registration) {
     const merchantId = required("PAYNAMICS_MERCHANT_ID");
     const merchantKey = required("PAYNAMICS_MERCHANT_KEY");
     const requestId = crypto.randomBytes(12).toString("hex");
-    const createBody = buildWorkflowCreateBody({ merchantId, merchantKey, requestId, registration, amountCents });
+    const createBody = buildWorkflowCreateBody({ merchantId, merchantKey, requestId, registration, amountCents, pmethod: method });
     let created;
     try {
       created = await paynamicsApiFetch("/paygate/transactions/", createBody);
@@ -814,8 +821,8 @@ export async function startPaynamicsPayment(db, registration) {
     const insert = db.prepare(`
       INSERT INTO paynamics_payments (
         registration_id, installment_id, request_id, gateway_response_id, amount_cents, currency, status,
-        gateway_response_code, gateway_message, payment_url, expires_at
-      ) VALUES (?, ?, ?, ?, ?, 'PHP', ?, ?, ?, ?, ?)
+        gateway_response_code, gateway_message, payment_channel, payment_url, expires_at
+      ) VALUES (?, ?, ?, ?, ?, 'PHP', ?, ?, ?, ?, ?, ?)
     `);
     const result = insert.run(
       registration.id,
@@ -826,6 +833,7 @@ export async function startPaynamicsPayment(db, registration) {
       failed ? "failed" : "pending",
       response.response_code || (failed ? "create_failed" : null),
       response.response_message || (failed ? "unsigned/invalid hosted link" : null),
+      method,
       paymentUrl || null,
       expiresAt(),
     );
