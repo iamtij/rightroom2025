@@ -521,6 +521,7 @@ function RegistrationView({
   editing,
   draft,
   setDraft,
+  chapters,
   onSave,
   onEdit,
   onCloseEdit,
@@ -531,6 +532,7 @@ function RegistrationView({
   editing: boolean;
   draft: typeof emptyRegistration;
   setDraft: (value: typeof emptyRegistration) => void;
+  chapters: Chapter[];
   onSave: () => void;
   onEdit: () => void;
   onCloseEdit: () => void;
@@ -567,7 +569,13 @@ function RegistrationView({
           <Field label="Mobile"><input className={field} required value={draft.mobile} onChange={(event) => setDraft({ ...draft, mobile: event.target.value })} /></Field>
           <Field label="Business"><input className={field} value={draft.business} onChange={(event) => setDraft({ ...draft, business: event.target.value })} /></Field>
           <Field label="Category"><input className={field} value={draft.industry} onChange={(event) => setDraft({ ...draft, industry: event.target.value })} /></Field>
-          <Field label="Chapter"><input className={field} value={draft.chapter} onChange={(event) => setDraft({ ...draft, chapter: event.target.value })} /></Field>
+          <Field label="Chapter">
+            <select className={field} value={draft.chapter} onChange={(event) => setDraft({ ...draft, chapter: event.target.value })}>
+              <option value="">Select a chapter</option>
+              {draft.chapter && !chapters.some((chapter) => chapter.name.toLowerCase() === draft.chapter.toLowerCase()) ? <option value={draft.chapter}>{draft.chapter}</option> : null}
+              {chapters.map((chapter) => <option key={chapter.id} value={chapter.name}>{chapter.name}</option>)}
+            </select>
+          </Field>
           <div className="flex flex-wrap gap-2 sm:col-span-2">
             <button type="submit" className={buttonClass}>Save edits</button>
             <button type="button" className={ghostButton} onClick={onCloseEdit}>Done</button>
@@ -642,6 +650,7 @@ function RegistrationView({
 function Registrations({ onError }: { onError: (message: string) => void }) {
   const [rows, setRows] = useState<Registration[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
   const [query, setQuery] = useState("");
   const [editor, setEditor] = useState<null | "add" | Registration>(null);
   const [viewing, setViewing] = useState<Registration | null>(null);
@@ -650,12 +659,14 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
   const [cancelTarget, setCancelTarget] = useState<null | { reference: string; name: string }>(null);
 
   async function load() {
-    const [registrations, ticketProducts] = await Promise.all([
+    const [registrations, ticketProducts, chapterRows] = await Promise.all([
       api("/api/admin/registrations"),
       api("/api/admin/products"),
+      api("/api/admin/chapters"),
     ]);
     setRows(registrations);
     setProducts(ticketProducts);
+    setChapters(chapterRows);
     setViewing((current) => current ? registrations.find((row: Registration) => row.reference === current.reference) || null : null);
   }
 
@@ -745,7 +756,7 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
           </div>
         </form>
       ) : null}
-      {viewing ? <RegistrationView row={viewing} editing={editingDetails} draft={draft} setDraft={setDraft} onSave={save} onEdit={() => setEditingDetails(true)} onCloseEdit={() => setEditingDetails(false)} onClose={() => { setViewing(null); setEditingDetails(false); }} onCancel={() => setCancelTarget({ reference: viewing.reference, name: viewing.attendee.fullName })} /> : null}
+      {viewing ? <RegistrationView row={viewing} editing={editingDetails} draft={draft} setDraft={setDraft} chapters={chapters} onSave={save} onEdit={() => setEditingDetails(true)} onCloseEdit={() => setEditingDetails(false)} onClose={() => { setViewing(null); setEditingDetails(false); }} onCancel={() => setCancelTarget({ reference: viewing.reference, name: viewing.attendee.fullName })} /> : null}
       <DataTable columns={["Name", "Email", "Mobile", "Reference", "Ticket", "Paid", "Left", "Status", ""]} empty={empty}>
         {visible.map((row) => (
           <tr key={row.reference}>
