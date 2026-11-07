@@ -221,6 +221,15 @@ function mergeStored(current: StoredRegistration, next: StoredRegistration): Sto
 const CALENDAR_URL =
   "https://calendar.google.com/calendar/render?action=TEMPLATE&text=IBMC%202027&dates=20270616/20270618&location=Newport%20Performing%20Arts%20Theater%2C%20Pasay%20City&details=IBMC%202027%20%C2%B7%20June%2016%E2%80%9317";
 
+const NETWORKING_SESSIONS = [
+  "December 2026",
+  "January 2027",
+  "February 2027",
+  "March 2027",
+  "April 2027",
+  "May 2027",
+];
+
 const inputClass =
   "w-full rounded-[10px] border border-[#D9D5CF] bg-white px-3.5 py-3 text-base font-normal text-[#141416] outline-none focus:border-[#D0202E]";
 
@@ -285,6 +294,15 @@ function Frame({
         {footer ? <div className="px-5 pt-2 pb-7">{footer}</div> : null}
       </div>
     </div>
+  );
+}
+
+function PageSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="flex flex-col gap-3">
+      <h2 className="m-0 text-xs font-bold tracking-[0.16em] text-[#A8131F] uppercase">{title}</h2>
+      {children}
+    </section>
   );
 }
 
@@ -585,7 +603,12 @@ function RegistrationWizard() {
       setOtpSentTo("your email");
       setOtpCode("");
     } catch (error) {
-      setLookupError(error instanceof Error ? error.message : "Could not send the code");
+      const message = error instanceof Error ? error.message : "Could not send the code";
+      if (otpSentTo) setOtpError(message);
+      else {
+        setOtpSentTo("");
+        setLookupError(message);
+      }
     } finally {
       setSearching(false);
     }
@@ -932,7 +955,7 @@ function RegistrationWizard() {
         ) : null}
         {otpSentTo && !member ? (
           <div className="flex flex-col gap-2 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
-            <p className="m-0 text-sm text-[#5C5C63]">Enter the 6-digit code from your email.</p>
+            <p className="m-0 text-sm text-[#5C5C63]">Enter the 6-digit code if it arrived.</p>
             <input
               className={inputClass}
               inputMode="numeric"
@@ -963,7 +986,7 @@ function RegistrationWizard() {
                 </button>
               </>
             ) : (
-              "Not a member? Guest registration opens Feb 1."
+              "Not a member? Guest registration opens February 1, 2027."
             )}
           </p>
         )}
@@ -1824,11 +1847,19 @@ function Manage({
   const [payingInstallment, setPayingInstallment] = useState(false);
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
+  const [badgeName, setBadgeName] = useState("");
+  const [badgeCompany, setBadgeCompany] = useState("");
+  const [badgeNote, setBadgeNote] = useState("");
+  const [badgeError, setBadgeError] = useState("");
   const payIntent = Boolean(payReference || openPayOnLoad);
 
   function openRecord(payload: StoredRegistration, options: { openPay?: boolean } = {}) {
     rememberRegistration(payload);
     setRecord(payload);
+    setBadgeName(payload.attendee?.fullName || "");
+    setBadgeCompany(payload.attendee?.business || "");
+    setBadgeNote("");
+    setBadgeError("");
     const shouldOpenPay =
       options.openPay &&
       payload.currency === "PHP" &&
@@ -2027,6 +2058,35 @@ function Manage({
     );
   }
 
+  async function saveBadge() {
+    if (!record || busy) return;
+    const fullName = badgeName.trim();
+    const business = badgeCompany.trim();
+    if (!fullName || !business) {
+      setBadgeNote("");
+      setBadgeError("Add the name and company name for your badge.");
+      return;
+    }
+    setBusy(true);
+    setBadgeError("");
+    setBadgeNote("");
+    try {
+      const response = await fetch(`/api/registrations/${record.reference}/badge`, {
+        method: "PATCH",
+        headers: resumeHeaders({ "Content-Type": "application/json" }, record.resumeToken),
+        body: JSON.stringify({ fullName, business }),
+      });
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || "Badge was not saved");
+      openRecord({ ...payload, resumeToken: payload.resumeToken || record.resumeToken });
+      setBadgeNote("Saved. Your badge will use this name and company.");
+    } catch (saveError) {
+      setBadgeError(saveError instanceof Error ? saveError.message : "Badge was not saved");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function startPayment() {
     if (!record || busy || record.currency !== "PHP" || !channel) return;
     const hitpay = hitpayApiChannel(channel);
@@ -2104,12 +2164,15 @@ function Manage({
   const remaining = record.totalCents - paidCents;
   const first = record.attendee.fullName.trim().split(/\s+/)[0];
   const keepUntil = due && due.dueOn !== "on-registration" ? addDays(due.dueOn, 15) : null;
+  const shownBadgeName = badgeName.trim() || "Your name";
+  const shownBadgeCompany = badgeCompany.trim() || "Your company";
   return (
     <Frame label="My registration">
       <div className="flex flex-col gap-1">
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Hi {first}</h1>
         <p className="m-0 text-[15px] text-[#5C5C63]">{record.tierName} · {record.plan === "installment" ? "installment plan" : "paid in full"}</p>
       </div>
+      <PageSection title="Payment">
       <LevNote
         pose={record.planStatus === "fully_paid" ? "thumb" : due ? "alert" : "smile"}
         bars={record.planStatus === "fully_paid" ? 5 : due ? 2 : Math.min(5, Math.max(paid.length, 1))}
@@ -2217,22 +2280,60 @@ function Manage({
           );
         })}
       </div>
-      {record.planStatus === "fully_paid" && record.qrToken ? (
-        <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-5">
-          <span className="self-start text-[15px] font-bold">QR ticket</span>
-          <img src={`/api/passes/${encodeURIComponent(record.qrToken)}/qr`} alt="QR ticket" className="h-56 w-56" />
-          <span className="font-archivo text-lg font-extrabold">{record.reference}</span>
-          <span className="text-center text-[13px] leading-snug text-[#5C5C63]">Show this at the door on both days.</span>
+      </PageSection>
+      <PageSection title="Event">
+        <div className="flex flex-col gap-2 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+          <p className="m-0 text-base font-bold">June 16–17, 2027</p>
+          <p className="m-0 text-sm leading-snug text-[#5C5C63]">Newport Performing Arts Theater, Pasay City</p>
+          <a href={CALENDAR_URL} target="_blank" rel="noreferrer" className="self-start text-sm font-semibold text-[#A8131F]">Add to calendar</a>
         </div>
-      ) : (
-        <div className="flex items-center justify-between gap-3 rounded-[14px] bg-[#E4E1DC] px-4 py-3.5">
-          <span className="flex flex-col gap-0.5">
-            <span className="text-[15px] font-bold">QR ticket</span>
-            <span className="text-[13px] text-[#3A3A40]">Unlocks when you're fully paid</span>
-          </span>
-          <span className="text-xs font-bold tracking-[0.1em] text-[#3A3A40] uppercase">Locked</span>
+        <div className="flex flex-col gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+          <div className="flex flex-col items-center gap-1 rounded-[14px] bg-[#141416] px-5 py-6 text-center text-white">
+            <span className="text-[11px] font-bold tracking-[0.16em] text-[#FF4D5A] uppercase">IBMC 2027</span>
+            <span className="font-archivo text-[26px] leading-tight font-extrabold">{shownBadgeName}</span>
+            <span className="text-sm text-[#C9C7C2]">{shownBadgeCompany}</span>
+          </div>
+          <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">This name and company appear on your badge.</p>
+          <Field label="Name">
+            <input className={inputClass} value={badgeName} onChange={(event) => { setBadgeName(event.target.value); setBadgeNote(""); setBadgeError(""); }} />
+          </Field>
+          <Field label="Company name">
+            <input className={inputClass} value={badgeCompany} onChange={(event) => { setBadgeCompany(event.target.value); setBadgeNote(""); setBadgeError(""); }} />
+          </Field>
+          {badgeNote ? <p className="m-0 text-sm text-[#3A3A40]">{badgeNote}</p> : null}
+          {badgeError ? <p className="m-0 text-sm text-[#A8131F]">{badgeError}</p> : null}
+          <button type="button" disabled={busy} onClick={saveBadge} className="self-start rounded-full bg-[#141416] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#C8C4BE]">
+            {busy ? "Saving" : "Save badge"}
+          </button>
         </div>
-      )}
+        {record.planStatus === "fully_paid" && record.qrToken ? (
+          <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-5">
+            <span className="self-start text-[15px] font-bold">QR ticket</span>
+            <img src={`/api/passes/${encodeURIComponent(record.qrToken)}/qr`} alt="QR ticket" className="h-56 w-56" />
+            <span className="font-archivo text-lg font-extrabold">{record.reference}</span>
+            <span className="text-center text-[13px] leading-snug text-[#5C5C63]">Show this at the door on both days.</span>
+          </div>
+        ) : (
+          <div className="flex items-center justify-between gap-3 rounded-[14px] bg-[#E4E1DC] px-4 py-3.5">
+            <span className="flex flex-col gap-0.5">
+              <span className="text-[15px] font-bold">QR ticket</span>
+              <span className="text-[13px] text-[#3A3A40]">Unlocks when you're fully paid</span>
+            </span>
+            <span className="text-xs font-bold tracking-[0.1em] text-[#3A3A40] uppercase">Locked</span>
+          </div>
+        )}
+      </PageSection>
+      <PageSection title="Upcoming activities">
+        <p className="m-0 text-sm leading-snug text-[#5C5C63]">Monthly networking on Zoom, December 2026 through May 2027. Each session link will show here when it is ready.</p>
+        <ul className="m-0 flex list-none flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-1">
+          {NETWORKING_SESSIONS.map((month) => (
+            <li key={month} className="flex items-center justify-between gap-3 border-t border-[#F0EDE8] py-2.5 first:border-t-0">
+              <span className="text-sm font-semibold">{month}</span>
+              <span className="text-[13px] text-[#5C5C63]">Zoom · link coming</span>
+            </li>
+          ))}
+        </ul>
+      </PageSection>
     </Frame>
   );
 }
