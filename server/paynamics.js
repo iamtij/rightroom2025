@@ -5,14 +5,11 @@ import { isChannelEnabled } from "./payment-channels.js";
 const locks = new Set();
 const DEFAULT_CHECKOUT_TTL_MINUTES = 30;
 const PAYMENT_ACTION = "url_link";
+const WIKI_TEST_API_BASE = "https://payin.payserv.net";
 
-const SUCCESS_CODES = new Set(["GR001", "GR002", "GR024"]);
-const PENDING_CODES = new Set(["GR033", "GR038", "GR064"]);
-const FAILURE_CODES = new Set([
-  "GR003", "GR004", "GR005", "GR006", "GR007", "GR008", "GR009", "GR010", "GR011", "GR012",
-  "GR013", "GR014", "GR015", "GR016", "GR017", "GR018", "GR019", "GR021", "GR022", "GR023",
-  "GR025", "GR034", "GR035", "GR036", "GR037", "GR039", "GR091", "GR092", "GR093",
-]);
+const TRANSACTION_SUCCESS = new Set(["GR001"]);
+const TRANSACTION_PENDING = new Set(["GR033"]);
+const TRANSACTION_FAILED = new Set(["GR003", "GR036", "GR152", "GR153", "GR158"]);
 
 export function paynamicsSha512(value) {
   return crypto.createHash("sha512").update(String(value || ""), "utf8").digest("hex");
@@ -22,10 +19,10 @@ function joinSignature(parts) {
   return paynamicsSha512(parts.map((item) => String(item ?? "")).join(""));
 }
 
-/** Official Workflow Postman ordering (Share | WorkFlow). */
+/** §10.3 Workflow transaction request signature. */
 export function paynamicsTransactionSignature(transaction, merchantId, merchantKey) {
   const tx = transaction && typeof transaction === "object" ? transaction : {};
-  const parts = [
+  return joinSignature([
     merchantId,
     tx.request_id,
     tx.notification_url,
@@ -44,10 +41,10 @@ export function paynamicsTransactionSignature(transaction, merchantId, merchantK
     tx.payment_notification_status,
     tx.payment_notification_channel,
     merchantKey,
-  ];
-  return joinSignature(parts);
+  ]);
 }
 
+/** §10.3 customer information signature. */
 export function paynamicsCustomerSignature(customer, merchantKey) {
   const info = customer && typeof customer === "object" ? customer : {};
   return joinSignature([
@@ -62,8 +59,28 @@ export function paynamicsCustomerSignature(customer, merchantKey) {
   ]);
 }
 
+/** §10.10 Workflow query request signature. */
 export function paynamicsQuerySignature(requestId, orgTrxid2, merchantId, merchantKey) {
   return joinSignature([merchantId, requestId, orgTrxid2, merchantKey]);
+}
+
+/** §10.3 initial/final Workflow response signature. */
+export function paynamicsWorkflowResponseSignature(response, merchantKey) {
+  const row = response && typeof response === "object" ? response : {};
+  return joinSignature([
+    row.merchant_id,
+    row.request_id,
+    row.response_id,
+    row.gateway_id,
+    row.response_code,
+    row.response_message,
+    row.response_advise,
+    row.timestamp,
+    row.processor_response_id,
+    row.processor_response_authcode,
+    row.pay_reference,
+    merchantKey,
+  ]);
 }
 
 export function paynamicsSignaturesMatch(expected, provided) {
@@ -73,14 +90,21 @@ export function paynamicsSignaturesMatch(expected, provided) {
   return crypto.timingSafeEqual(Buffer.from(want, "utf8"), Buffer.from(got, "utf8"));
 }
 
-export function paynamicsOutcome(responseCode) {
+/** Transaction payment outcome from response_code (never treats QM001 as paid). */
+export function paynamicsPaymentOutcome(responseCode) {
   const code = String(responseCode || "").trim().toUpperCase();
   if (!code) return "pending";
-  if (SUCCESS_CODES.has(code)) return "paid";
-  if (PENDING_CODES.has(code)) return "pending";
-  if (FAILURE_CODES.has(code)) return "failed";
+  if (code === "QM001") return "query_ok";
+  if (TRANSACTION_SUCCESS.has(code)) return "paid";
+  if (TRANSACTION_PENDING.has(code)) return "pending";
+  if (TRANSACTION_FAILED.has(code)) return "failed";
+  if (code.startsWith("QM")) return "query_ok";
   if (code.startsWith("GR")) return "failed";
   return "pending";
+}
+
+export function paynamicsSettlementEnabled() {
+  return false;
 }
 
 export function paynamicsAmountCents(amountText) {
@@ -91,31 +115,63 @@ export function paynamicsAmountCents(amountText) {
   return Math.round(value * 100);
 }
 
-export function paynamicsNotificationVerifyContract() {
-  return String(process.env.PAYNAMICS_NOTIFICATION_VERIFY_CONTRACT || "").trim();
+export function paynamicsPaymentHostAllowlist() {
+  const raw = String(process.env.PAYNAMICS_PAYMENT_HOST_ALLOWLIST || "payserv.net").trim();
+  return raw.split(",").map((item) => item.trim().toLowerCase()).filter(Boolean);
 }
 
-export function paynamicsSettlementEnabled() {
-  if (process.env.PAYNAMICS_SETTLEMENT_ENABLED !== "true") return false;
-  const contract = paynamicsNotificationVerifyContract();
-  if (!contract) return false;
-  if (contract === "workflow_mock_test_only") return process.env.NODE_ENV === "test" || process.env.PAYNAMICS_ALLOW_TEST_SETTLEMENT === "true";
-  return false;
+export function allowedPaymentRedirectUrl(value) {
+  const urlText = String(value || "").trim();
+  if (!urlText) return "";
+  let url;
+  try {
+    url = new URL(urlText);
+  } catch {
+    return "";
+  }
+  if (url.protocol !== "https:") return "";
+  const host = url.hostname.toLowerCase();
+  const allowlist = paynamicsPaymentHostAllowlist();
+  const allowed = allowlist.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+  if (!allowed) return "";
+  return url.toString();
 }
 
-export function paynamicsQuerySettlementEnabled() {
-  return process.env.PAYNAMICS_QUERY_SETTLEMENT_ENABLED === "true" && Boolean(paynamicsNotificationVerifyContract());
+export function parseWorkflowResponse(body) {
+  if (!body || typeof body !== "object") return {};
+  const root = body;
+  return {
+    merchant_id: root.merchant_id || root.merchantid || "",
+    request_id: root.request_id || "",
+    response_id: root.response_id || "",
+    gateway_id: root.gateway_id || "",
+    response_code: root.response_code || "",
+    response_message: root.response_message || "",
+    response_advise: root.response_advise || "",
+    timestamp: root.timestamp || "",
+    processor_response_id: root.processor_response_id || "",
+    processor_response_authcode: root.processor_response_authcode || "",
+    pay_reference: root.pay_reference || "",
+    payment_action_info: root.payment_action_info || "",
+    amount: root.amount || "",
+    currency: root.currency || "",
+    signature: root.signature || "",
+    raw: root,
+  };
 }
 
-export function notificationVerified(payload) {
-  if (!paynamicsSettlementEnabled()) return false;
-  const contract = paynamicsNotificationVerifyContract();
-  if (contract === "workflow_mock_test_only") return payload?.__testVerified === true;
-  return false;
+export function workflowResponseSignatureValid(response, merchantKey, { requestId = "" } = {}) {
+  if (!response?.signature) return false;
+  const expected = paynamicsWorkflowResponseSignature(response, merchantKey);
+  if (!paynamicsSignaturesMatch(expected, response.signature)) return false;
+  if (requestId && String(response.request_id || "") !== String(requestId)) return false;
+  return true;
 }
 
-export function queryResponseVerified() {
-  return false;
+/** §10.2 — hosted payment link is only `payment_action_info`. */
+export function extractHostedPaymentUrl(payload) {
+  const row = parseWorkflowResponse(payload);
+  return allowedPaymentRedirectUrl(row.payment_action_info);
 }
 
 export function parseNotificationPayload(body) {
@@ -130,20 +186,10 @@ export function parseNotificationPayload(body) {
     }
   }
   if (typeof body !== "object") return {};
-  const root = body;
-  const transaction = root.transaction && typeof root.transaction === "object" ? root.transaction : root;
+  const parsed = parseWorkflowResponse(body);
   return {
-    request_id: transaction.request_id || root.request_id || "",
-    response_id: transaction.response_id || root.response_id || "",
-    response_code: transaction.response_code || root.response_code || "",
-    response_message: transaction.response_message || root.response_message || "",
-    amount: transaction.amount || root.amount || "",
-    currency: transaction.currency || root.currency || "",
-    merchantid: transaction.merchantid || root.merchantid || "",
-    signature: transaction.signature || root.signature || "",
-    pmethod: transaction.pmethod || root.pmethod || "",
-    pchannel: transaction.pchannel || root.pchannel || "",
-    raw: root,
+    ...parsed,
+    merchantid: parsed.merchant_id,
   };
 }
 
@@ -172,6 +218,10 @@ function publicOrigin() {
   return url.origin;
 }
 
+export function paynamicsWikiTestApiBase() {
+  return WIKI_TEST_API_BASE;
+}
+
 export function paynamicsApiBaseUrl() {
   return String(process.env.PAYNAMICS_API_BASE_URL || "").trim().replace(/\/$/, "");
 }
@@ -182,6 +232,14 @@ export function paynamicsApiAccountConfirmed() {
 
 export function paynamicsApiCallsEnabled() {
   return process.env.PAYNAMICS_API_CALLS_ENABLED === "true";
+}
+
+function apiBaseMatchesWikiTest(base) {
+  try {
+    return new URL(base).origin === new URL(WIKI_TEST_API_BASE).origin;
+  } catch {
+    return false;
+  }
 }
 
 export function paynamicsApiCallsAllowed() {
@@ -199,8 +257,10 @@ export function paynamicsApiCallsAllowed() {
   if (!String(process.env.PAYNAMICS_BASIC_AUTH_PASSWORD || "").trim()) return false;
   if (!String(process.env.PAYNAMICS_MERCHANT_ID || "").trim()) return false;
   if (!String(process.env.PAYNAMICS_MERCHANT_KEY || "").trim()) return false;
-  if (process.env.PAYNAMICS_ALLOW_PRODUCTION !== "true" && process.env.PAYNAMICS_API_ENV !== "sandbox") return false;
-  return true;
+  const env = String(process.env.PAYNAMICS_API_ENV || "").toLowerCase();
+  if (process.env.PAYNAMICS_ALLOW_PRODUCTION === "true") return true;
+  if (env !== "sandbox") return false;
+  return apiBaseMatchesWikiTest(base);
 }
 
 function basicAuthHeader() {
@@ -211,7 +271,7 @@ function basicAuthHeader() {
 
 async function paynamicsApiFetch(path, body) {
   if (!paynamicsApiCallsAllowed()) {
-    throw new Error("Paynamics API calls are disabled until sandbox account details are confirmed.");
+    throw new Error("Paynamics API calls are disabled until test Workflow credentials and host are confirmed.");
   }
   const base = paynamicsApiBaseUrl();
   const response = await fetch(`${base}${path}`, {
@@ -261,39 +321,6 @@ function formatPhone(mobile) {
 
 function amountLabel(cents) {
   return (Math.round(cents) / 100).toFixed(2);
-}
-
-function allowedRedirectUrl(value) {
-  try {
-    const url = new URL(String(value || ""));
-    if (url.protocol !== "https:") return "";
-    return url.toString();
-  } catch {
-    return "";
-  }
-}
-
-/** Response payment-link field names are not in the sanitized Postman collection; verify against Paynamics Wiki §10.2. */
-export function extractHostedPaymentUrl(payload) {
-  if (!payload || typeof payload !== "object") return "";
-  const candidates = [
-    payload.redirect_url,
-    payload.payment_url,
-    payload.url,
-    payload.url_link,
-    payload?.transaction?.redirect_url,
-    payload?.transaction?.payment_url,
-    payload?.transaction?.url,
-    payload?.data?.redirect_url,
-    payload?.data?.payment_url,
-    payload?.response?.redirect_url,
-    payload?.response?.payment_url,
-  ];
-  for (const item of candidates) {
-    const url = allowedRedirectUrl(item);
-    if (url) return url;
-  }
-  return "";
 }
 
 export function buildWorkflowCreateBody({
@@ -393,11 +420,11 @@ function presentPaynamics(row) {
   return {
     requestId: row.request_id,
     status: row.status,
-    paymentUrl: allowedRedirectUrl(row.payment_url),
+    paymentUrl: allowedPaymentRedirectUrl(row.payment_url),
     gatewayResponseCode: row.gateway_response_code || "",
     gatewayMessage: row.gateway_message || "",
     expiresAt: row.expires_at || "",
-    settlementPendingVerification: !paynamicsSettlementEnabled(),
+    settlementDisabled: true,
   };
 }
 
@@ -452,47 +479,64 @@ function settlePaynamics(db, row) {
   return run();
 }
 
-function referenceMatches(row, payload) {
-  if (!payload?.request_id) return false;
-  return String(payload.request_id) === String(row.request_id);
+function merchantMatches(row, payload) {
+  const mid = String(process.env.PAYNAMICS_MERCHANT_ID || "").trim();
+  if (!mid) return true;
+  const got = String(payload.merchant_id || payload.merchantid || "").trim();
+  if (!got) return false;
+  return got === mid;
 }
 
-function amountMatches(row, payload) {
-  if (!payload?.amount) return true;
+function referenceMatches(row, payload) {
+  const rid = String(payload?.request_id || "").trim();
+  if (!rid) return false;
+  return rid === String(row.request_id);
+}
+
+function amountMatches(row, payload, { required = false } = {}) {
+  if (!payload?.amount) return !required;
   const cents = paynamicsAmountCents(payload.amount);
-  if (cents === null) return true;
+  if (cents === null) return false;
   return cents === row.amount_cents;
 }
 
-function currencyMatches(payload) {
-  if (!payload?.currency) return true;
+function currencyMatches(payload, { required = false } = {}) {
+  if (!payload?.currency) return !required;
   return String(payload.currency).toUpperCase() === "PHP";
 }
 
-export function applyPaynamicsStatus(db, row, payload, { allowSettle = false } = {}) {
+/**
+ * Status refresh only. Settlement requires independently verified notification/query contracts (currently disabled).
+ * `allowSettle` is for unit tests that inject verified payloads directly — not used in production handlers.
+ */
+export function applyPaynamicsStatus(db, row, payload, { allowSettle = false, requireAmountCurrency = false } = {}) {
   if (!row || row.status === "paid") return row;
+  if (!merchantMatches(row, payload)) {
+    return savePaynamics(db, row, { status: "failed", gatewayResponseCode: "merchant", gatewayMessage: "merchant_id mismatch" });
+  }
   if (!referenceMatches(row, payload)) {
     return savePaynamics(db, row, { status: "failed", gatewayResponseCode: "ref", gatewayMessage: "request_id mismatch" });
   }
-  if (!amountMatches(row, payload)) {
+  if (!amountMatches(row, payload, { required: requireAmountCurrency })) {
     return savePaynamics(db, row, {
       status: "failed",
       gatewayResponseCode: payload.response_code || "amount",
       gatewayMessage: "amount mismatch",
       gatewayResponseId: payload.response_id || null,
-      paymentChannel: payload.pchannel || payload.pmethod || null,
     });
   }
-  if (!currencyMatches(payload)) {
+  if (!currencyMatches(payload, { required: requireAmountCurrency })) {
     return savePaynamics(db, row, { status: "failed", gatewayResponseCode: "currency", gatewayMessage: "currency mismatch" });
   }
   const patch = {
     gatewayResponseCode: payload.response_code || row.gateway_response_code,
     gatewayMessage: payload.response_message || row.gateway_message,
     gatewayResponseId: payload.response_id || row.gateway_response_id,
-    paymentChannel: payload.pchannel || payload.pmethod || row.payment_channel,
   };
-  const outcome = paynamicsOutcome(payload.response_code);
+  const outcome = paynamicsPaymentOutcome(payload.response_code);
+  if (outcome === "query_ok") {
+    return savePaynamics(db, row, { ...patch, status: row.status === "expired" ? "expired" : "pending", gatewayMessage: payload.response_message || "query ok" });
+  }
   if (outcome === "paid" && allowSettle) {
     settlePaynamics(db, row);
     return db.prepare("SELECT * FROM paynamics_payments WHERE id = ?").get(row.id);
@@ -502,6 +546,16 @@ export function applyPaynamicsStatus(db, row, payload, { allowSettle = false } =
   return savePaynamics(db, row, patch);
 }
 
+function resolveInnerQueryPayload(body) {
+  const outer = parseWorkflowResponse(body);
+  if (outer.response_code !== "QM001") return outer;
+  const nested = body?.transaction || body?.data || body?.result;
+  if (nested && typeof nested === "object") {
+    return { ...parseWorkflowResponse(nested), merchant_id: outer.merchant_id || nested.merchant_id };
+  }
+  return outer;
+}
+
 async function queryWorkflowStatus(row) {
   if (!paynamicsApiCallsAllowed()) return null;
   const merchantId = String(process.env.PAYNAMICS_MERCHANT_ID || "").trim();
@@ -509,12 +563,12 @@ async function queryWorkflowStatus(row) {
   const queryRequestId = `Q${crypto.randomBytes(10).toString("hex")}`.slice(0, 32);
   const signature = paynamicsQuerySignature(queryRequestId, row.request_id, merchantId, merchantKey);
   try {
-    const remote = await paynamicsApiFetch("/paygate/transactions/query", {
+    return await paynamicsApiFetch("/paygate/transactions/query", {
+      merchant_id: merchantId,
       request_id: queryRequestId,
       org_trxid2: row.request_id,
       signature,
     });
-    return remote;
   } catch {
     return null;
   }
@@ -525,7 +579,7 @@ export async function startPaynamicsPayment(db, registration) {
   if (registration.currency !== "PHP") return { error: "Paynamics collects peso payments.", status: 400, registration };
   if (!paynamicsApiCallsAllowed()) {
     return {
-      error: "Paynamics checkout is not enabled until sandbox API host and credentials are confirmed.",
+      error: "Paynamics checkout is not enabled until test Workflow credentials and host are confirmed.",
       status: 503,
       registration,
     };
@@ -563,11 +617,10 @@ export async function startPaynamicsPayment(db, registration) {
       const message = error instanceof Error ? error.message : "Paynamics could not start the payment.";
       return { error: message, status: 502, registration };
     }
-    const paymentUrl = extractHostedPaymentUrl(created.body);
-    const gatewayCode = String(created.body?.response_code || created.body?.transaction?.response_code || "");
-    const gatewayMessage = String(created.body?.response_message || created.body?.transaction?.response_message || "");
-    const gatewayRef = String(created.body?.response_id || created.body?.transaction?.response_id || "");
-    const failed = !created.ok || !paymentUrl;
+    const response = parseWorkflowResponse(created.body);
+    const signed = workflowResponseSignatureValid(response, merchantKey, { requestId });
+    const paymentUrl = signed ? extractHostedPaymentUrl(created.body) : "";
+    const failed = !created.ok || !signed || !paymentUrl;
     const insert = db.prepare(`
       INSERT INTO paynamics_payments (
         registration_id, installment_id, request_id, gateway_response_id, amount_cents, currency, status,
@@ -578,18 +631,18 @@ export async function startPaynamicsPayment(db, registration) {
       registration.id,
       due.id,
       requestId,
-      gatewayRef || null,
+      response.response_id || null,
       amountCents,
       failed ? "failed" : "pending",
-      gatewayCode || (failed ? "create_failed" : null),
-      gatewayMessage || (failed ? "hosted link missing or create failed" : null),
+      response.response_code || (failed ? "create_failed" : null),
+      response.response_message || (failed ? "unsigned/invalid hosted link" : null),
       paymentUrl || null,
       expiresAt(),
     );
     const saved = db.prepare("SELECT * FROM paynamics_payments WHERE id = ?").get(result.lastInsertRowid);
     if (failed) {
       return {
-        error: gatewayMessage || "Paynamics did not return a payment link.",
+        error: response.response_message || "Paynamics did not return a verified hosted payment link.",
         status: 502,
         registration,
         paynamics: presentPaynamics(saved),
@@ -612,9 +665,8 @@ export async function refreshPaynamicsPayment(db, requestId) {
   if (current.status === "pending" && paynamicsApiCallsAllowed()) {
     const remote = await queryWorkflowStatus(current);
     if (remote?.body) {
-      const payload = parseNotificationPayload(remote.body);
-      const allowSettle = paynamicsQuerySettlementEnabled() && queryResponseVerified();
-      current = applyPaynamicsStatus(db, current, payload, { allowSettle }) || current;
+      const payload = resolveInnerQueryPayload(remote.body);
+      current = applyPaynamicsStatus(db, current, payload, { allowSettle: false, requireAmountCurrency: false }) || current;
     }
   }
   const registration = getRegistration(db, current.registration_id);
@@ -626,14 +678,15 @@ export async function handlePaynamicsNotification(db, body) {
   if (!payload.request_id) return { status: 400, body: "invalid payload" };
   const row = findRequest(db, payload.request_id);
   if (!row) return { status: 200, body: "OK" };
-  const verified = notificationVerified(payload);
   try {
-    let current = applyPaynamicsStatus(db, row, payload, { allowSettle: verified }) || row;
-    if (!verified) {
+    const merchantKey = String(process.env.PAYNAMICS_MERCHANT_KEY || "").trim();
+    const signed = payload.signature && merchantKey && workflowResponseSignatureValid(payload, merchantKey, { requestId: row.request_id });
+    let current = applyPaynamicsStatus(db, row, payload, { allowSettle: false, requireAmountCurrency: true }) || row;
+    if (!signed) {
       current = savePaynamics(db, current, {
         status: current.status,
         gatewayResponseCode: payload.response_code || current.gateway_response_code,
-        gatewayMessage: payload.response_message || "notification received; settlement awaiting verified contract",
+        gatewayMessage: "notification stored; settlement disabled pending Paynamics contract",
         gatewayResponseId: payload.response_id || current.gateway_response_id,
       });
     }
@@ -647,3 +700,6 @@ export async function handlePaynamicsNotification(db, body) {
   }
   return { status: 200, body: "OK" };
 }
+
+// Back-compat alias for older tests/imports
+export const paynamicsOutcome = paynamicsPaymentOutcome;

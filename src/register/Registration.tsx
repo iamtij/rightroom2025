@@ -81,7 +81,7 @@ type PaynamicsSession = {
   gatewayResponseCode: string;
   gatewayMessage: string;
   expiresAt: string;
-  settlementPendingVerification?: boolean;
+  settlementDisabled?: boolean;
 };
 
 function isPayChannel(value: string): value is PayChannelCode {
