@@ -3,6 +3,7 @@ import path from "path";
 import Database from "better-sqlite3";
 import { fileURLToPath } from "url";
 import { seedPaymentChannels } from "./payment-channels.js";
+import { stagingTestRegistrationAllowed } from "./staging-early-payments.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -434,9 +435,10 @@ export function openDatabase(file = process.env.IBMC_DB_PATH) {
   db.exec(SCHEMA);
   migrate(db);
   seed(db);
-  if (testRegistrationEnabled()) {
+  if (stagingTestRegistrationAllowed()) {
     ensureTestPayment(db);
     ensureTestInstallment(db);
+    ensureTest100(db);
   }
   return db;
 }
@@ -628,8 +630,28 @@ function ensureTestInstallment(db) {
       WHERE id = ?
     `).run(product.id);
   }
-  const count = db.prepare("SELECT COUNT(*) AS count FROM installment_plan_items WHERE product_id = ?").get(product.id).count;
-  if (count === 3) return;
+  const items = db
+    .prepare("SELECT sequence, kind, days_after, amount_cents FROM installment_plan_items WHERE product_id = ? ORDER BY sequence")
+    .all(product.id);
+  const expect = [
+    { sequence: 1, kind: "on_registration", days_after: null, amount_cents: 10_000 },
+    { sequence: 2, kind: "days_after", days_after: 2, amount_cents: 5_000 },
+    { sequence: 3, kind: "days_after", days_after: 3, amount_cents: 5_000 },
+  ];
+  if (
+    items.length === 3
+    && expect.every((row, index) => {
+      const item = items[index];
+      return (
+        item.sequence === row.sequence
+        && item.kind === row.kind
+        && (item.days_after ?? null) === (row.days_after ?? null)
+        && item.amount_cents === row.amount_cents
+      );
+    })
+  ) {
+    return;
+  }
   const replace = db.transaction(() => {
     db.prepare("DELETE FROM installment_plan_items WHERE product_id = ?").run(product.id);
     const insert = db.prepare(`
@@ -651,6 +673,30 @@ function ensureTestPayment(db) {
       code, name, audience, currency, full_price_cents, installment_total_cents,
       sales_start, sales_end, allows_installment
     ) VALUES ('test_50', 'Test Payment', 'local', 'PHP', 5000, NULL, '2026-01-01', '2027-05-31', 0)
+  `).run();
+}
+
+function ensureTest100(db) {
+  const row = db.prepare("SELECT id FROM ticket_products WHERE code = 'test_100'").get();
+  if (row) {
+    db.prepare(`
+      UPDATE ticket_products
+      SET name = 'Staging Test · ₱100',
+          full_price_cents = 10000,
+          installment_total_cents = NULL,
+          allows_installment = 0,
+          active = 1,
+          sales_start = '2026-01-01',
+          sales_end = '2027-05-31'
+      WHERE id = ?
+    `).run(row.id);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO ticket_products (
+      code, name, audience, currency, full_price_cents, installment_total_cents,
+      sales_start, sales_end, allows_installment
+    ) VALUES ('test_100', 'Staging Test · ₱100', 'local', 'PHP', 10000, NULL, '2026-01-01', '2027-05-31', 0)
   `).run();
 }
 

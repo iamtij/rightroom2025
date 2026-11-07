@@ -19,7 +19,14 @@ Paynamics on localhost still requires the fail-closed env gates in this doc (san
 
 **Callbacks on localhost:** Paynamics **notification** webhooks (`POST /api/webhooks/paynamics`) need a **public HTTPS URL** Paynamics can reach. A laptop-only `localhost` URL is not reachable from Paynamics’ servers unless you use a tunnel. Return links in the browser can still land on `localhost` for UX; **settlement remains disabled** in this branch (notifications do not `recordPayment`).
 
-Test registration tickets: `ALLOW_TEST_REGISTRATION=true` (see `.env.example`).
+**Staging Paynamics checkout tickets (before Nov 11 public windows):** set `ALLOW_TEST_REGISTRATION=true` **and** `IBMC_STAGING_EARLY_PAYMENTS=true` on a **verified staging** deployment (see `server/staging-early-payments.js`). Exposes:
+
+| Product | Checkout |
+| --- | --- |
+| `test_100` | ₱100 paid in full (new staging choice) |
+| `test_200` | ₱200 installment — ₱100 today, then ₱50 day +2 and +3 after registration (existing schedule) |
+
+Legacy `test_50` (₱50) remains for the member TESTING path only; production First Mover / Early Bird `sales_start` and `plans.ts` Nov 11 gate are unchanged. Confirm readiness: `GET /api/registration-options` → `tests: true`, `stagingEarlyPayments.enabled: true`. Admin has **no** product editor — tickets are env-gated seeds only.
 
 ## Staging safe mode (shared mail/SMS/backup credentials)
 

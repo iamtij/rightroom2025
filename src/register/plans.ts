@@ -123,6 +123,24 @@ export function testInstallmentTier(): Tier {
   };
 }
 
+export function test100PaymentTier(): Tier {
+  return {
+    code: "test_100",
+    name: "Staging test · ₱100",
+    currency: "PHP",
+    fullCents: 10_000,
+    installmentCents: null,
+    windowLabel: "staging only",
+    nextLabel: "₱100 full payment. For Paynamics staging checkout.",
+    onSale: true,
+    opensLabel: null,
+    rows: [],
+    saveLabel: "One payment of ₱100.",
+    installmentSummary: null,
+    note: null,
+  };
+}
+
 export function testPaymentTier(): Tier {
   return {
     code: "test_50",

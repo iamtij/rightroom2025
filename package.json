@@ -12,6 +12,7 @@
     "verify:reminders": "node server/verify-reminders.js",
     "verify:paynamics": "node server/verify-paynamics.js",
     "verify:staging-safe": "node server/verify-staging-safe.js",
+    "verify:staging-early-payments": "node server/verify-staging-early-payments.js",
     "verify:registration-lookup": "node server/verify-registration-lookup.js",
     "preview": "vite preview",
     "clean": "rm -rf dist",

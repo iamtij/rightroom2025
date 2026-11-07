@@ -60,6 +60,8 @@ assert.equal(pass.reference, registration.reference);
 assert.equal(getEntryPass(db, "made-up-token"), null);
 
 process.env.ALLOW_TEST_REGISTRATION = "true";
+process.env.IBMC_STAGING_EARLY_PAYMENTS = "true";
+process.env.IBMC_DEPLOYMENT_ENV = "staging";
 db.prepare(`
   INSERT INTO ticket_products (
     code, name, audience, currency, full_price_cents, installment_total_cents,
@@ -78,6 +80,7 @@ const testPaid = recordPayment(db, { registrationId: testRegistration.id, amount
 assert.ok(testPaid.qr_token);
 assert.equal(getEntryPass(db, testPaid.qr_token), null);
 delete process.env.ALLOW_TEST_REGISTRATION;
+delete process.env.IBMC_STAGING_EARLY_PAYMENTS;
 
 const file = path.join(os.tmpdir(), `ibmc-verify-${process.pid}.sqlite`);
 fs.rmSync(file, { force: true });

@@ -1,7 +1,11 @@
 import "dotenv/config";
 import express from "express";
 import { randomBytes } from "crypto";
-import { openDatabase, testRegistrationEnabled, testTicketEnabled } from "./db.js";
+import { openDatabase, testTicketEnabled } from "./db.js";
+import {
+  assessStagingEarlyPayments,
+  stagingTestRegistrationAllowed,
+} from "./staging-early-payments.js";
 import { beginMfaSetup, clearSessionCookie, cookieValue, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
 import { admitPass, cancelRegistration, compRegistration, createRegistration, ensureResumeToken, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
 import { dashboardStats } from "./dashboard.js";
@@ -225,9 +229,11 @@ export function createApi() {
   router.get("/registration-options", (_req, res) => {
     const siteKey = String(process.env.TURNSTILE_SITE_KEY || "").trim();
     const secret = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
+    const stagingEarly = assessStagingEarlyPayments();
     res.json({
-      tests: testRegistrationEnabled(),
+      tests: stagingTestRegistrationAllowed(),
       testTicket: testTicketEnabled(),
+      stagingEarlyPayments: { enabled: stagingEarly.allowed, reason: stagingEarly.reason },
       turnstileConfigured: Boolean(siteKey && secret),
       turnstileSiteKey: siteKey && secret ? siteKey : "",
     });
@@ -348,8 +354,8 @@ export function createApi() {
 
   function createPublicRegistration(body) {
     const today = manilaParts().date;
-    const testProduct = body.productCode === "test" || body.productCode === "test_50" || body.productCode === "test_200";
-    if (testProduct && !(body.productCode === "test" ? testTicketEnabled() : testRegistrationEnabled())) {
+    const testProduct = body.productCode === "test" || body.productCode === "test_50" || body.productCode === "test_100" || body.productCode === "test_200";
+    if (testProduct && !(body.productCode === "test" ? testTicketEnabled() : stagingTestRegistrationAllowed())) {
       const error = new Error("Unknown ticket");
       error.status = 400;
       throw error;
@@ -365,7 +371,14 @@ export function createApi() {
       error.status = 400;
       throw error;
     }
-    if (body.productCode !== "test" && body.productCode !== "test_50" && body.productCode !== "test_200" && body.attendeeType === "guest" && today < "2027-02-01") {
+    if (
+      body.productCode !== "test"
+      && body.productCode !== "test_50"
+      && body.productCode !== "test_100"
+      && body.productCode !== "test_200"
+      && body.attendeeType === "guest"
+      && today < "2027-02-01"
+    ) {
       const error = new Error("Guest registration opens February 1, 2027");
       error.status = 400;
       throw error;

@@ -8,6 +8,7 @@ import {
   manilaDate,
   money,
   testInstallmentTier,
+  test100PaymentTier,
   testPaymentTier,
   testTier,
   tierFor,
@@ -573,6 +574,7 @@ function RegistrationWizard() {
   const [chapters, setChapters] = useState<string[]>([]);
   const [testMode, setTestMode] = useState(false);
   const [installmentTest, setInstallmentTest] = useState(false);
+  const [fullPaymentTest, setFullPaymentTest] = useState(false);
   const [memberProof, setMemberProof] = useState("");
   const [challenge, setChallenge] = useState("");
   const [companyWebsite, setCompanyWebsite] = useState("");
@@ -639,9 +641,10 @@ function RegistrationWizard() {
 
   const international = attendee?.international ?? false;
   const tier = useMemo(() => {
+    if (fullPaymentTest) return test100PaymentTier();
     if (installmentTest) return testInstallmentTier();
     return testMode ? testTier() : tierFor(today, international);
-  }, [today, international, testMode, installmentTest]);
+  }, [today, international, testMode, installmentTest, fullPaymentTest]);
 
   function clearOtp() {
     setOtpSentTo("");
@@ -745,6 +748,7 @@ function RegistrationWizard() {
   function startTest() {
     setTestMode(true);
     setInstallmentTest(false);
+    setFullPaymentTest(false);
     setMemberTest(false);
     setMemberProof("");
     setAttendee(emptyGuest(false));
@@ -756,6 +760,7 @@ function RegistrationWizard() {
   function startInstallmentTest() {
     setTestMode(false);
     setInstallmentTest(true);
+    setFullPaymentTest(false);
     setMemberTest(false);
     setMemberProof("");
     setAttendee(emptyGuest(false));
@@ -764,9 +769,22 @@ function RegistrationWizard() {
     setStep("guest");
   }
 
+  function startFullPaymentTest() {
+    setTestMode(false);
+    setInstallmentTest(false);
+    setFullPaymentTest(true);
+    setMemberTest(false);
+    setMemberProof("");
+    setAttendee(emptyGuest(false));
+    setPlan("full");
+    setAgreed(false);
+    setStep("guest");
+  }
+
   function startMemberTest() {
     setTestMode(false);
     setInstallmentTest(false);
+    setFullPaymentTest(false);
     setMemberTest(true);
     setMemberProof("");
     setMember(null);
@@ -794,7 +812,7 @@ function RegistrationWizard() {
         : "Add your name, business, industry, email, and mobile number.");
       return;
     }
-    if (attendee.audience === "guest" && !testMode && !installmentTest && today < "2027-02-01") {
+    if (attendee.audience === "guest" && !testMode && !installmentTest && !fullPaymentTest && today < "2027-02-01") {
       setGuestError("Guest registration opens February 1, 2027.");
       return;
     }
@@ -955,7 +973,8 @@ function RegistrationWizard() {
         {localTier ? <PriceStrip tier={localTier} /> : <p className="m-0 text-[15px]">Registration closed on May 31, 2027.</p>}
         <h2 className="m-0 mt-1.5 text-[17px] font-bold">Who's registering?</h2>
         {import.meta.env.DEV && testTicketOpen ? <Choice title="Test ticket · ₱10" body="Available now, for a local payment test." emphasis onClick={startTest} /> : null}
-        {testsOpen ? <Choice title="Test installment · ₱200" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." emphasis onClick={startInstallmentTest} /> : null}
+        {testsOpen ? <Choice title="Staging test · ₱100 full" body="One ₱100 payment. For staging Paynamics checkout before public ticket windows open." emphasis onClick={startFullPaymentTest} /> : null}
+        {testsOpen ? <Choice title="Staging test · ₱200 installment" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." emphasis onClick={startInstallmentTest} /> : null}
         <Choice title={liveCopy ? "I'm a BNI Philippines Member" : "I'm a BNI member"} body="Quick registration. We'll fill in your details." emphasis onClick={() => choose("member")} />
         {testsOpen ? <Choice title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." emphasis onClick={startMemberTest} /> : null}
         {guestsOpen ? (
@@ -1174,7 +1193,7 @@ function RegistrationWizard() {
             <input required className={inputClass} placeholder="917 123 4567" value={attendee.mobile} onChange={(event) => setAttendee({ ...attendee, mobile: event.target.value })} />
           </span>
         </Field>
-        {memberPath || testMode || installmentTest ? null : (
+        {memberPath || testMode || installmentTest || fullPaymentTest ? null : (
           <>
             <Field label="Who invited you?" hint="(optional)">
               <input className={inputClass} placeholder="Member name or chapter" value={attendee.invitedBy} onChange={(event) => setAttendee({ ...attendee, invitedBy: event.target.value })} />
@@ -1224,7 +1243,7 @@ function RegistrationWizard() {
     const charging = checkoutTier();
     const dueToday = plan === "installment" && tier.rows[0] ? tier.rows[0].amountCents : charging ? charging.fullCents : tier.fullCents;
     const premium = tier.installmentCents && tier.installmentCents > tier.fullCents ? tier.installmentCents - tier.fullCents : 0;
-    const realTier = tier.code !== "test" && tier.code !== "test_50" && tier.code !== "test_200";
+    const realTier = tier.code !== "test" && tier.code !== "test_50" && tier.code !== "test_100" && tier.code !== "test_200";
     return (
       <Frame
         label="Step 2 of 4"
@@ -1245,9 +1264,9 @@ function RegistrationWizard() {
         <div className="flex flex-col gap-1.5 rounded-[14px] bg-[#141416] p-4 text-[#F6F4F1]">
           <div className="flex items-center justify-between gap-3">
             <span className="font-archivo text-xl font-extrabold">{charging?.name}</span>
-            <span className="rounded-full bg-[#D0202E] px-2.5 py-1 text-[11px] font-bold tracking-[0.1em] text-white uppercase">{charging?.code === "test_50" || charging?.code === "test_200" ? "Test" : charging?.onSale ? "Best price" : "Opens soon"}</span>
+            <span className="rounded-full bg-[#D0202E] px-2.5 py-1 text-[11px] font-bold tracking-[0.1em] text-white uppercase">{charging?.code === "test_50" || charging?.code === "test_100" || charging?.code === "test_200" ? "Test" : charging?.onSale ? "Best price" : "Opens soon"}</span>
           </div>
-          <span className="text-sm text-[#C9C7C2]">{charging?.code === "test_50" || charging?.code === "test_200" ? "Payment is open" : charging?.onSale ? `Register by ${charging.windowLabel.replace("until ", "")}` : `Registration opens ${charging?.opensLabel}`}</span>
+          <span className="text-sm text-[#C9C7C2]">{charging?.code === "test_50" || charging?.code === "test_100" || charging?.code === "test_200" ? "Payment is open" : charging?.onSale ? `Register by ${charging.windowLabel.replace("until ", "")}` : `Registration opens ${charging?.opensLabel}`}</span>
         </div>
         <h2 className="m-0 mt-1 text-[17px] font-bold">How would you like to pay?</h2>
         <PayChoice

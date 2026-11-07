@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { claimCoupon, priceCoupon } from "./coupons.js";
-import { registrationBalance, testRegistrationEnabled, testTicketEnabled } from "./db.js";
+import { registrationBalance, testTicketEnabled } from "./db.js";
+import { stagingTestRegistrationAllowed } from "./staging-early-payments.js";
 import { addDays, manilaParts } from "./time.js";
 
 function dueOnFor(item, registeredOn) {
@@ -123,7 +124,7 @@ export function getEntryPass(db, qrToken) {
   const registration = getRegistration(db, row.id);
   if (!registration || registration.status !== "confirmed" || !registration.fully_paid_at) return null;
   if (registration.balance_cents !== 0) return null;
-  if (["test", "test_50", "test_200"].includes(registration.product_code)) return null;
+  if (["test", "test_50", "test_100", "test_200"].includes(registration.product_code)) return null;
   return {
     fullName: registration.full_name,
     tierName: registration.product_name,
@@ -135,7 +136,10 @@ export function getEntryPass(db, qrToken) {
 export function createRegistration(db, input) {
   const run = db.transaction(() => {
     if (input.productCode === "test" && !testTicketEnabled()) throw new Error("Unknown ticket");
-    if ((input.productCode === "test_50" || input.productCode === "test_200") && !testRegistrationEnabled()) {
+    if (
+      (input.productCode === "test_50" || input.productCode === "test_100" || input.productCode === "test_200")
+      && !stagingTestRegistrationAllowed()
+    ) {
       throw new Error("Unknown ticket");
     }
     const clash = registrationContactClash(db, { email: input.email, mobile: input.mobile });
