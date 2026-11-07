@@ -442,7 +442,7 @@ function Frame({
             Need help? Email{" "}
             <a href="mailto:helpdesk@bni.ph" className="font-semibold text-[#A8131F]">helpdesk@bni.ph</a>
             {" "}or visit the{" "}
-            <a href="https://helpdesk.bni.ph/" target="_blank" rel="noreferrer" className="font-semibold text-[#A8131F]">helpdesk</a>.
+            <a href="https://helpdesk.bni.ph/" className="font-semibold text-[#A8131F]">helpdesk</a>.
           </p>
         </div>
       </div>
