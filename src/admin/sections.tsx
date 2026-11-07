@@ -1047,6 +1047,8 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
   const [channels, setChannels] = useState<PaymentChannelSetting[]>([]);
   const [hitpayConfigured, setHitpayConfigured] = useState(true);
   const [paynamicsConfigured, setPaynamicsConfigured] = useState(true);
+  const [paynamicsLiveWarning, setPaynamicsLiveWarning] = useState(false);
+  const [paynamicsCheckoutMode, setPaynamicsCheckoutMode] = useState<"sandbox" | "live" | "off">("off");
   const [saving, setSaving] = useState("");
 
   async function load() {
@@ -1054,6 +1056,8 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
     setChannels(payload.channels || []);
     setHitpayConfigured(Boolean(payload.hitpayConfigured));
     setPaynamicsConfigured(Boolean(payload.paynamicsConfigured));
+    setPaynamicsLiveWarning(Boolean(payload.paynamics?.liveRealChargeWarning));
+    setPaynamicsCheckoutMode(payload.paynamics?.checkoutMode === "live" || payload.paynamics?.checkoutMode === "sandbox" ? payload.paynamics.checkoutMode : "off");
   }
 
   useEffect(() => {
@@ -1071,6 +1075,8 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
       setChannels(payload.channels || []);
       setHitpayConfigured(Boolean(payload.hitpayConfigured));
       setPaynamicsConfigured(Boolean(payload.paynamicsConfigured));
+    setPaynamicsLiveWarning(Boolean(payload.paynamics?.liveRealChargeWarning));
+    setPaynamicsCheckoutMode(payload.paynamics?.checkoutMode === "live" || payload.paynamics?.checkoutMode === "sandbox" ? payload.paynamics.checkoutMode : "off");
     } catch (error) {
       onError(error instanceof Error ? error.message : "Payment channels were not saved");
       await load().catch(() => {});
@@ -1109,6 +1115,11 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
             HitPay QR and HitPay online banking need HITPAY_API_KEY and HITPAY_SALT on the server before a buyer can be charged.
           </p>
         )}
+        {paynamicsLiveWarning ? (
+          <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] font-semibold leading-normal text-[#A8131F]">
+            Staging live Paynamics is armed ({paynamicsCheckoutMode}): successful buyer checkouts are real charges. IBMC registration settlement is still disabled until the notification contract is verified.
+          </p>
+        ) : null}
         {paynamicsConfigured ? null : (
           <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
             Paynamics Workflow needs confirmed PAYNAMICS_API_BASE_URL, PAYNAMICS_API_ACCOUNT_CONFIRMED, Basic auth, and merchant ID/key before checkout can start.

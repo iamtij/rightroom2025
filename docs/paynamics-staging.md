@@ -20,14 +20,37 @@ Wiki does **not** publish a Workflow **production** host. User-confirmed pasted 
 
 ## Fail-closed API gates
 
+### Sandbox (default)
+
 Outbound calls require **all** of:
 
 - `PAYNAMICS_API_CALLS_ENABLED=true`
 - `PAYNAMICS_API_ACCOUNT_CONFIRMED=true` (parent confirms BNI **test** package)
-- `PAYNAMICS_API_BASE_URL=https://payin.payserv.net` (sandbox mode only matches this origin)
-- `PAYNAMICS_API_ENV=sandbox` (required; there is no env override for production or non-test API hosts)
+- `PAYNAMICS_API_BASE_URL=https://payin.payserv.net` (wiki §1.6 test origin only)
+- `PAYNAMICS_API_ENV=sandbox`
 - `PAYNAMICS_BASIC_AUTH_USER` / `PAYNAMICS_BASIC_AUTH_PASSWORD`
 - `PAYNAMICS_MERCHANT_ID` / `PAYNAMICS_MERCHANT_KEY` (signatures only — not Basic auth)
+
+### Staging live merchant (real Paynamics charges — TJ testing)
+
+For Railway **staging** when using **live** merchant credentials (real money at Paynamics; IBMC registration settlement still disabled):
+
+| Variable | Purpose |
+| --- | --- |
+| `IBMC_DEPLOYMENT_ENV=staging` | Deployment identity — **required** |
+| `PAYNAMICS_STAGING_LIVE_MERCHANT=true` | Explicit opt-in |
+| `PAYNAMICS_API_LIVE_ACCOUNT_CONFIRMED=true` | Parent confirms live account + endpoint with Paynamics |
+| `PAYNAMICS_API_ENV=live` | Live Workflow mode |
+| `PAYNAMICS_LIVE_API_ORIGIN_ALLOWLIST` | Comma-separated **exact** HTTPS origin(s) Paynamics provided (no default live URL in repo) |
+| `PAYNAMICS_API_BASE_URL` | Must match an allowlisted origin |
+
+**Rejected on `IBMC_DEPLOYMENT_ENV=production`** — production app cannot arm staging-live mode. There is no arbitrary-host bypass (old `PAYNAMICS_ALLOW_PRODUCTION` is gone).
+
+Wiki §1.6 `payin.payserv.net` is the **test** host only — do not treat it as authenticated production. Extend `PAYNAMICS_PAYMENT_HOST_ALLOWLIST` if live hosted pages use a different host.
+
+Checkout/admin show a **real charge** warning when live mode is armed. Use `IBMC_STAGING_SAFE_MODE=true` to suppress mail/SMS/backups while testing.
+
+**Still open:** live Workflow notification URL/ACK, query inner signature after `QM001`, and whether live hosted domains differ from test.
 
 ## Hosted redirect (§10.2)
 

@@ -234,6 +234,14 @@ export function paynamicsApiCallsEnabled() {
   return process.env.PAYNAMICS_API_CALLS_ENABLED === "true";
 }
 
+function apiBaseOrigin(base) {
+  try {
+    return new URL(base).origin;
+  } catch {
+    return "";
+  }
+}
+
 function apiBaseMatchesWikiTest(base) {
   try {
     return new URL(base).origin === new URL(WIKI_TEST_API_BASE).origin;
@@ -242,14 +250,72 @@ function apiBaseMatchesWikiTest(base) {
   }
 }
 
-export function paynamicsApiCallsAllowed() {
+export function ibmcDeploymentEnv() {
+  return String(process.env.IBMC_DEPLOYMENT_ENV || "").trim().toLowerCase();
+}
+
+export function ibmcStagingDeployment() {
+  return ibmcDeploymentEnv() === "staging";
+}
+
+export function ibmcProductionDeployment() {
+  return ibmcDeploymentEnv() === "production";
+}
+
+function parsePaynamicsOriginAllowlist(raw) {
+  return String(raw || "")
+    .split(",")
+    .map((item) => item.trim().replace(/\/$/, ""))
+    .filter(Boolean);
+}
+
+export function paynamicsLiveApiOriginAllowlist() {
+  return parsePaynamicsOriginAllowlist(process.env.PAYNAMICS_LIVE_API_ORIGIN_ALLOWLIST);
+}
+
+function apiBaseMatchesLiveAllowlist(base) {
+  const origin = apiBaseOrigin(base);
+  if (!origin) return false;
+  const entries = paynamicsLiveApiOriginAllowlist();
+  if (!entries.length) return false;
+  return entries.some((entry) => {
+    try {
+      const normalized = entry.startsWith("http") ? entry : `https://${entry}`;
+      return new URL(normalized).origin === origin;
+    } catch {
+      return false;
+    }
+  });
+}
+
+export function paynamicsStagingLiveMerchantOptIn() {
+  return process.env.PAYNAMICS_STAGING_LIVE_MERCHANT === "true";
+}
+
+export function paynamicsLiveAccountConfirmed() {
+  return process.env.PAYNAMICS_API_LIVE_ACCOUNT_CONFIRMED === "true";
+}
+
+/** Staging-only live merchant mode (explicit opt-in + deployment identity). Never on production deployment. */
+export function paynamicsStagingLiveMerchantAllowed() {
+  if (ibmcProductionDeployment()) return false;
+  if (!ibmcStagingDeployment()) return false;
+  if (!paynamicsStagingLiveMerchantOptIn()) return false;
+  if (!paynamicsLiveAccountConfirmed()) return false;
+  return true;
+}
+
+export function paynamicsApiEnv() {
+  return String(process.env.PAYNAMICS_API_ENV || "").trim().toLowerCase();
+}
+
+function paynamicsApiCredentialsReady() {
   if (!paynamicsApiCallsEnabled()) return false;
   if (!paynamicsApiAccountConfirmed()) return false;
   const base = paynamicsApiBaseUrl();
   if (!base) return false;
   try {
-    const url = new URL(base);
-    if (url.protocol !== "https:") return false;
+    if (new URL(base).protocol !== "https:") return false;
   } catch {
     return false;
   }
@@ -257,12 +323,61 @@ export function paynamicsApiCallsAllowed() {
   if (!String(process.env.PAYNAMICS_BASIC_AUTH_PASSWORD || "").trim()) return false;
   if (!String(process.env.PAYNAMICS_MERCHANT_ID || "").trim()) return false;
   if (!String(process.env.PAYNAMICS_MERCHANT_KEY || "").trim()) return false;
-  const env = String(process.env.PAYNAMICS_API_ENV || "").toLowerCase();
-  if (env !== "sandbox") return false;
-  return apiBaseMatchesWikiTest(base);
+  return true;
 }
 
-/** True only when API base origin exactly matches wiki §1.6 test Workflow host (no prod / alternate-host override). */
+export function assessPaynamicsApiAdmission() {
+  if (!paynamicsApiCallsEnabled()) return { allowed: false, reason: "api_calls_disabled" };
+  if (!paynamicsApiAccountConfirmed()) return { allowed: false, reason: "account_not_confirmed" };
+  const base = paynamicsApiBaseUrl();
+  if (!base) return { allowed: false, reason: "missing_api_base" };
+  try {
+    if (new URL(base).protocol !== "https:") return { allowed: false, reason: "api_base_not_https" };
+  } catch {
+    return { allowed: false, reason: "invalid_api_base" };
+  }
+  if (!String(process.env.PAYNAMICS_BASIC_AUTH_USER || "").trim()) return { allowed: false, reason: "missing_basic_auth" };
+  if (!String(process.env.PAYNAMICS_BASIC_AUTH_PASSWORD || "").trim()) return { allowed: false, reason: "missing_basic_auth" };
+  if (!String(process.env.PAYNAMICS_MERCHANT_ID || "").trim()) return { allowed: false, reason: "missing_merchant_id" };
+  if (!String(process.env.PAYNAMICS_MERCHANT_KEY || "").trim()) return { allowed: false, reason: "missing_merchant_key" };
+  const env = paynamicsApiEnv();
+  if (env === "sandbox") {
+    if (!apiBaseMatchesWikiTest(base)) return { allowed: false, reason: "sandbox_host_mismatch" };
+    return { allowed: true, reason: "sandbox", mode: "sandbox" };
+  }
+  if (env === "live") {
+    if (ibmcProductionDeployment()) return { allowed: false, reason: "live_blocked_on_production_deployment" };
+    if (!paynamicsStagingLiveMerchantAllowed()) return { allowed: false, reason: "staging_live_not_allowed" };
+    if (!apiBaseMatchesLiveAllowlist(base)) return { allowed: false, reason: "live_origin_not_allowlisted" };
+    return { allowed: true, reason: "staging_live", mode: "live" };
+  }
+  return { allowed: false, reason: "unsupported_api_env" };
+}
+
+export function paynamicsApiCallsAllowed() {
+  return assessPaynamicsApiAdmission().allowed;
+}
+
+export function paynamicsCheckoutMode() {
+  const admission = assessPaynamicsApiAdmission();
+  if (!admission.allowed) return "off";
+  return admission.mode === "live" ? "live" : "sandbox";
+}
+
+export function paynamicsLiveRealChargeWarning() {
+  return paynamicsCheckoutMode() === "live";
+}
+
+export function paynamicsPublicCheckoutInfo() {
+  const mode = paynamicsCheckoutMode();
+  return {
+    checkoutMode: mode,
+    liveRealChargeWarning: mode === "live",
+    stagingLiveMerchantArmed: paynamicsStagingLiveMerchantAllowed(),
+  };
+}
+
+/** True only when API base origin exactly matches wiki §1.6 test Workflow host. */
 export function paynamicsApiBaseIsWikiTestHost() {
   return apiBaseMatchesWikiTest(paynamicsApiBaseUrl());
 }
@@ -421,6 +536,7 @@ function findRequest(db, requestId) {
 }
 
 function presentPaynamics(row) {
+  const liveWarning = paynamicsLiveRealChargeWarning();
   return {
     requestId: row.request_id,
     status: row.status,
@@ -429,6 +545,8 @@ function presentPaynamics(row) {
     gatewayMessage: row.gateway_message || "",
     expiresAt: row.expires_at || "",
     settlementDisabled: true,
+    checkoutMode: paynamicsCheckoutMode(),
+    liveRealChargeWarning: liveWarning,
   };
 }
 

@@ -82,6 +82,8 @@ type PaynamicsSession = {
   gatewayMessage: string;
   expiresAt: string;
   settlementDisabled?: boolean;
+  checkoutMode?: "sandbox" | "live" | "off";
+  liveRealChargeWarning?: boolean;
 };
 
 function isPayChannel(value: string): value is PayChannelCode {
@@ -127,6 +129,7 @@ function payActionLabel(channel: PayChannelCode | "", amount: string, busy: bool
 function usePaymentChannels() {
   const [channels, setChannels] = useState<PayChannel[] | null>(null);
   const [channel, setChannel] = useState<PayChannelCode | "">("");
+  const [paynamicsLiveChargeWarning, setPaynamicsLiveChargeWarning] = useState(false);
   useEffect(() => {
     let stop = false;
     fetch("/api/payment-channels")
@@ -136,6 +139,7 @@ function usePaymentChannels() {
         const list = (Array.isArray(payload.channels) ? payload.channels : []).filter((item: PayChannel) => item && isPayChannel(String(item.code)));
         setChannels(list);
         setChannel((current) => (current && list.some((item: PayChannel) => item.code === current) ? current : list[0]?.code || ""));
+        setPaynamicsLiveChargeWarning(Boolean(payload.paynamics?.liveRealChargeWarning));
       })
       .catch(() => {
         if (!stop) setChannels([]);
@@ -144,7 +148,7 @@ function usePaymentChannels() {
       stop = true;
     };
   }, []);
-  return { channels, channel, setChannel };
+  return { channels, channel, setChannel, paynamicsLiveChargeWarning };
 }
 
 type Attendee = {
@@ -499,7 +503,7 @@ function RegistrationWizard() {
   const [memberTest, setMemberTest] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [method, setMethod] = useState<UpayMethod>("instapay");
-  const { channels, channel, setChannel } = usePaymentChannels();
+  const { channels, channel, setChannel, paynamicsLiveChargeWarning } = usePaymentChannels();
   const [checkoutReference, setCheckoutReference] = useState("");
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
@@ -1366,7 +1370,7 @@ function RegistrationWizard() {
         <h2 className="m-0 mt-1 text-[17px] font-bold">Pay with</h2>
         {charging.currency === "PHP" ? (
           <>
-            <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} />
+            <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} paynamicsLiveChargeWarning={paynamicsLiveChargeWarning} />
             <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
               Receipt goes to {attendee.email} and {attendee.mobile}.
             </p>
@@ -1482,12 +1486,14 @@ function PaymentChoices({
   onChannel,
   method,
   onMethod,
+  paynamicsLiveChargeWarning,
 }: {
   channels: PayChannel[] | null;
   channel: PayChannelCode | "";
   onChannel: (channel: PayChannelCode) => void;
   method: UpayMethod;
   onMethod: (method: UpayMethod) => void;
+  paynamicsLiveChargeWarning?: boolean;
 }) {
   if (channels === null) return <p className="m-0 text-sm text-[#5C5C63]">Loading payment options.</p>;
   if (channels.length === 0) return <p className="m-0 text-sm text-[#5C5C63]">Payment isn't open right now.</p>;
@@ -1519,7 +1525,14 @@ function PaymentChoices({
         <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">You'll continue to HitPay to pay with UnionBank Online. That page closes after 5 minutes. Coming back here does not by itself mean the payment went through.</p>
       ) : null}
       {channel === "paynamics" ? (
-        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">You'll continue to Paynamics to choose a payment method. This page checks status with Paynamics; a return link alone does not confirm payment.</p>
+        <>
+          {paynamicsLiveChargeWarning ? (
+            <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] font-semibold leading-normal text-[#A8131F]">
+              Staging live Paynamics: successful payments are real charges. Use only test cards/amounts you intend to pay.
+            </p>
+          ) : null}
+          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">You'll continue to Paynamics to choose a payment method. This page checks status with Paynamics; a return link alone does not confirm payment.</p>
+        </>
       ) : null}
     </>
   );
@@ -1834,6 +1847,11 @@ function PaynamicsPending({
   return (
     <Frame label="Payment">
       <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Pay with Paynamics</h1>
+      {current.liveRealChargeWarning ? (
+        <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] font-semibold leading-normal text-[#A8131F]">
+          Staging live Paynamics: this checkout can post a real charge if payment succeeds.
+        </p>
+      ) : null}
       <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">
         Finish payment on Paynamics. This page does not confirm payment from a return link alone; settlement waits for a verified provider notification contract.
       </p>
@@ -2076,7 +2094,7 @@ function Manage({
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [method, setMethod] = useState<UpayMethod>("instapay");
-  const { channels, channel, setChannel } = usePaymentChannels();
+  const { channels, channel, setChannel, paynamicsLiveChargeWarning } = usePaymentChannels();
   const [payingInstallment, setPayingInstallment] = useState(false);
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
@@ -2482,7 +2500,7 @@ function Manage({
             payingInstallment ? (
               <>
                 <h2 className="m-0 text-[17px] font-bold">Choose how to pay</h2>
-                <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} />
+                <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} paynamicsLiveChargeWarning={paynamicsLiveChargeWarning} />
                 <button
                   type="button"
                   disabled={busy || !channel}

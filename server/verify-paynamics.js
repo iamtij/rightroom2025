@@ -8,10 +8,14 @@ import { createRegistration } from "./registrations.js";
 import {
   allowedPaymentRedirectUrl,
   applyPaynamicsStatus,
+  assessPaynamicsApiAdmission,
   buildWorkflowCreateBody,
   extractHostedPaymentUrl,
   handlePaynamicsNotification,
+  ibmcProductionDeployment,
+  ibmcStagingDeployment,
   paynamicsApiCallsAllowed,
+  paynamicsCheckoutMode,
   paynamicsCustomerSignature,
   paynamicsPaymentOutcome,
   paynamicsQuerySignature,
@@ -137,6 +141,49 @@ assert.equal(paynamicsApiCallsAllowed(), true);
 process.env.PAYNAMICS_ALLOW_PRODUCTION = "";
 delete process.env.PAYNAMICS_ALLOW_PRODUCTION;
 assert.equal(paynamicsApiCallsAllowed(), true);
+
+function setLiveStagingEnv(baseOrigin) {
+  delete process.env.IBMC_DEPLOYMENT_ENV;
+  delete process.env.PAYNAMICS_STAGING_LIVE_MERCHANT;
+  delete process.env.PAYNAMICS_API_LIVE_ACCOUNT_CONFIRMED;
+  delete process.env.PAYNAMICS_LIVE_API_ORIGIN_ALLOWLIST;
+  process.env.IBMC_DEPLOYMENT_ENV = "staging";
+  process.env.PAYNAMICS_API_ENV = "live";
+  process.env.PAYNAMICS_STAGING_LIVE_MERCHANT = "true";
+  process.env.PAYNAMICS_API_LIVE_ACCOUNT_CONFIRMED = "true";
+  process.env.PAYNAMICS_LIVE_API_ORIGIN_ALLOWLIST = baseOrigin;
+  process.env.PAYNAMICS_API_BASE_URL = baseOrigin;
+  process.env.PAYNAMICS_API_CALLS_ENABLED = "true";
+  process.env.PAYNAMICS_API_ACCOUNT_CONFIRMED = "true";
+}
+
+assert.equal(ibmcStagingDeployment(), false);
+setLiveStagingEnv("https://live-workflow.example.test");
+assert.equal(assessPaynamicsApiAdmission().allowed, true);
+assert.equal(paynamicsCheckoutMode(), "live");
+
+process.env.IBMC_DEPLOYMENT_ENV = "production";
+assert.equal(ibmcProductionDeployment(), true);
+assert.equal(assessPaynamicsApiAdmission().allowed, false);
+assert.equal(assessPaynamicsApiAdmission().reason, "live_blocked_on_production_deployment");
+
+process.env.IBMC_DEPLOYMENT_ENV = "staging";
+process.env.PAYNAMICS_API_BASE_URL = "https://arbitrary.evil.test";
+assert.equal(assessPaynamicsApiAdmission().allowed, false);
+assert.equal(assessPaynamicsApiAdmission().reason, "live_origin_not_allowlisted");
+
+delete process.env.PAYNAMICS_STAGING_LIVE_MERCHANT;
+process.env.PAYNAMICS_API_BASE_URL = "https://live-workflow.example.test";
+assert.equal(assessPaynamicsApiAdmission().allowed, false);
+
+process.env.PAYNAMICS_API_ENV = "sandbox";
+process.env.PAYNAMICS_API_BASE_URL = "https://payin.payserv.net";
+delete process.env.IBMC_DEPLOYMENT_ENV;
+delete process.env.PAYNAMICS_STAGING_LIVE_MERCHANT;
+delete process.env.PAYNAMICS_API_LIVE_ACCOUNT_CONFIRMED;
+delete process.env.PAYNAMICS_LIVE_API_ORIGIN_ALLOWLIST;
+assert.equal(paynamicsApiCallsAllowed(), true);
+assert.equal(paynamicsCheckoutMode(), "sandbox");
 
 global.fetch = async (url, options = {}) => {
   const target = String(url);

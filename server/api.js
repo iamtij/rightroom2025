@@ -13,7 +13,7 @@ import { rateLimit } from "./limits.js";
 import { formatLongDate, manilaParts } from "./time.js";
 import { handleUpayCallback, refreshUpayPayment, startUpayPayment } from "./upay.js";
 import { handleHitpayWebhook, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
-import { handlePaynamicsNotification, refreshPaynamicsPayment, startPaynamicsPayment } from "./paynamics.js";
+import { handlePaynamicsNotification, paynamicsPublicCheckoutInfo, refreshPaynamicsPayment, startPaynamicsPayment } from "./paynamics.js";
 import { hitpayConfigured, listPaymentChannels, paynamicsConfigured, savePaymentChannels } from "./payment-channels.js";
 import { entryQrPng } from "./templates.js";
 import { recordSecurityEvent } from "./alerts.js";
@@ -218,6 +218,7 @@ export function createApi() {
   router.get("/payment-channels", (_req, res) => {
     res.json({
       channels: listPaymentChannels(db(), { enabledOnly: true }).map(({ code, label, detail }) => ({ code, label, detail })),
+      paynamics: paynamicsPublicCheckoutInfo(),
     });
   });
 
@@ -754,6 +755,7 @@ export function createApi() {
       channels: listPaymentChannels(db()),
       hitpayConfigured: hitpayConfigured(),
       paynamicsConfigured: paynamicsConfigured(),
+      paynamics: paynamicsPublicCheckoutInfo(),
     });
   });
 
@@ -764,6 +766,7 @@ export function createApi() {
       channels,
       hitpayConfigured: hitpayConfigured(),
       paynamicsConfigured: paynamicsConfigured(),
+      paynamics: paynamicsPublicCheckoutInfo(),
     });
   });
 
