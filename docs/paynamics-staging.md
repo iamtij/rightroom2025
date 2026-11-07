@@ -5,6 +5,10 @@ BNI onboarding: **Paynamics Checkout (Workflow)** — REST JSON, HTTP Basic auth
 Canonical contract extract: `docs/paynamics/wiki-contracts-extract.md`  
 Postman reference: `docs/paynamics/workflow.postman_collection.sanitized.json`
 
+## Staging safe mode (shared mail/SMS/backup credentials)
+
+Before Paynamics sandbox testing on Railway staging that still has real Resend, Semaphore, or backup S3 variables, set **`IBMC_STAGING_SAFE_MODE=true`** (`docs/staging-safe-mode.md`). Paynamics Workflow API calls are **not** suppressed.
+
 ## Test endpoints (Wiki §1.6 — confirmed)
 
 | Call | URL |

@@ -3,6 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { automaticBackupsSuppressed } from "./staging-safe.js";
 
 const MAGIC = Buffer.from("IBMCBAK1");
 const RETENTION_DAYS = 30;
@@ -80,6 +81,10 @@ async function pruneOldBackups(client, bucket) {
 }
 
 export async function createEncryptedBackup(db) {
+  if (automaticBackupsSuppressed()) {
+    console.log("Database backup skipped: IBMC_STAGING_SAFE_MODE is enabled");
+    return null;
+  }
   const key = encryptionKey();
   const config = bucketConfig();
   if (!key || !config) {

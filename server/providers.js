@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { outboundNotificationsSuppressed } from "./staging-safe.js";
 
 const SEMAPHORE_URL = "https://api.semaphore.co/api/v4/messages";
 
@@ -19,6 +20,7 @@ async function pause(ms) {
 }
 
 export async function sendEmail({ to, subject, html, text, idempotencyKey }) {
+  if (outboundNotificationsSuppressed()) return { status: "skipped", error: "staging_safe_mode" };
   if (!process.env.RESEND_API_KEY) return { status: "skipped", error: "provider_not_configured" };
   const resend = new Resend(process.env.RESEND_API_KEY);
   const payload = {
@@ -43,6 +45,7 @@ export async function sendEmail({ to, subject, html, text, idempotencyKey }) {
 }
 
 export async function sendSms({ to, message }) {
+  if (outboundNotificationsSuppressed()) return { status: "skipped", error: "staging_safe_mode" };
   if (!process.env.SEMAPHORE_API_KEY) return { status: "skipped", error: "provider_not_configured" };
   const number = philippineMobile(to);
   if (!number) return { status: "failed", error: "mobile_not_philippine" };
