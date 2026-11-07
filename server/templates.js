@@ -126,6 +126,9 @@ export async function renderEntryPass({ registration, passUrl }) {
     body: `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;border:1px solid #E4E1DC;border-radius:16px;">
         <tr><td align="center" style="padding:28px 22px 12px;">
+          <div style="font-family:Arial,sans-serif;font-size:20px;font-weight:800;letter-spacing:0.04em;color:#141416;">IBMC <span style="color:#D0202E;">2027</span></div>
+        </td></tr>
+        <tr><td align="center" style="padding:0 22px 12px;">
           <img src="${escapeHtml(qrImageUrl(passUrl))}" width="220" height="220" alt="QR ticket" style="display:block;width:220px;height:220px;border:0;">
         </td></tr>
         <tr><td align="center" style="padding:0 22px 24px;font-size:14px;color:#5C5C63;">

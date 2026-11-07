@@ -55,6 +55,15 @@ app.get('*', (req, res) => {
 
 const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  if (process.env.IBMC_STAGING_SAFE_MODE === "true") {
+    console.log("IBMC_STAGING_SAFE_MODE: outbound email/SMS and automatic backups are suppressed; login codes still send");
+  }
+});
+
+process.once("SIGTERM", () => {
+  const force = setTimeout(() => process.exit(0), 10_000);
+  force.unref();
+  server.close(() => process.exit(0));
 });
 
 process.once("SIGTERM", () => {

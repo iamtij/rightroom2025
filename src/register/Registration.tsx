@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { parseLookupContact } from "../../server/contact.js";
 import { LevNote, type LevPose } from "./Lev";
 import {
   INDUSTRIES,
@@ -8,6 +9,7 @@ import {
   manilaDate,
   money,
   testInstallmentTier,
+  test100PaymentTier,
   testPaymentTier,
   testTier,
   tierFor,
@@ -16,22 +18,111 @@ import {
   type Tier,
 } from "./plans";
 
-function Turnstile({ siteKey, onToken }: { siteKey: string; onToken: (token: string) => void }) {
+function humanCheckPayError(message: string) {
+  return (
+    message.includes("Confirm you are a person")
+    || message.includes("human-check")
+    || message.includes("Refresh the page")
+    || message.includes("security check expired")
+  );
+}
+
+async function mintFormChallenge() {
+  const response = await fetch("/api/challenge");
+  if (!response.ok) throw new Error("Refresh the page and try again.");
+  const payload = await response.json();
+  const token = String(payload.token || "").trim();
+  if (!token) throw new Error("Refresh the page and try again.");
+  return token;
+}
+
+type TurnstileGlobal = {
+  render: (node: HTMLElement, options: object) => string;
+  remove?: (widgetId: string) => void;
+};
+
+function Turnstile({
+  siteKey,
+  onToken,
+  onBlocked,
+}: {
+  siteKey: string;
+  onToken: (token: string) => void;
+  onBlocked?: (blocked: boolean) => void;
+}) {
   const holder = useRef<HTMLDivElement>(null);
+  const widgetIdRef = useRef<string | null>(null);
+  const onTokenRef = useRef(onToken);
+  const onBlockedRef = useRef(onBlocked);
+  onTokenRef.current = onToken;
+  onBlockedRef.current = onBlocked;
+  const [widgetError, setWidgetError] = useState(false);
   useEffect(() => {
-    const script = document.createElement("script");
-    script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-    script.async = true;
-    script.onload = () => {
-      const widget = (window as Window & { turnstile?: { render: (node: HTMLElement, options: object) => void } }).turnstile;
-      if (holder.current && widget) widget.render(holder.current, { sitekey: siteKey, callback: onToken });
+    onBlockedRef.current?.(false);
+    setWidgetError(false);
+    let cancelled = false;
+    const mountWidget = () => {
+      const widget = (window as Window & { turnstile?: TurnstileGlobal }).turnstile;
+      if (cancelled || !holder.current || !widget) return;
+      if (widgetIdRef.current && widget.remove) {
+        widget.remove(widgetIdRef.current);
+        widgetIdRef.current = null;
+      }
+      widgetIdRef.current = widget.render(holder.current, {
+        sitekey: siteKey,
+        callback: (token: string) => {
+          setWidgetError(false);
+          onBlockedRef.current?.(false);
+          onTokenRef.current(token);
+        },
+        "error-callback": () => {
+          setWidgetError(true);
+          onBlockedRef.current?.(true);
+        },
+        "expired-callback": () => {
+          onTokenRef.current("");
+          onBlockedRef.current?.(true);
+        },
+        "timeout-callback": () => {
+          onTokenRef.current("");
+          onBlockedRef.current?.(true);
+        },
+      });
     };
-    document.head.appendChild(script);
+    const existing = document.querySelector("script[data-ibmc-turnstile]");
+    if ((window as Window & { turnstile?: TurnstileGlobal }).turnstile) {
+      mountWidget();
+    } else if (existing) {
+      existing.addEventListener("load", mountWidget);
+    } else {
+      const script = document.createElement("script");
+      script.src = "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
+      script.async = true;
+      script.dataset.ibmcTurnstile = "1";
+      script.onload = mountWidget;
+      document.head.appendChild(script);
+    }
     return () => {
-      script.remove();
+      cancelled = true;
+      const widget = (window as Window & { turnstile?: TurnstileGlobal }).turnstile;
+      if (widgetIdRef.current && widget?.remove) {
+        widget.remove(widgetIdRef.current);
+        widgetIdRef.current = null;
+      }
     };
-  }, [siteKey, onToken]);
-  return <div ref={holder} />;
+  }, [siteKey]);
+  return (
+    <div className="flex flex-col gap-2">
+      <div ref={holder} />
+      {widgetError ? (
+        <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] leading-normal text-[#A8131F]">
+          The human-check widget did not load on this page. If you see “Invalid sitekey” above, the server’s{" "}
+          <span className="font-semibold">TURNSTILE_SITE_KEY</span> may not be allowed for this hostname. For local dev you can leave{" "}
+          <span className="font-semibold">TURNSTILE_SITE_KEY</span> and <span className="font-semibold">TURNSTILE_SECRET_KEY</span> empty (no widget), or use Turnstile keys configured for localhost in Cloudflare. Registration cannot continue until the check succeeds or Turnstile is disabled on the server.
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 type Audience = "member" | "guest" | "international";
@@ -55,7 +146,17 @@ const UPAY_METHODS: { id: UpayMethod; label: string; detail: string }[] = [
   { id: "paygate", label: "Other banks", detail: "Pay through PCHC Paygate." },
 ];
 
-type PayChannelCode = "upay" | "hitpay_qr" | "hitpay_online";
+type PaynamicsChannel = "paymaya_ph" | "grabpay_ph" | "bpi_online" | "ubp_online" | "br_landbank_ph";
+
+const PAYNAMICS_CHANNELS: { id: PaynamicsChannel; group: string; label: string; detail: string }[] = [
+  { id: "paymaya_ph", group: "E-Wallet", label: "Maya", detail: "Pay with Maya." },
+  { id: "grabpay_ph", group: "E-Wallet", label: "GrabPay", detail: "Pay with GrabPay." },
+  { id: "bpi_online", group: "Online banking", label: "BPI", detail: "Pay from a BPI account." },
+  { id: "ubp_online", group: "Online banking", label: "UnionBank Online", detail: "Pay from a UnionBank account." },
+  { id: "br_landbank_ph", group: "Online banking", label: "Landbank", detail: "Pay from a Landbank account." },
+];
+
+type PayChannelCode = "upay" | "hitpay_qr" | "hitpay_online" | "paynamics";
 
 type PayChannel = {
   code: PayChannelCode;
@@ -74,8 +175,19 @@ type HitpaySession = {
   canRefresh: boolean;
 };
 
+type PaynamicsSession = {
+  requestId: string;
+  status: "pending" | "paid" | "failed" | "expired" | "cancelled";
+  paymentUrl: string;
+  gatewayResponseCode: string;
+  gatewayMessage: string;
+  expiresAt: string;
+  settlementDisabled?: boolean;
+  checkoutMode?: "sandbox" | "live" | "off";
+};
+
 function isPayChannel(value: string): value is PayChannelCode {
-  return value === "upay" || value === "hitpay_qr" || value === "hitpay_online";
+  return value === "upay" || value === "hitpay_qr" || value === "hitpay_online" || value === "paynamics";
 }
 
 function safeHitpayUrl(value: string) {
@@ -96,16 +208,38 @@ function hitpayApiChannel(code: PayChannelCode) {
   return "";
 }
 
-function payActionLabel(channel: PayChannelCode | "", amount: string, busy: boolean) {
+function safePaynamicsUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
+}
+
+function payActionLabel(channel: PayChannelCode | "", amount: string, busy: boolean, paynamicsChannel: PaynamicsChannel = "paymaya_ph") {
   if (busy) return channel === "upay" || !channel ? "Opening UnionBank" : "Opening payment";
   if (channel === "hitpay_qr") return `Pay with QR · ${amount}`;
   if (channel === "hitpay_online") return `Pay with online banking · ${amount}`;
+  if (channel === "paynamics") {
+    const label = PAYNAMICS_CHANNELS.find((item) => item.id === paynamicsChannel)?.label || "Paynamics";
+    return `Pay with ${label} · ${amount}`;
+  }
   return `Pay with UnionBank · ${amount}`;
 }
+
+type PaynamicsCheckoutPublic = {
+  checkoutMode: string;
+  apiAdmissionAllowed?: boolean;
+  apiAdmissionReason?: string;
+};
 
 function usePaymentChannels() {
   const [channels, setChannels] = useState<PayChannel[] | null>(null);
   const [channel, setChannel] = useState<PayChannelCode | "">("");
+  const [paynamicsCheckout, setPaynamicsCheckout] = useState<PaynamicsCheckoutPublic>({ checkoutMode: "off" });
+  const [paynamicsChannel, setPaynamicsChannel] = useState<PaynamicsChannel>("paymaya_ph");
   useEffect(() => {
     let stop = false;
     fetch("/api/payment-channels")
@@ -115,6 +249,12 @@ function usePaymentChannels() {
         const list = (Array.isArray(payload.channels) ? payload.channels : []).filter((item: PayChannel) => item && isPayChannel(String(item.code)));
         setChannels(list);
         setChannel((current) => (current && list.some((item: PayChannel) => item.code === current) ? current : list[0]?.code || ""));
+        const paynamics = payload.paynamics && typeof payload.paynamics === "object" ? payload.paynamics : {};
+        setPaynamicsCheckout({
+          checkoutMode: String(paynamics.checkoutMode || "off"),
+          apiAdmissionAllowed: Boolean(paynamics.apiAdmissionAllowed),
+          apiAdmissionReason: String(paynamics.apiAdmissionReason || ""),
+        });
       })
       .catch(() => {
         if (!stop) setChannels([]);
@@ -123,7 +263,7 @@ function usePaymentChannels() {
       stop = true;
     };
   }, []);
-  return { channels, channel, setChannel };
+  return { channels, channel, setChannel, paynamicsCheckout, paynamicsChannel, setPaynamicsChannel };
 }
 
 type Attendee = {
@@ -182,6 +322,7 @@ type StoredRegistration = {
   totalCents: number;
   payments: StoredPayment[];
   planStatus: "active" | "fully_paid";
+  qrReady?: boolean;
   qrToken?: string;
 };
 
@@ -297,7 +438,7 @@ function Frame({
             Need help? Email{" "}
             <a href="mailto:helpdesk@bni.ph" className="font-semibold text-[#A8131F]">helpdesk@bni.ph</a>
             {" "}or visit the{" "}
-            <a href="https://helpdesk.bni.ph/" target="_blank" rel="noreferrer" className="font-semibold text-[#A8131F]">helpdesk</a>.
+            <a href="https://helpdesk.bni.ph/" className="font-semibold text-[#A8131F]">helpdesk</a>.
           </p>
         </div>
       </div>
@@ -438,6 +579,49 @@ function memberAttendee(member: FoundMember, audience: Audience = "member"): Att
   };
 }
 
+const RESEND_WAIT_SECONDS = 60;
+
+function useResendCooldown() {
+  const [secondsLeft, setSecondsLeft] = useState(0);
+  const endsAt = useRef(0);
+  const cooling = secondsLeft > 0;
+
+  useEffect(() => {
+    if (!cooling) return undefined;
+    const timer = window.setInterval(() => {
+      const left = Math.max(0, Math.ceil((endsAt.current - Date.now()) / 1000));
+      setSecondsLeft((current) => (current === left ? current : left));
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [cooling]);
+
+  const start = useCallback(() => {
+    endsAt.current = Date.now() + RESEND_WAIT_SECONDS * 1000;
+    setSecondsLeft(RESEND_WAIT_SECONDS);
+  }, []);
+
+  const reset = useCallback(() => {
+    endsAt.current = 0;
+    setSecondsLeft(0);
+  }, []);
+
+  return { secondsLeft, start, reset };
+}
+
+function ResendCodeButton({ secondsLeft, busy = false, onClick }: { secondsLeft: number; busy?: boolean; onClick: () => void }) {
+  const waiting = secondsLeft > 0;
+  return (
+    <button
+      type="button"
+      disabled={busy || waiting}
+      onClick={onClick}
+      className="min-w-[7.5rem] rounded-full border border-[#D9D5CF] px-4 py-2.5 text-sm font-semibold tabular-nums disabled:cursor-not-allowed disabled:text-[#9A9590]"
+    >
+      {waiting ? `Resend ${secondsLeft}s` : "Resend"}
+    </button>
+  );
+}
+
 function membershipHoldNote(member: FoundMember, editing: boolean) {
   if (member.profileReady) return "";
   const person = memberAttendee(member);
@@ -473,15 +657,17 @@ function RegistrationWizard() {
   const [otpCode, setOtpCode] = useState("");
   const [otpError, setOtpError] = useState("");
   const [otpBusy, setOtpBusy] = useState(false);
+  const { secondsLeft: resendSeconds, start: startResendCooldown, reset: resetResendCooldown } = useResendCooldown();
   const [editToken, setEditToken] = useState("");
   const [plan, setPlan] = useState<CheckoutPlan>("full");
   const [memberTest, setMemberTest] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [method, setMethod] = useState<UpayMethod>("instapay");
-  const { channels, channel, setChannel } = usePaymentChannels();
+  const { channels, channel, setChannel, paynamicsCheckout, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
   const [checkoutReference, setCheckoutReference] = useState("");
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
+  const [paynamicsSession, setPaynamicsSession] = useState<PaynamicsSession | null>(null);
   const [ticketError, setTicketError] = useState("");
   const [guestError, setGuestError] = useState("");
   const [datesOpen, setDatesOpen] = useState(false);
@@ -492,9 +678,11 @@ function RegistrationWizard() {
   const [couponBusy, setCouponBusy] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<StoredRegistration | null>(null);
+  const [managedRecord, setManagedRecord] = useState<StoredRegistration | null>(null);
   const [chapters, setChapters] = useState<string[]>([]);
   const [testMode, setTestMode] = useState(false);
   const [installmentTest, setInstallmentTest] = useState(false);
+  const [fullPaymentTest, setFullPaymentTest] = useState(false);
   const [memberProof, setMemberProof] = useState("");
   const [challenge, setChallenge] = useState("");
   const [companyWebsite, setCompanyWebsite] = useState("");
@@ -502,6 +690,21 @@ function RegistrationWizard() {
   const [testTicketOpen, setTestTicketOpen] = useState(false);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
   const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileBlocked, setTurnstileBlocked] = useState(false);
+  const [turnstileMountKey, setTurnstileMountKey] = useState(0);
+
+  const applyTurnstileToken = useCallback((token: string) => {
+    setTurnstileToken(token);
+    if (token) {
+      setTurnstileBlocked(false);
+      setPayError((current) => (current && humanCheckPayError(current) ? "" : current));
+    }
+  }, []);
+
+  const resetTurnstileAfterSubmit = useCallback(() => {
+    setTurnstileToken("");
+    setTurnstileMountKey((value) => value + 1);
+  }, []);
 
   useEffect(() => {
     let stop = false;
@@ -560,19 +763,26 @@ function RegistrationWizard() {
 
   const international = attendee?.international ?? false;
   const tier = useMemo(() => {
+    if (fullPaymentTest) return test100PaymentTier();
     if (installmentTest) return testInstallmentTier();
     return testMode ? testTier() : tierFor(today, international);
-  }, [today, international, testMode, installmentTest]);
+  }, [today, international, testMode, installmentTest, fullPaymentTest]);
 
   function clearOtp() {
     setOtpSentTo("");
     setOtpCode("");
     setOtpError("");
     setEditToken("");
+    resetResendCooldown();
   }
 
   async function sendOtp() {
-    if (!member || otpBusy) return;
+    if (!member || otpBusy || resendSeconds > 0) return;
+    const contact = parseLookupContact(lookup.trim());
+    if ("error" in contact) {
+      setOtpError(contact.error);
+      return;
+    }
     setOtpBusy(true);
     setOtpError("");
     try {
@@ -585,6 +795,7 @@ function RegistrationWizard() {
       if (!response.ok) throw new Error(payload.error || "Could not send the code");
       setOtpSentTo(payload.maskedEmail || "your email");
       setOtpCode("");
+      startResendCooldown();
     } catch (error) {
       setOtpError(error instanceof Error ? error.message : "Could not send the code");
     } finally {
@@ -604,6 +815,19 @@ function RegistrationWizard() {
       });
       const payload = await response.json();
       if (!response.ok || !payload.member) throw new Error(payload.error || "That code is wrong.");
+      resetResendCooldown();
+      const registration = payload.registration as StoredRegistration | undefined;
+      if (payload.member.registered && registration?.reference) {
+        rememberRegistration(registration);
+        setSaved(registration);
+        setManagedRecord(registration);
+        setMember(payload.member);
+        setEditToken(payload.editToken || "");
+        setOtpSentTo("");
+        setStep("manage");
+        return;
+      }
+      setManagedRecord(null);
       setMember(payload.member);
       setEditToken(payload.editToken || "");
       setAttendee(memberAttendee(payload.member));
@@ -617,7 +841,14 @@ function RegistrationWizard() {
 
   async function searchMember() {
     const query = lookup.trim();
-    if (!query || searching) return;
+    if (!query || searching || resendSeconds > 0) return;
+    const contact = parseLookupContact(query);
+    if ("error" in contact) {
+      setMember(null);
+      clearOtp();
+      setLookupError(contact.error);
+      return;
+    }
     setSearching(true);
     setLookupError("");
     setOtpError("");
@@ -632,6 +863,7 @@ function RegistrationWizard() {
       if (!response.ok) throw new Error(payload.error || "Could not send the code");
       setOtpSentTo("your email");
       setOtpCode("");
+      startResendCooldown();
     } catch (error) {
       const message = error instanceof Error ? error.message : "Could not send the code";
       if (otpSentTo) setOtpError(message);
@@ -666,6 +898,7 @@ function RegistrationWizard() {
   function startTest() {
     setTestMode(true);
     setInstallmentTest(false);
+    setFullPaymentTest(false);
     setMemberTest(false);
     setMemberProof("");
     setAttendee(emptyGuest(false));
@@ -677,6 +910,7 @@ function RegistrationWizard() {
   function startInstallmentTest() {
     setTestMode(false);
     setInstallmentTest(true);
+    setFullPaymentTest(false);
     setMemberTest(false);
     setMemberProof("");
     setAttendee(emptyGuest(false));
@@ -685,9 +919,22 @@ function RegistrationWizard() {
     setStep("guest");
   }
 
+  function startFullPaymentTest() {
+    setTestMode(false);
+    setInstallmentTest(false);
+    setFullPaymentTest(true);
+    setMemberTest(false);
+    setMemberProof("");
+    setAttendee(emptyGuest(false));
+    setPlan("full");
+    setAgreed(false);
+    setStep("guest");
+  }
+
   function startMemberTest() {
     setTestMode(false);
     setInstallmentTest(false);
+    setFullPaymentTest(false);
     setMemberTest(true);
     setMemberProof("");
     setMember(null);
@@ -715,7 +962,7 @@ function RegistrationWizard() {
         : "Add your name, business, industry, email, and mobile number.");
       return;
     }
-    if (attendee.audience === "guest" && !testMode && !installmentTest && today < "2027-02-01") {
+    if (attendee.audience === "guest" && !testMode && !installmentTest && !fullPaymentTest && today < "2027-02-01") {
       setGuestError("Guest registration opens February 1, 2027.");
       return;
     }
@@ -773,16 +1020,32 @@ function RegistrationWizard() {
     const charging = checkoutTier();
     if (!attendee || !charging || saving || !charging.onSale) return;
     if (turnstileSiteKey && !turnstileToken) {
-      setPayError("Confirm you are a person and try again.");
+      setPayError(
+        turnstileBlocked
+          ? "Fix the human-check widget below (or disable Turnstile in server env) before paying."
+          : "Confirm you are a person below and try again.",
+      );
       return;
     }
     const useInstallment = plan === "installment" && Boolean(charging.installmentCents) && charging.rows.length > 0;
     const peso = charging.currency === "PHP";
+    if (peso && channel === "paynamics" && paynamicsCheckout.checkoutMode === "off") {
+      const reason = paynamicsCheckout.apiAdmissionReason ? ` (${paynamicsCheckout.apiAdmissionReason})` : "";
+      setPayError(`Paynamics checkout is not enabled on this server${reason}. See docs/paynamics-staging.md for required env vars.`);
+      return;
+    }
     if (peso && !channel) return;
-    const hitpay = peso && channel ? hitpayApiChannel(channel) : "";
+    const paynamics = peso && channel === "paynamics";
+    const hitpay = peso && channel && channel !== "paynamics" ? hitpayApiChannel(channel) : "";
     setSaving(true);
     setPayError("");
+    let needsFormChallenge = false;
+    let submittedWithTurnstile = false;
     try {
+      needsFormChallenge = !peso || !checkoutReference;
+      const challengeToken = needsFormChallenge ? await mintFormChallenge() : challenge;
+      if (needsFormChallenge) setChallenge(challengeToken);
+      submittedWithTurnstile = Boolean(needsFormChallenge && turnstileSiteKey && turnstileToken);
       const registrationBody = {
         productCode: charging.code,
         paymentPlan: useInstallment ? "installment" : "full",
@@ -796,46 +1059,95 @@ function RegistrationWizard() {
         attendeeType: attendee.audience,
         couponCode: plan === "full" ? coupon?.code || "" : "",
         memberToken: memberProof || undefined,
-        challenge,
+        challenge: challengeToken,
         companyWebsite,
         turnstileToken,
       };
       const path = !peso
         ? "/api/registrations"
-        : hitpay
-          ? (checkoutReference ? `/api/registrations/${checkoutReference}/hitpay` : "/api/registrations/hitpay")
-          : (checkoutReference ? `/api/registrations/${checkoutReference}/upay` : "/api/registrations/upay");
-      const paymentBody = hitpay ? { channel: hitpay } : { paymentMethod: method };
+        : paynamics
+          ? (checkoutReference ? `/api/registrations/${checkoutReference}/paynamics` : "/api/registrations/paynamics")
+          : hitpay
+            ? (checkoutReference ? `/api/registrations/${checkoutReference}/hitpay` : "/api/registrations/hitpay")
+            : (checkoutReference ? `/api/registrations/${checkoutReference}/upay` : "/api/registrations/upay");
+      const paymentBody = paynamics ? { pchannel: paynamicsChannel } : hitpay ? { channel: hitpay } : { paymentMethod: method };
+      const captchaToken = turnstileToken;
       const response = await fetch(path, {
         method: "POST",
         headers: resumeHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(peso && checkoutReference ? paymentBody : peso ? { ...registrationBody, ...paymentBody } : registrationBody),
+        body: JSON.stringify(
+          peso && checkoutReference
+            ? paymentBody
+            : peso
+              ? { ...registrationBody, ...paymentBody, turnstileToken: captchaToken }
+              : { ...registrationBody, turnstileToken: captchaToken },
+        ),
       });
-      const payload = await response.json();
-      const record = payload.registration || (payload.reference ? payload : null);
-      if (record?.reference) {
-        rememberRegistration(record);
-        setSaved(record);
-        setCheckoutReference(record.reference);
+      let payload: Record<string, unknown> = {};
+      try {
+        payload = await response.json();
+      } catch {
+        throw new Error("Payment did not continue. Try again.");
       }
-      if (!response.ok) throw new Error(payload.error || "Registration was not saved");
+      const record = (payload.registration as { reference?: string } | undefined) || (payload.reference ? payload : null);
+      if (response.ok && record?.reference) {
+        rememberRegistration(record as StoredRegistration);
+        setSaved(record as StoredRegistration);
+        setCheckoutReference(String(record.reference));
+      }
+      if (!response.ok) {
+        const serverMessage = String(payload.error || "Registration was not saved");
+        const errorCode = String(payload.code || "");
+        const challengeRejected = errorCode === "form_challenge_invalid" || serverMessage === "Refresh the page and try again.";
+        const turnstileRejected = errorCode === "turnstile_rejected" || serverMessage === "Confirm you are a person and try again.";
+        const captchaLikelyConsumed = submittedWithTurnstile && !challengeRejected && !turnstileRejected;
+        if ((turnstileRejected || captchaLikelyConsumed) && turnstileSiteKey) {
+          resetTurnstileAfterSubmit();
+        }
+        if (challengeRejected) {
+          try {
+            await mintFormChallenge();
+          } catch {
+            /* keep user-facing message */
+          }
+          setPayError("Your session check expired. Press Pay again after the human check below shows Success.");
+        } else if (turnstileRejected) {
+          setPayError("Human check was not accepted. Wait for Success below, then press Pay again.");
+        } else {
+          setPayError(serverMessage);
+        }
+        return;
+      }
       if (payload.upay?.senderRefId) {
         setHitpaySession(null);
+        setPaynamicsSession(null);
         setUpaySession(payload.upay);
         setStep("paying");
         return;
       }
       if (payload.hitpay?.sessionId) {
         setUpaySession(null);
+        setPaynamicsSession(null);
         setHitpaySession(payload.hitpay);
         setStep("paying");
         const url = payload.hitpay.channel === "online" ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
         if (url) window.location.assign(url);
         return;
       }
+      const paynamicsPayload = payload.paynamics as { requestId?: string; paymentUrl?: string } | undefined;
+      if (paynamicsPayload?.requestId) {
+        setUpaySession(null);
+        setHitpaySession(null);
+        setPaynamicsSession(paynamicsPayload as PaynamicsSession);
+        setStep("paying");
+        const url = safePaynamicsUrl(String(paynamicsPayload.paymentUrl || ""));
+        if (url) window.location.assign(url);
+        return;
+      }
       setStep("done");
     } catch (error) {
-      setPayError(error instanceof Error ? error.message : "Registration was not saved");
+      const message = error instanceof Error ? error.message : "Registration was not saved";
+      setPayError(message);
     } finally {
       setSaving(false);
     }
@@ -853,7 +1165,8 @@ function RegistrationWizard() {
         {localTier ? <PriceStrip tier={localTier} /> : <p className="m-0 text-[15px]">Registration closed on May 31, 2027.</p>}
         <h2 className="m-0 mt-1.5 text-[17px] font-bold">Who's registering?</h2>
         {import.meta.env.DEV && testTicketOpen ? <Choice title="Test ticket · ₱10" body="Available now, for a local payment test." emphasis onClick={startTest} /> : null}
-        {testsOpen ? <Choice title="Test installment · ₱200" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." emphasis onClick={startInstallmentTest} /> : null}
+        {testsOpen ? <Choice title="Staging test · ₱100 full" body="One ₱100 payment. For staging Paynamics checkout before public ticket windows open." emphasis onClick={startFullPaymentTest} /> : null}
+        {testsOpen ? <Choice title="Staging test · ₱200 installment" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." emphasis onClick={startInstallmentTest} /> : null}
         <Choice title={liveCopy ? "I'm a BNI Philippines Member" : "I'm a BNI member"} body="Quick registration. We'll fill in your details." emphasis onClick={() => choose("member")} />
         {testsOpen ? <Choice title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." emphasis onClick={startMemberTest} /> : null}
         {guestsOpen ? (
@@ -868,7 +1181,7 @@ function RegistrationWizard() {
         )}
         <p className="m-0 mt-auto text-center text-sm text-[#5C5C63]">
           Already registered?{" "}
-          <button type="button" className="font-semibold text-[#A8131F]" onClick={() => { setLookup(""); setStep("manage"); }}>
+          <button type="button" className="font-semibold text-[#A8131F]" onClick={() => { setLookup(""); setManagedRecord(null); setStep("manage"); }}>
             Manage my registration
           </button>
         </p>
@@ -937,7 +1250,7 @@ function RegistrationWizard() {
           />
           <button
             type="button"
-            disabled={!lookup.trim() || searching}
+            disabled={!lookup.trim() || searching || resendSeconds > 0}
             onClick={searchMember}
             className="shrink-0 rounded-full bg-[#D0202E] px-5 text-base font-bold text-white disabled:bg-[#E4A0A6]"
           >
@@ -969,7 +1282,7 @@ function RegistrationWizard() {
                 {otpError ? <p className="m-0 text-sm text-[#A8131F]">{otpError}</p> : null}
                 <div className="flex gap-2">
                   <button type="button" disabled={otpCode.length !== 6 || otpBusy} onClick={confirmOtp} className="rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]">Confirm code</button>
-                  <button type="button" disabled={otpBusy} onClick={sendOtp} className="rounded-full border border-[#D9D5CF] px-4 py-2.5 text-sm font-semibold">Resend</button>
+                  <ResendCodeButton secondsLeft={resendSeconds} busy={otpBusy} onClick={sendOtp} />
                 </div>
               </div>
             ) : (
@@ -1001,7 +1314,7 @@ function RegistrationWizard() {
             {otpError ? <p className="m-0 text-sm text-[#A8131F]">{otpError}</p> : null}
             <div className="flex gap-2">
               <button type="button" disabled={otpCode.length !== 6 || otpBusy} onClick={confirmOtp} className="rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]">Confirm code</button>
-              <button type="button" disabled={otpBusy || searching} onClick={searchMember} className="rounded-full border border-[#D9D5CF] px-4 py-2.5 text-sm font-semibold">Resend</button>
+              <ResendCodeButton secondsLeft={resendSeconds} busy={otpBusy || searching} onClick={searchMember} />
             </div>
           </div>
         ) : null}
@@ -1072,7 +1385,7 @@ function RegistrationWizard() {
             <input required className={inputClass} placeholder="917 123 4567" value={attendee.mobile} onChange={(event) => setAttendee({ ...attendee, mobile: event.target.value })} />
           </span>
         </Field>
-        {memberPath || testMode || installmentTest ? null : (
+        {memberPath || testMode || installmentTest || fullPaymentTest ? null : (
           <>
             <Field label="Who invited you?" hint="(optional)">
               <input className={inputClass} placeholder="Member name or chapter" value={attendee.invitedBy} onChange={(event) => setAttendee({ ...attendee, invitedBy: event.target.value })} />
@@ -1122,7 +1435,7 @@ function RegistrationWizard() {
     const charging = checkoutTier();
     const dueToday = plan === "installment" && tier.rows[0] ? tier.rows[0].amountCents : charging ? charging.fullCents : tier.fullCents;
     const premium = tier.installmentCents && tier.installmentCents > tier.fullCents ? tier.installmentCents - tier.fullCents : 0;
-    const realTier = tier.code !== "test" && tier.code !== "test_50" && tier.code !== "test_200";
+    const realTier = tier.code !== "test" && tier.code !== "test_50" && tier.code !== "test_100" && tier.code !== "test_200";
     return (
       <Frame
         label="Step 2 of 4"
@@ -1143,9 +1456,9 @@ function RegistrationWizard() {
         <div className="flex flex-col gap-1.5 rounded-[14px] bg-[#141416] p-4 text-[#F6F4F1]">
           <div className="flex items-center justify-between gap-3">
             <span className="font-archivo text-xl font-extrabold">{charging?.name}</span>
-            <span className="rounded-full bg-[#D0202E] px-2.5 py-1 text-[11px] font-bold tracking-[0.1em] text-white uppercase">{charging?.code === "test_50" || charging?.code === "test_200" ? "Test" : charging?.onSale ? "Best price" : "Opens soon"}</span>
+            <span className="rounded-full bg-[#D0202E] px-2.5 py-1 text-[11px] font-bold tracking-[0.1em] text-white uppercase">{charging?.code === "test_50" || charging?.code === "test_100" || charging?.code === "test_200" ? "Test" : charging?.onSale ? "Best price" : "Opens soon"}</span>
           </div>
-          <span className="text-sm text-[#C9C7C2]">{charging?.code === "test_50" || charging?.code === "test_200" ? "Payment is open" : charging?.onSale ? `Register by ${charging.windowLabel.replace("until ", "")}` : `Registration opens ${charging?.opensLabel}`}</span>
+          <span className="text-sm text-[#C9C7C2]">{charging?.code === "test_50" || charging?.code === "test_100" || charging?.code === "test_200" ? "Payment is open" : charging?.onSale ? `Register by ${charging.windowLabel.replace("until ", "")}` : `Registration opens ${charging?.opensLabel}`}</span>
         </div>
         <h2 className="m-0 mt-1 text-[17px] font-bold">How would you like to pay?</h2>
         <PayChoice
@@ -1265,20 +1578,38 @@ function RegistrationWizard() {
         label="Step 3 of 4"
         step={3}
         footer={
-          <div className="flex flex-col gap-2.5">
-            <PrimaryButton disabled={!charging.onSale || saving || (charging.currency === "PHP" && !channel)} onClick={pay}>
+          <div className="flex flex-col gap-3">
+            <PrimaryButton
+              disabled={
+                !charging.onSale
+                || saving
+                || (charging.currency === "PHP" && !channel)
+                || Boolean(turnstileSiteKey && !turnstileToken)
+              }
+              onClick={pay}
+            >
               {charging.onSale
                 ? charging.currency === "PHP"
-                  ? payActionLabel(channel, money(dueToday, charging.currency), saving)
+                  ? payActionLabel(channel, money(dueToday, charging.currency), saving, paynamicsChannel)
                   : `Submit registration · ${money(dueToday, charging.currency)} due`
                 : `Opens ${charging.opensLabel}`}
             </PrimaryButton>
+            {turnstileSiteKey ? (
+              <div className="pt-1">
+                <Turnstile
+                  key={turnstileMountKey}
+                  siteKey={turnstileSiteKey}
+                  onToken={applyTurnstileToken}
+                  onBlocked={setTurnstileBlocked}
+                />
+              </div>
+            ) : null}
+            {payError ? <p className="m-0 text-center text-sm leading-normal text-[#A8131F]">{payError}</p> : null}
           </div>
         }
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep("ticket")}>← Back</button>
         <input className="absolute -left-[9999px] h-0 w-0" tabIndex={-1} autoComplete="off" aria-hidden="true" value={companyWebsite} onChange={(event) => setCompanyWebsite(event.target.value)} />
-        {turnstileSiteKey ? <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} /> : null}
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Payment</h1>
         <LevNote pose="focus" label="Lev holding a card">Secure payment. I've got this.</LevNote>
         <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-2">
@@ -1330,9 +1661,18 @@ function RegistrationWizard() {
         <h2 className="m-0 mt-1 text-[17px] font-bold">Pay with</h2>
         {charging.currency === "PHP" ? (
           <>
-            <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} />
+            <PaymentChoices
+              channels={channels}
+              channel={channel}
+              onChannel={setChannel}
+              method={method}
+              onMethod={setMethod}
+              paynamicsChannel={paynamicsChannel}
+              onPaynamicsChannel={setPaynamicsChannel}
+              paynamicsCheckout={paynamicsCheckout}
+            />
             <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
-              Receipt goes to {attendee.email} and {attendee.mobile}.
+              Receipt · {attendee.email} · {attendee.mobile}
             </p>
           </>
         ) : (
@@ -1340,8 +1680,29 @@ function RegistrationWizard() {
             UnionBank UPay collects peso payments. This ticket is in US dollars, so the seat is held and IBMC records the payment separately. Receipt goes to {attendee.email} and {attendee.mobile}.
           </p>
         )}
-        {payError ? <p className="m-0 text-sm text-[#A8131F]">{payError}</p> : null}
       </Frame>
+    );
+  }
+
+  if (step === "paying" && saved && paynamicsSession) {
+    return (
+      <PaynamicsPending
+        record={saved}
+        session={paynamicsSession}
+        onUpdate={(registration, session) => {
+          setSaved(registration);
+          setPaynamicsSession(session);
+          if (session.status === "paid") setStep("done");
+        }}
+        onLater={() => {
+          setPaynamicsSession(null);
+          setStep("form");
+        }}
+        onBack={() => {
+          setPaynamicsSession(null);
+          setStep("form");
+        }}
+      />
     );
   }
 
@@ -1377,7 +1738,18 @@ function RegistrationWizard() {
     );
   }
   if (step === "done" && saved) return <Confirmed record={saved} onManage={() => setStep("manage")} />;
-  if (step === "manage") return <Manage initialQuery={lookup} onStart={() => setStep("start")} />;
+  if (step === "manage") {
+    return (
+      <Manage
+        initialQuery={lookup}
+        initialRecord={managedRecord}
+        onStart={() => {
+          setManagedRecord(null);
+          setStep("start");
+        }}
+      />
+    );
+  }
   return null;
 }
 
@@ -1424,12 +1796,18 @@ function PaymentChoices({
   onChannel,
   method,
   onMethod,
+  paynamicsChannel,
+  onPaynamicsChannel,
+  paynamicsCheckout,
 }: {
   channels: PayChannel[] | null;
   channel: PayChannelCode | "";
   onChannel: (channel: PayChannelCode) => void;
   method: UpayMethod;
   onMethod: (method: UpayMethod) => void;
+  paynamicsChannel: PaynamicsChannel;
+  onPaynamicsChannel: (channel: PaynamicsChannel) => void;
+  paynamicsCheckout?: PaynamicsCheckoutPublic;
 }) {
   if (channels === null) return <p className="m-0 text-sm text-[#5C5C63]">Loading payment options.</p>;
   if (channels.length === 0) return <p className="m-0 text-sm text-[#5C5C63]">Payment isn't open right now.</p>;
@@ -1460,7 +1838,45 @@ function PaymentChoices({
       {channel === "hitpay_online" ? (
         <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">You'll continue to HitPay to pay with UnionBank Online. That page closes after 5 minutes. Coming back here does not by itself mean the payment went through.</p>
       ) : null}
+      {channel === "paynamics" ? (
+        <>
+          <PaynamicsMethods channel={paynamicsChannel} onChange={onPaynamicsChannel} />
+          {paynamicsCheckout?.checkoutMode === "off" ? (
+            <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] leading-normal text-[#A8131F]">
+              Paynamics checkout is not enabled on this server
+              {paynamicsCheckout.apiAdmissionReason ? ` (${paynamicsCheckout.apiAdmissionReason})` : ""}
+              . See <code className="text-[12px]">docs/paynamics-staging.md</code>.
+            </p>
+          ) : (
+            <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">You'll continue to Paynamics to finish this payment.</p>
+          )}
+        </>
+      ) : null}
     </>
+  );
+}
+
+function PaynamicsMethods({ channel, onChange }: { channel: PaynamicsChannel; onChange: (channel: PaynamicsChannel) => void }) {
+  let group = "";
+  return (
+    <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF] bg-white">
+      {PAYNAMICS_CHANNELS.map((item) => {
+        const heading = item.group !== group;
+        group = item.group;
+        return (
+          <div key={item.id}>
+            {heading ? <p className="m-0 border-t border-[#E4E1DC] px-4 pt-3 text-xs font-bold tracking-[0.12em] text-[#A8131F] uppercase first:border-t-0">{item.group}</p> : null}
+            <label className={`flex items-start gap-3 px-4 py-3 ${channel === item.id ? "bg-[#FBE9EA]" : ""}`}>
+              <input type="radio" name="paynamics-channel" className="mt-1 h-5 w-5 accent-[#D0202E]" checked={channel === item.id} onChange={() => onChange(item.id)} />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-[15px] font-semibold">{item.label}</span>
+                <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{item.detail}</span>
+              </span>
+            </label>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1716,6 +2132,150 @@ function HitpayPending({
   );
 }
 
+function PaynamicsPending({
+  record,
+  session,
+  onUpdate,
+  onLater,
+  onBack,
+}: {
+  record: StoredRegistration;
+  session: PaynamicsSession;
+  onUpdate: (registration: StoredRegistration, session: PaynamicsSession) => void;
+  onLater: () => void;
+  onBack: () => void;
+}) {
+  const [checking, setChecking] = useState(false);
+  const [error, setError] = useState("");
+  const [current, setCurrent] = useState(session);
+
+  useEffect(() => {
+    setCurrent(session);
+  }, [session]);
+
+  useEffect(() => {
+    if (current.status === "paid" || current.status === "failed" || current.status === "expired") return;
+    const timer = window.setInterval(() => {
+      fetch(`/api/payments/paynamics/${current.requestId}`, { headers: resumeHeaders() })
+        .then((response) => response.json())
+        .then((payload) => {
+          if (payload.registration && payload.paynamics) onUpdate(mergeStored(record, payload.registration), payload.paynamics);
+        })
+        .catch(() => {});
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [current.requestId, current.status, onUpdate, record]);
+
+  async function checkStatus() {
+    setChecking(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/payments/paynamics/${current.requestId}`, { headers: resumeHeaders() });
+      const payload = await response.json();
+      if (payload.registration && payload.paynamics) onUpdate(mergeStored(record, payload.registration), payload.paynamics);
+      if (payload.paynamics?.status === "failed") setError("This payment can't continue. Nothing was charged.");
+      else if (payload.error && payload.paynamics?.status === "pending") setError(payload.error);
+    } catch {
+      setError("Paynamics has not confirmed the payment yet.");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  if (current.status === "paid") {
+    return <Confirmed record={record} onManage={onBack} />;
+  }
+
+  return (
+    <Frame label="Payment">
+      <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Pay with Paynamics</h1>
+      <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">
+        {current.settlementDisabled
+          ? "Finish payment on Paynamics. This page does not confirm payment from a return link alone; settlement waits for a verified provider notification contract."
+          : "Finish payment on Paynamics. This page checks with Paynamics every few seconds and when you tap check again — your return from Paynamics alone does not confirm payment."}
+      </p>
+      <div className="rounded-[14px] border border-[#E4E1DC] bg-white p-4 text-sm leading-normal text-[#3A3A40]">
+        {current.status === "expired"
+          ? "The Paynamics checkout window expired. Nothing was charged unless Paynamics confirms otherwise."
+          : "Waiting for Paynamics. Stay on this page if you already paid."}
+      </div>
+      {current.status === "failed" ? (
+        <p className="m-0 text-sm text-[#A8131F]">This payment can&apos;t continue. Nothing was charged.</p>
+      ) : null}
+      <button
+        type="button"
+        disabled={checking || current.status === "paid"}
+        className="self-start text-sm font-semibold text-[#A8131F] disabled:text-[#C8C4BE]"
+        onClick={checkStatus}
+      >
+        {checking ? "Checking payment status" : "I've paid — check again"}
+      </button>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="text-sm font-semibold text-[#3A3A40]" onClick={onLater}>
+          Pay later
+        </button>
+        {current.status === "pending" && safePaynamicsUrl(current.paymentUrl) ? (
+          <a className="text-sm font-semibold text-[#A8131F] no-underline" href={safePaynamicsUrl(current.paymentUrl)}>
+            Open Paynamics again
+          </a>
+        ) : null}
+      </div>
+      {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
+    </Frame>
+  );
+}
+
+function PaynamicsReturn({ requestId }: { requestId: string }) {
+  const [record, setRecord] = useState<StoredRegistration | null>(null);
+  const [session, setSession] = useState<PaynamicsSession | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let stop = false;
+    async function load() {
+      try {
+        const response = await fetch(`/api/payments/paynamics/${requestId}`, { headers: resumeHeaders() });
+        const payload = await response.json();
+        if (stop) return;
+        if (payload.registration) setRecord(payload.registration);
+        if (payload.paynamics) setSession(payload.paynamics);
+        if (!response.ok && !payload.paynamics) setError(payload.error || "Payment not found");
+      } catch {
+        if (!stop) setError("Checking payment status failed.");
+      }
+    }
+    load();
+    return () => {
+      stop = true;
+    };
+  }, [requestId]);
+
+  if (record && session?.status === "paid") {
+    return <Confirmed record={record} onManage={() => { window.location.href = "/register"; }} />;
+  }
+  if (record && session) {
+    return (
+      <PaynamicsPending
+        record={record}
+        session={session}
+        onUpdate={(registration, next) => {
+          setRecord(registration);
+          setSession(next);
+        }}
+        onLater={() => { window.location.href = "/register"; }}
+        onBack={() => { window.location.href = "/register"; }}
+      />
+    );
+  }
+  return (
+    <Frame label="Payment">
+      <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Checking payment status</h1>
+      <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">Your return from Paynamics does not confirm payment. This page waits for Paynamics&apos; signed server notification.</p>
+      {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
+    </Frame>
+  );
+}
+
 function HitpayReturn({ sessionId }: { sessionId: string }) {
   const [record, setRecord] = useState<StoredRegistration | null>(null);
   const [session, setSession] = useState<HitpaySession | null>(null);
@@ -1856,15 +2416,17 @@ function Confirmed({ record, onManage }: { record: StoredRegistration; onManage:
 function Manage({
   onStart,
   initialQuery = "",
+  initialRecord = null,
   payReference = "",
   openPayOnLoad = false,
 }: {
   onStart: () => void;
   initialQuery?: string;
+  initialRecord?: StoredRegistration | null;
   payReference?: string;
   openPayOnLoad?: boolean;
 }) {
-  const [record, setRecord] = useState<StoredRegistration | null>(null);
+  const [record, setRecord] = useState<StoredRegistration | null>(initialRecord);
   const [query, setQuery] = useState(payReference || initialQuery);
   const [found, setFound] = useState<{ fullName: string; tierName: string; maskedEmail: string } | null>(null);
   const [lookedUp, setLookedUp] = useState(false);
@@ -1872,13 +2434,15 @@ function Manage({
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const { secondsLeft: resendSeconds, start: startResendCooldown, reset: resetResendCooldown } = useResendCooldown();
   const [method, setMethod] = useState<UpayMethod>("instapay");
-  const { channels, channel, setChannel } = usePaymentChannels();
+  const { channels, channel, setChannel, paynamicsCheckout, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
   const [payingInstallment, setPayingInstallment] = useState(false);
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
-  const [badgeName, setBadgeName] = useState("");
-  const [badgeCompany, setBadgeCompany] = useState("");
+  const [paynamicsSession, setPaynamicsSession] = useState<PaynamicsSession | null>(null);
+  const [badgeName, setBadgeName] = useState(initialRecord?.attendee.fullName || "");
+  const [badgeCompany, setBadgeCompany] = useState(initialRecord?.attendee.business || "");
   const [badgeNote, setBadgeNote] = useState("");
   const [badgeError, setBadgeError] = useState("");
   const payIntent = Boolean(payReference || openPayOnLoad);
@@ -1922,6 +2486,7 @@ function Manage({
         if (stop) return;
         if (!sent.ok) throw new Error("Could not send the code");
         setMaskedEmail("your email");
+        startResendCooldown();
       } catch (lookupError) {
         if (!stop) setError(lookupError instanceof Error ? lookupError.message : "Search failed");
       } finally {
@@ -1939,11 +2504,21 @@ function Manage({
     setMaskedEmail("");
     setCode("");
     setError("");
+    resetResendCooldown();
   }
 
   async function findRegistration() {
     const contact = query.trim();
-    if (!contact || busy) return;
+    if (!contact || busy || resendSeconds > 0) return;
+    const parsed = parseLookupContact(contact, { reference: true });
+    if ("error" in parsed) {
+      setFound(null);
+      setLookedUp(false);
+      setMaskedEmail("");
+      setCode("");
+      setError(parsed.error);
+      return;
+    }
     setBusy(true);
     setError("");
     setFound(null);
@@ -1959,6 +2534,7 @@ function Manage({
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(payload.error || "Could not send the code");
       setMaskedEmail("your email");
+      startResendCooldown();
     } catch (lookupError) {
       setError(lookupError instanceof Error ? lookupError.message : "Search failed");
     } finally {
@@ -1968,7 +2544,12 @@ function Manage({
 
   async function sendCode() {
     const contact = query.trim();
-    if (!contact || busy) return;
+    if (!contact || busy || resendSeconds > 0) return;
+    const parsed = parseLookupContact(contact, { reference: true });
+    if ("error" in parsed) {
+      setError(parsed.error);
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -1981,6 +2562,7 @@ function Manage({
       if (!response.ok) throw new Error(payload.error || "Could not send the code");
       setMaskedEmail("your email");
       setCode("");
+      startResendCooldown();
     } catch (sendError) {
       setError(sendError instanceof Error ? sendError.message : "Could not send the code");
     } finally {
@@ -2036,7 +2618,7 @@ function Manage({
             />
             <button
               type="button"
-              disabled={!query.trim() || busy}
+              disabled={!query.trim() || busy || resendSeconds > 0}
               onClick={findRegistration}
               className="shrink-0 rounded-full bg-[#141416] px-4 text-sm font-bold text-white disabled:bg-[#C8C4BE]"
             >
@@ -2073,7 +2655,7 @@ function Manage({
             {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
             <div className="flex gap-2">
               <button type="button" disabled={code.length !== 6 || busy} onClick={confirmCode} className="rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]">Confirm code</button>
-              <button type="button" disabled={busy} onClick={sendCode} className="rounded-full border border-[#D9D5CF] px-4 py-2.5 text-sm font-semibold">Resend</button>
+              <ResendCodeButton secondsLeft={resendSeconds} busy={busy} onClick={sendCode} />
             </div>
           </div>
         ) : null}
@@ -2119,28 +2701,49 @@ function Manage({
 
   async function startPayment() {
     if (!record || busy || record.currency !== "PHP" || !channel) return;
-    const hitpay = hitpayApiChannel(channel);
+    if (channel === "paynamics" && paynamicsCheckout.checkoutMode === "off") {
+      const reason = paynamicsCheckout.apiAdmissionReason ? ` (${paynamicsCheckout.apiAdmissionReason})` : "";
+      setError(`Paynamics checkout is not enabled on this server${reason}.`);
+      return;
+    }
+    const paynamics = channel === "paynamics";
+    const hitpay = paynamics ? "" : hitpayApiChannel(channel);
     setBusy(true);
     setError("");
     try {
-      const response = await fetch(hitpay ? `/api/registrations/${record.reference}/hitpay` : `/api/registrations/${record.reference}/upay`, {
+      const path = paynamics
+        ? `/api/registrations/${record.reference}/paynamics`
+        : hitpay
+          ? `/api/registrations/${record.reference}/hitpay`
+          : `/api/registrations/${record.reference}/upay`;
+      const response = await fetch(path, {
         method: "POST",
         headers: resumeHeaders({ "Content-Type": "application/json" }, record.resumeToken),
-        body: JSON.stringify(hitpay ? { channel: hitpay } : { paymentMethod: method }),
+        body: JSON.stringify(paynamics ? { pchannel: paynamicsChannel } : hitpay ? { channel: hitpay } : { paymentMethod: method }),
       });
       const payload = await response.json();
       if (payload.registration) setRecord(payload.registration);
       if (!response.ok) throw new Error(payload.error || "The payment could not be started.");
       if (payload.upay?.senderRefId) {
         setHitpaySession(null);
+        setPaynamicsSession(null);
         setUpaySession(payload.upay);
         setPayingInstallment(false);
       }
       if (payload.hitpay?.sessionId) {
         setUpaySession(null);
+        setPaynamicsSession(null);
         setHitpaySession(payload.hitpay);
         setPayingInstallment(false);
         const url = payload.hitpay.channel === "online" ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
+        if (url) window.location.assign(url);
+      }
+      if (payload.paynamics?.requestId) {
+        setUpaySession(null);
+        setHitpaySession(null);
+        setPaynamicsSession(payload.paynamics);
+        setPayingInstallment(false);
+        const url = safePaynamicsUrl(payload.paynamics.paymentUrl);
         if (url) window.location.assign(url);
       }
     } catch (payError) {
@@ -2148,6 +2751,25 @@ function Manage({
     } finally {
       setBusy(false);
     }
+  }
+
+  if (paynamicsSession) {
+    return (
+      <PaynamicsPending
+        record={record}
+        session={paynamicsSession}
+        onUpdate={(registration, session) => {
+          setRecord(registration);
+          setPaynamicsSession(session);
+          if (session.status === "paid") {
+            setPaynamicsSession(null);
+            setPayingInstallment(false);
+          }
+        }}
+        onLater={() => setPaynamicsSession(null)}
+        onBack={() => setPaynamicsSession(null)}
+      />
+    );
   }
 
   if (hitpaySession) {
@@ -2243,14 +2865,23 @@ function Manage({
             payingInstallment ? (
               <>
                 <h2 className="m-0 text-[17px] font-bold">Choose how to pay</h2>
-                <PaymentChoices channels={channels} channel={channel} onChannel={setChannel} method={method} onMethod={setMethod} />
+                <PaymentChoices
+                  channels={channels}
+                  channel={channel}
+                  onChannel={setChannel}
+                  method={method}
+                  onMethod={setMethod}
+                  paynamicsChannel={paynamicsChannel}
+                  onPaynamicsChannel={setPaynamicsChannel}
+                  paynamicsCheckout={paynamicsCheckout}
+                />
                 <button
                   type="button"
                   disabled={busy || !channel}
                   onClick={startPayment}
                   className="rounded-full bg-[#D0202E] px-4 py-3.5 text-base font-bold text-white disabled:bg-[#E4A0A6]"
                 >
-                  {payActionLabel(channel, money(due.amountCents, record.currency), busy)}
+                  {payActionLabel(channel, money(due.amountCents, record.currency), busy, paynamicsChannel)}
                 </button>
                 <button
                   type="button"
@@ -2340,9 +2971,12 @@ function Manage({
             {busy ? "Saving" : "Save badge"}
           </button>
         </div>
-        {record.planStatus === "fully_paid" && record.qrToken ? (
+        {record.qrReady && record.qrToken ? (
           <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-5">
             <span className="self-start text-[15px] font-bold">QR ticket</span>
+            <span className="font-archivo text-xl font-extrabold tracking-[0.04em] text-[#141416]">
+              IBMC <span className="text-[#D0202E]">2027</span>
+            </span>
             <img src={`/api/passes/${encodeURIComponent(record.qrToken)}/qr`} alt="QR ticket" className="h-56 w-56" />
             <span className="font-archivo text-lg font-extrabold">{record.reference}</span>
             <span className="text-center text-[13px] leading-snug text-[#5C5C63]">Show this at the door on both days.</span>
@@ -2383,6 +3017,8 @@ function payReferenceFromPath(pathname: string) {
 }
 
 export default function Registration() {
+  const paynamicsRequest = new URLSearchParams(window.location.search).get("paynamicsRequest") || "";
+  if (paynamicsRequest) return <PaynamicsReturn requestId={paynamicsRequest} />;
   const paySession = new URLSearchParams(window.location.search).get("paySession") || "";
   if (paySession) return <HitpayReturn sessionId={paySession} />;
   const payReference = payReferenceFromPath(window.location.pathname);

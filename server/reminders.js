@@ -40,7 +40,7 @@ function installmentStillDue(db, installmentId) {
   return row.status === "due" && row.amount_paid_cents < row.amount_cents;
 }
 
-async function deliver(channel, recipient, rendered, idempotencyKey) {
+async function deliver(channel, recipient, rendered, idempotencyKey, deliveryKind = "general") {
   if (channel === "email") {
     return sendEmail({
       to: recipient,
@@ -48,6 +48,7 @@ async function deliver(channel, recipient, rendered, idempotencyKey) {
       html: rendered.html,
       text: rendered.body,
       idempotencyKey,
+      deliveryKind,
     });
   }
   return sendSms({ to: recipient, message: rendered.body });
@@ -88,7 +89,10 @@ async function queue(db, row, rendered) {
   if (row.templateKey === "installment_reminder" && !installmentStillDue(db, row.installmentId)) return false;
   const existing = db.prepare("SELECT id, status, error FROM reminder_dispatches WHERE dispatch_key = ?").get(row.dispatchKey);
   if (existing) {
-    const retryable = existing.status !== "sent" && (existing.status === "skipped" || existing.error === "provider_not_configured") && providerReady(row.channel);
+    const retryable = existing.status !== "sent"
+      && existing.status === "skipped"
+      && (existing.error === "provider_not_configured" || existing.error === "staging_safe_mode")
+      && providerReady(row.channel);
     if (!retryable) return false;
     db.prepare("DELETE FROM reminder_dispatches WHERE id = ?").run(existing.id);
   }
@@ -97,9 +101,44 @@ async function queue(db, row, rendered) {
     insertDispatch(db, { ...row, ...rendered, includesQr: false }, { status: "failed", error: "qr_blocked" });
     return true;
   }
-  const result = await deliver(row.channel, row.recipient, rendered, `${row.templateKey}/${row.dispatchKey}`);
+  const deliveryKind = row.templateKey === "entry_pass" ? "entry_pass" : "general";
+  const result = await deliver(row.channel, row.recipient, rendered, `${row.templateKey}/${row.dispatchKey}`, deliveryKind);
   insertDispatch(db, { ...row, ...rendered }, result);
   return true;
+}
+
+export async function sendEntryPassForRegistration(db, registrationId, { force = false } = {}) {
+  const registration = getRegistration(db, registrationId);
+  if (!registration?.qr_token || registration.balance_cents !== 0 || !registration.fully_paid_at) {
+    return { ok: false, error: "not_fully_paid" };
+  }
+  const rule = db.prepare(`
+    SELECT * FROM reminder_rules
+    WHERE enabled = 1 AND trigger = 'fully_paid' AND channel = 'email' AND template_key = 'entry_pass'
+    LIMIT 1
+  `).get();
+  if (!rule) return { ok: false, error: "no_rule" };
+  const dispatchKey = `reg:${registration.id}:rule:${rule.id}`;
+  if (force) db.prepare("DELETE FROM reminder_dispatches WHERE dispatch_key = ?").run(dispatchKey);
+  const passUrl = `${siteUrl()}/pass/${registration.qr_token}`;
+  const rendered = await renderEntryPass({ registration, passUrl });
+  const queued = await queue(db, {
+    dispatchKey,
+    registrationId: registration.id,
+    installmentId: null,
+    ruleId: rule.id,
+    channel: rule.channel,
+    templateKey: rule.template_key,
+    recipient: registration.email,
+  }, rendered);
+  const row = db.prepare("SELECT status, error FROM reminder_dispatches WHERE dispatch_key = ?").get(dispatchKey);
+  return { ok: queued && row?.status === "sent", status: row?.status, error: row?.error || (queued ? null : "not_queued") };
+}
+
+export function queueEntryPassAfterPayment(db, registrationId) {
+  void sendEntryPassForRegistration(db, registrationId).catch((error) => {
+    console.error("Entry pass email failed:", error.message);
+  });
 }
 
 export async function runReminders(db, now = new Date()) {

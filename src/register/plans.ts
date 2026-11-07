@@ -123,6 +123,24 @@ export function testInstallmentTier(): Tier {
   };
 }
 
+export function test100PaymentTier(): Tier {
+  return {
+    code: "test_100",
+    name: "Staging test · ₱100",
+    currency: "PHP",
+    fullCents: 10_000,
+    installmentCents: null,
+    windowLabel: "staging only",
+    nextLabel: "₱100 full payment. For Paynamics staging checkout.",
+    onSale: true,
+    opensLabel: null,
+    rows: [],
+    saveLabel: "One payment of ₱100.",
+    installmentSummary: null,
+    note: null,
+  };
+}
+
 export function testPaymentTier(): Tier {
   return {
     code: "test_50",
@@ -212,7 +230,7 @@ export function tierFor(today: string, international: boolean): Tier | null {
       rows: EARLY_BIRD_ROWS,
       saveLabel: "One payment today. Save ₱3,000 against Regular.",
       installmentSummary: "₱4,000 today, then ₱3,000 a month, Feb to May.",
-      note: "Phase 2 payments begin in February for all Early Bird registrants.",
+      note: null,
     };
   }
   return {

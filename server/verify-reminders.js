@@ -8,6 +8,8 @@ import { addDays, manilaParts } from "./time.js";
 delete process.env.RESEND_API_KEY;
 delete process.env.SEMAPHORE_API_KEY;
 process.env.ALLOW_TEST_REGISTRATION = "true";
+process.env.IBMC_STAGING_EARLY_PAYMENTS = "true";
+process.env.IBMC_DEPLOYMENT_ENV = "staging";
 
 const db = openDatabase(":memory:");
 const today = manilaParts().date;

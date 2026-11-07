@@ -1,9 +1,14 @@
 import "dotenv/config";
 import express from "express";
 import { randomBytes } from "crypto";
-import { openDatabase, testRegistrationEnabled, testTicketEnabled } from "./db.js";
+import { openDatabase, testTicketEnabled } from "./db.js";
+import {
+  assessStagingEarlyPayments,
+  stagingTestRegistrationAllowed,
+} from "./staging-early-payments.js";
 import { beginMfaSetup, clearSessionCookie, cookieValue, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
-import { admitPass, cancelRegistration, compRegistration, createRegistration, ensureResumeToken, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
+import { admitPass, cancelRegistration, compRegistration, createRegistration, discardUnopenedRegistration, ensureResumeToken, entryPassEligible, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
+import { sendEntryPassForRegistration } from "./reminders.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
 import { listMembers, lookupMember, memberContactClash, memberFromProof, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
@@ -13,7 +18,8 @@ import { rateLimit } from "./limits.js";
 import { formatLongDate, manilaParts } from "./time.js";
 import { handleUpayCallback, refreshUpayPayment, startUpayPayment } from "./upay.js";
 import { handleHitpayWebhook, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
-import { hitpayConfigured, listPaymentChannels, savePaymentChannels } from "./payment-channels.js";
+import { handlePaynamicsNotification, paynamicsCheckoutChannel, paynamicsPublicCheckoutInfo, refreshPaynamicsPayment, startPaynamicsPayment } from "./paynamics.js";
+import { hitpayConfigured, listPaymentChannels, paynamicsConfigured, savePaymentChannels } from "./payment-channels.js";
 import { entryQrPng } from "./templates.js";
 import { recordSecurityEvent } from "./alerts.js";
 
@@ -25,6 +31,92 @@ function db() {
     seedAdmin(database);
   }
   return database;
+}
+
+function channelLabel(value) {
+  const labels = {
+    paymaya_ph: "Maya",
+    grabpay_ph: "GrabPay",
+    bpi_online: "BPI",
+    ubp_online: "UnionBank Online",
+    br_landbank_ph: "Landbank",
+    gc: "GCash",
+    qr: "QR Ph",
+    online: "Online banking",
+    instapay: "InstaPay",
+    paygate: "Other banks",
+    "UB Online": "UnionBank Online",
+  };
+  const key = String(value || "").trim();
+  return labels[key] || key.replaceAll("_", " ");
+}
+
+function registrationTransactions(database, registrationId) {
+  const ledger = database.prepare(`
+    SELECT amount_cents, method, external_reference, recorded_at
+    FROM payments WHERE registration_id = ? ORDER BY id
+  `).all(registrationId);
+  const recorded = new Set(ledger.map((item) => item.external_reference).filter(Boolean));
+  const rows = [];
+  for (const item of database.prepare(`
+    SELECT request_id, amount_cents, status, gateway_response_code, gateway_message, payment_channel, created_at, updated_at
+    FROM paynamics_payments WHERE registration_id = ? ORDER BY id
+  `).all(registrationId)) {
+    rows.push({
+      at: item.updated_at || item.created_at,
+      provider: "Paynamics",
+      channel: channelLabel(item.payment_channel),
+      status: item.status,
+      amountCents: item.amount_cents,
+      reference: item.request_id,
+      gateway: [item.gateway_response_code, item.gateway_message].filter(Boolean).join(" · "),
+      recorded: recorded.has(item.request_id),
+    });
+  }
+  for (const item of database.prepare(`
+    SELECT session_id, gateway_ref, amount_cents, channel, status, gateway_status, created_at, updated_at
+    FROM hitpay_payments WHERE registration_id = ? ORDER BY id
+  `).all(registrationId)) {
+    rows.push({
+      at: item.updated_at || item.created_at,
+      provider: "HitPay",
+      channel: channelLabel(item.channel),
+      status: item.status,
+      amountCents: item.amount_cents,
+      reference: item.gateway_ref || item.session_id,
+      gateway: item.gateway_status || "",
+      recorded: recorded.has(item.session_id),
+    });
+  }
+  for (const item of database.prepare(`
+    SELECT sender_ref_id, amount_cents, payment_method, status, unionbank_code, unionbank_state, transaction_id, created_at, updated_at
+    FROM upay_payments WHERE registration_id = ? ORDER BY id
+  `).all(registrationId)) {
+    rows.push({
+      at: item.updated_at || item.created_at,
+      provider: "U Pay",
+      channel: channelLabel(item.payment_method),
+      status: item.status,
+      amountCents: item.amount_cents,
+      reference: item.transaction_id || item.sender_ref_id,
+      gateway: [item.unionbank_code, item.unionbank_state].filter(Boolean).join(" · "),
+      recorded: recorded.has(item.sender_ref_id),
+    });
+  }
+  for (const item of ledger) {
+    if (item.external_reference && rows.some((row) => row.reference === item.external_reference)) continue;
+    rows.push({
+      at: item.recorded_at,
+      provider: "Recorded",
+      channel: channelLabel(item.method),
+      status: "paid",
+      amountCents: item.amount_cents,
+      reference: item.external_reference || "",
+      gateway: "",
+      recorded: true,
+    });
+  }
+  return rows;
 }
 
 function present(registration, options = {}) {
@@ -68,11 +160,12 @@ function present(registration, options = {}) {
     balanceCents: registration.balance_cents,
     status: registration.status,
     planStatus: registration.status === "cancelled" ? "cancelled" : registration.balance_cents === 0 ? "fully_paid" : registration.plan_status || "active",
-    qrReady: registration.balance_cents === 0 && Boolean(registration.qr_token),
+    qrReady: entryPassEligible(registration),
     registeredOn: registration.registered_on,
     payments,
+    ...(options.transactions ? { transactions: options.transactions } : {}),
     ...(options.resume && registration.resume_token ? { resumeToken: registration.resume_token } : {}),
-    ...(options.resume && registration.balance_cents === 0 && registration.qr_token ? { qrToken: registration.qr_token } : {}),
+    ...(options.resume && entryPassEligible(registration) ? { qrToken: registration.qr_token } : {}),
   };
 }
 
@@ -200,7 +293,7 @@ export function createApi() {
   });
   app.use((req, res, next) => {
     const url = req.originalUrl || req.url || "";
-    if (url.includes("/payments/upay/callback") || url.includes("/webhooks/hitpay")) return next();
+    if (url.includes("/payments/upay/callback") || url.includes("/webhooks/hitpay") || url.includes("/webhooks/paynamics")) return next();
     express.json({ limit: "2mb" })(req, res, next);
   });
   const loginLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, bucket: "login", db });
@@ -217,15 +310,19 @@ export function createApi() {
   router.get("/payment-channels", (_req, res) => {
     res.json({
       channels: listPaymentChannels(db(), { enabledOnly: true }).map(({ code, label, detail }) => ({ code, label, detail })),
+      paynamics: paynamicsPublicCheckoutInfo(),
     });
   });
 
   router.get("/registration-options", (_req, res) => {
     const siteKey = String(process.env.TURNSTILE_SITE_KEY || "").trim();
     const secret = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
+    const stagingEarly = assessStagingEarlyPayments();
     res.json({
-      tests: testRegistrationEnabled(),
+      tests: stagingTestRegistrationAllowed(),
       testTicket: testTicketEnabled(),
+      stagingEarlyPayments: { enabled: stagingEarly.allowed, reason: stagingEarly.reason },
+      turnstileConfigured: Boolean(siteKey && secret),
       turnstileSiteKey: siteKey && secret ? siteKey : "",
     });
   });
@@ -244,7 +341,7 @@ export function createApi() {
     const token = String(req.body?.challenge || "");
     const row = token ? db().prepare("SELECT expires_at FROM form_challenges WHERE token = ?").get(token) : null;
     if (!row || row.expires_at < Date.now()) {
-      res.status(400).json({ error: "Refresh the page and try again." });
+      res.status(400).json({ error: "Refresh the page and try again.", code: "form_challenge_invalid" });
       return true;
     }
     db().prepare("DELETE FROM form_challenges WHERE token = ?").run(token);
@@ -257,7 +354,7 @@ export function createApi() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!payload.success) {
-        res.status(400).json({ error: "Confirm you are a person and try again." });
+        res.status(400).json({ error: "Confirm you are a person and try again.", code: "turnstile_rejected" });
         return true;
       }
     }
@@ -270,8 +367,16 @@ export function createApi() {
 
   router.post("/members/otp", otpLimit, async (req, res) => {
     const result = await sendMemberOtp(db(), req.body?.query || req.body?.email);
-    if (result.error && result.status !== 404) console.error("Member code was not sent");
-    res.json({ ok: true });
+    if (result.error) {
+      if (result.status !== 404 && result.status !== 400) console.error("Member code was not sent");
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    if (result.waited) {
+      res.json({ ok: true, maskedEmail: result.maskedEmail, waited: true });
+      return;
+    }
+    res.json({ ok: true, maskedEmail: result.maskedEmail });
   });
 
   router.post("/members/otp/verify", otpLimit, (req, res) => {
@@ -285,16 +390,29 @@ export function createApi() {
       res.status(400).json({ error: "That code is wrong." });
       return;
     }
-    const registered = [member.email, member.mobile].some((contact) => {
-      const registration = findRegistrationByContact(db(), contact);
-      return Boolean(registration && registration.status === "confirmed");
-    });
+    const email = String(member.email || "").trim().toLowerCase();
+    const byEmail = email ? findRegistrationByContact(db(), email) : null;
+    const emailOwned = byEmail
+      && byEmail.status === "confirmed"
+      && String(byEmail.email || "").trim().toLowerCase() === email
+      ? byEmail
+      : null;
+    const byMobile = member.mobile ? findRegistrationByContact(db(), member.mobile) : null;
+    const mobileOwned = byMobile && byMobile.status === "confirmed" ? byMobile : null;
+    const owned = emailOwned || mobileOwned;
+    const registered = Boolean(owned);
     const { id, ...visible } = member;
-    res.json({
+    const body = {
       ok: true,
       editToken: result.editToken,
       member: { ...visible, registered, memberToken: toPublicMember(member, registered).memberToken },
-    });
+    };
+    if (owned) {
+      const registration = ensureResumeToken(db(), owned);
+      attachResume(res, registration);
+      body.registration = present(registration, { resume: true });
+    }
+    res.json(body);
   });
 
   router.post("/members/details", otpLimit, (req, res) => {
@@ -337,8 +455,8 @@ export function createApi() {
 
   function createPublicRegistration(body) {
     const today = manilaParts().date;
-    const testProduct = body.productCode === "test" || body.productCode === "test_50" || body.productCode === "test_200";
-    if (testProduct && !(body.productCode === "test" ? testTicketEnabled() : testRegistrationEnabled())) {
+    const testProduct = body.productCode === "test" || body.productCode === "test_50" || body.productCode === "test_100" || body.productCode === "test_200";
+    if (testProduct && !(body.productCode === "test" ? testTicketEnabled() : stagingTestRegistrationAllowed())) {
       const error = new Error("Unknown ticket");
       error.status = 400;
       throw error;
@@ -354,7 +472,14 @@ export function createApi() {
       error.status = 400;
       throw error;
     }
-    if (body.productCode !== "test" && body.productCode !== "test_50" && body.productCode !== "test_200" && body.attendeeType === "guest" && today < "2027-02-01") {
+    if (
+      body.productCode !== "test"
+      && body.productCode !== "test_50"
+      && body.productCode !== "test_100"
+      && body.productCode !== "test_200"
+      && body.attendeeType === "guest"
+      && today < "2027-02-01"
+    ) {
       const error = new Error("Guest registration opens February 1, 2027");
       error.status = 400;
       throw error;
@@ -390,6 +515,20 @@ export function createApi() {
     res.status(created ? 201 : 200).json(body);
   }
 
+  function sendPaynamics(res, result, created) {
+    if (result.resume) attachResume(res, result.registration);
+    const body = {
+      error: result.error,
+      registration: result.registration ? present(result.registration, { contact: result.contact !== false, resume: result.resume === true }) : undefined,
+      paynamics: result.paynamics || undefined,
+    };
+    if (result.error) {
+      res.status(result.status || 502).json(body);
+      return;
+    }
+    res.status(created ? 201 : 200).json(body);
+  }
+
   function sendUpay(res, result, created) {
     if (result.error) {
       res.status(result.status || 502).json({
@@ -404,6 +543,23 @@ export function createApi() {
       registration: present(result.registration, { contact: result.contact !== false, resume: result.resume === true }),
       upay: result.upay,
     });
+  }
+
+  function hostedCheckoutStarted(result) {
+    if (!result || result.error) return false;
+    if (result.paynamics) return Boolean(result.paynamics.paymentUrl);
+    if (result.hitpay) return Boolean(result.hitpay.sessionId);
+    if (result.upay) return Boolean(result.upay.senderRefId);
+    return false;
+  }
+
+  function finishNewCheckout(res, send, registration, result) {
+    if (hostedCheckoutStarted(result)) {
+      send(res, { ...result, resume: true }, true);
+      return;
+    }
+    discardUnopenedRegistration(db(), registration.id);
+    send(res, { ...result, registration: undefined, resume: false, error: result.error || "Payment did not start. Nothing was saved." }, true);
   }
 
   function ownerAccess(registration, token) {
@@ -424,11 +580,13 @@ export function createApi() {
 
   router.post("/registrations/upay", registerLimit, async (req, res) => {
     if (await rejectBot(req, res)) return;
+    let registration;
     try {
-      const registration = createPublicRegistration(req.body || {});
+      registration = createPublicRegistration(req.body || {});
       const result = await startUpayPayment(db(), registration, req.body?.paymentMethod);
-      sendUpay(res, { ...result, resume: true }, true);
+      finishNewCheckout(res, sendUpay, registration, result);
     } catch (error) {
+      if (registration) discardUnopenedRegistration(db(), registration.id);
       res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
     }
   });
@@ -440,11 +598,13 @@ export function createApi() {
       res.status(400).json({ error: "Choose a payment option." });
       return;
     }
+    let registration;
     try {
-      const registration = createPublicRegistration(req.body || {});
+      registration = createPublicRegistration(req.body || {});
       const result = await startHitpayPayment(db(), registration, channel);
-      sendHitpay(res, { ...result, resume: true }, true);
+      finishNewCheckout(res, sendHitpay, registration, result);
     } catch (error) {
+      if (registration) discardUnopenedRegistration(db(), registration.id);
       res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
     }
   });
@@ -482,6 +642,44 @@ export function createApi() {
     }
     const result = await startUpayPayment(db(), registration, req.body?.paymentMethod);
     sendUpay(res, { ...result, ...ownerAccess(registration, resumeCredential(req)) }, false);
+  });
+
+  router.post("/registrations/paynamics", registerLimit, async (req, res) => {
+    if (await rejectBot(req, res)) return;
+    const selection = paynamicsCheckoutChannel(req.body?.pchannel);
+    if (!selection) {
+      res.status(400).json({ error: "Choose a Paynamics option." });
+      return;
+    }
+    let registration;
+    try {
+      registration = createPublicRegistration(req.body || {});
+      const result = await startPaynamicsPayment(db(), registration, selection.pchannel);
+      finishNewCheckout(res, sendPaynamics, registration, result);
+    } catch (error) {
+      if (registration) discardUnopenedRegistration(db(), registration.id);
+      res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
+    }
+  });
+
+  router.post("/registrations/:reference/paynamics", registerLimit, async (req, res) => {
+    const selection = paynamicsCheckoutChannel(req.body?.pchannel);
+    if (!selection) {
+      res.status(400).json({ error: "Choose a Paynamics option." });
+      return;
+    }
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    const registration = getRegistration(db(), row.id);
+    if (!registration || registration.status !== "confirmed") {
+      res.status(400).json({ error: "Registration is not payable" });
+      return;
+    }
+    const result = await startPaynamicsPayment(db(), registration, selection.pchannel);
+    sendPaynamics(res, { ...result, ...ownerAccess(registration, resumeCredential(req)) }, false);
   });
 
   const upayPollLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 240, bucket: "upay-poll", db });
@@ -524,6 +722,21 @@ export function createApi() {
     sendHitpay(res, { ...result, ...ownerAccess(result.registration, resumeCredential(req)) }, false);
   });
 
+  const paynamicsPollLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 240, bucket: "paynamics-poll", db });
+
+  router.get("/payments/paynamics/:requestId", paynamicsPollLimit, async (req, res) => {
+    const result = await refreshPaynamicsPayment(db(), req.params.requestId);
+    if (!result.registration) {
+      res.status(result.status || 404).json({ error: result.error || "Payment not found" });
+      return;
+    }
+    res.status(result.status && result.status !== 200 ? result.status : 200).json({
+      registration: present(result.registration, ownerAccess(result.registration, resumeCredential(req))),
+      paynamics: result.paynamics,
+      error: result.error,
+    });
+  });
+
   router.post("/webhooks/hitpay", express.text({ type: "*/*", limit: "1mb" }), async (req, res) => {
     const result = await handleHitpayWebhook(db(), String(req.body || ""), req.get("hitpay-signature"), {
       eventType: req.get("hitpay-event-type"),
@@ -531,6 +744,22 @@ export function createApi() {
     });
     res.status(result.status).json(result.body);
   });
+
+  const paynamicsNotifyLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 120, bucket: "paynamics-notify", db });
+
+  router.post(
+    "/webhooks/paynamics",
+    paynamicsNotifyLimit,
+    express.json({ limit: "1mb" }),
+    express.urlencoded({ extended: false, limit: "1mb" }),
+    express.text({ type: "*/*", limit: "1mb" }),
+    async (req, res) => {
+      const payload = req.body && typeof req.body === "object" ? req.body : String(req.body || "");
+      const result = await handlePaynamicsNotification(db(), payload);
+      recordSecurityEvent(db(), "paynamics.notify", result.status === 200 ? "accepted" : "rejected");
+      res.status(result.status).type("text/plain").send(result.body);
+    },
+  );
 
   const upayCallbackLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 60, bucket: "upay-callback", db });
 
@@ -559,15 +788,25 @@ export function createApi() {
       return;
     }
     const result = await sendRegistrationOtp(db(), query);
-    if (result.error && result.status !== 404) console.error("Registration code was not sent");
-    res.json({ ok: true });
+    if (result.error) {
+      if (result.status !== 404 && result.status !== 400) console.error("Registration code was not sent");
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    if (result.waited) {
+      res.json({ ok: true, maskedEmail: result.maskedEmail, waited: true });
+      return;
+    }
+    res.json({ ok: true, maskedEmail: result.maskedEmail });
   });
 
   router.post("/registrations/otp/verify", otpLimit, (req, res) => {
     const query = String(req.body?.query || "").trim();
     const result = verifyRegistrationOtp(db(), query, req.body?.code);
     if (result.error) {
-      res.status(400).json({ error: "That code is wrong." });
+      const status = result.status || 400;
+      const message = status === 400 ? "That code is wrong." : result.error;
+      res.status(status).json({ error: message });
       return;
     }
     const registration = ensureResumeToken(db(), result.registration);
@@ -678,13 +917,23 @@ export function createApi() {
   });
 
   router.get("/admin/payment-channels", requireAdmin, (_req, res) => {
-    res.json({ channels: listPaymentChannels(db()), hitpayConfigured: hitpayConfigured() });
+    res.json({
+      channels: listPaymentChannels(db()),
+      hitpayConfigured: hitpayConfigured(),
+      paynamicsConfigured: paynamicsConfigured(),
+      paynamics: paynamicsPublicCheckoutInfo(),
+    });
   });
 
   router.patch("/admin/payment-channels", requireAdmin, (req, res) => {
     const channels = savePaymentChannels(db(), req.body || {});
     writeAudit(db(), req.admin.id, "payment_channel.update", "payment_channels");
-    res.json({ channels, hitpayConfigured: hitpayConfigured() });
+    res.json({
+      channels,
+      hitpayConfigured: hitpayConfigured(),
+      paynamicsConfigured: paynamicsConfigured(),
+      paynamics: paynamicsPublicCheckoutInfo(),
+    });
   });
 
   router.get("/admin/dashboard", requireAdmin, (_req, res) => {
@@ -699,7 +948,10 @@ export function createApi() {
     `).all();
     writeAudit(db(), req.admin.id, "registration.list", "registrations");
     recordSecurityEvent(db(), "registration.list", "registration list");
-    res.json(rows.map((row) => present(getRegistration(db(), row.id))));
+    res.json(rows.map((row) => {
+      const registration = getRegistration(db(), row.id);
+      return present(registration, { transactions: registrationTransactions(db(), registration.id) });
+    }));
   });
 
   router.post("/admin/registrations/:reference/payments", requireAdmin, (req, res) => {
@@ -752,6 +1004,21 @@ export function createApi() {
     } catch (error) {
       res.status(error.status || 400).json({ error: clientError(error, "The complimentary ticket was not saved") });
     }
+  });
+
+  router.post("/admin/registrations/:reference/resend-entry-pass", requireAdmin, async (req, res) => {
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    const result = await sendEntryPassForRegistration(db(), row.id, { force: true });
+    if (!result.ok) {
+      res.status(result.error === "not_fully_paid" ? 400 : 502).json({ error: result.error || "QR ticket email was not sent", ...result });
+      return;
+    }
+    writeAudit(db(), req.admin.id, "registration.entry_pass_resend", req.params.reference);
+    res.json({ sent: true, reference: req.params.reference });
   });
 
   router.post("/admin/passes/check-in", requireAdmin, (req, res) => {

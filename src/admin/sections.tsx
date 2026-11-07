@@ -47,10 +47,21 @@ type Member = {
   country: string;
   goldClub: boolean;
 };
-type Payment = { label: string; dueOn: string; amountCents: number; status: "paid" | "due" | "upcoming" };
+type Payment = { label: string; dueOn: string; amountCents: number; amountPaidCents?: number; status: "paid" | "due" | "upcoming" };
+type LedgerTransaction = {
+  at: string;
+  provider: string;
+  channel: string;
+  status: string;
+  amountCents: number;
+  reference: string;
+  gateway: string;
+  recorded: boolean;
+};
 type Registration = {
   reference: string;
   status: string;
+  registeredOn?: string;
   attendee: { fullName: string; email: string; mobile: string; business?: string; industry?: string; chapter?: string };
   tierName: string;
   plan: string;
@@ -60,6 +71,7 @@ type Registration = {
   planStatus: string;
   qrReady: boolean;
   payments: Payment[];
+  transactions?: LedgerTransaction[];
 };
 
 async function api(path: string, options: RequestInit = {}) {
@@ -122,6 +134,14 @@ type DashboardData = {
   dueSoon: { through: string; rows: { currency: "PHP" | "USD"; count: number; cents: number }[] };
   roster: { total: number; updated: number; delayed: number; cancelled: number; updatedPercent: number | null; delayedPercent: number | null; cancelledPercent: number | null; goldClub: number };
   firstMoverRoster: { total: number; updated: number; delayed: number; cancelled: number; updatedPercent: number | null; delayedPercent: number | null; cancelledPercent: number | null };
+  paymentMethods: {
+    channel: string;
+    label: string;
+    currency: string;
+    count: number;
+    cents: number;
+    methods: { code: string; label: string; count: number; cents: number }[];
+  }[];
 };
 
 const chartColors = { updated: "#141416", delayed: "#D0202E", cancelled: "#B7B3AD", confirmed: "#D0202E", track: "#F0EDE8", installment: "#FF4D5A" };
@@ -237,6 +257,39 @@ function StackedBars({ rows }: { rows: { label: string; detail: string; parts: {
   );
 }
 
+function paymentCount(count: number) {
+  if (!count) return "No payments";
+  return count === 1 ? "1 payment" : `${count} payments`;
+}
+
+function currencyName(currency: string) {
+  if (currency === "PHP") return "Pesos";
+  if (currency === "USD") return "US dollars";
+  return currency;
+}
+
+function MethodAmount({ cents, currency }: { cents: number; currency: string }) {
+  if (currency === "PHP") return <Peso cents={cents} />;
+  if (currency === "USD") return <>{money(cents, "USD")}</>;
+  const amount = (cents / 100).toLocaleString("en-US", { maximumFractionDigits: 0 });
+  return <>{currency} {amount}</>;
+}
+
+function MethodRow({ label, detail, summary, cents, max, nested }: { label: string; detail: ReactNode; summary: string; cents: number; max: number; nested?: boolean }) {
+  const width = max > 0 ? Math.max(cents > 0 ? 2 : 0, Math.round((cents / max) * 100)) : 0;
+  return (
+    <div className={nested ? "pl-4" : ""}>
+      <div className="mb-1 flex items-baseline justify-between gap-3 text-sm">
+        <span className={`min-w-0 ${nested ? "" : "font-semibold"}`}>{label}</span>
+        <span className="shrink-0 text-right text-[#5C5C63]">{detail}</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-[#F0EDE8]" role="img" aria-label={summary}>
+        <div className={`h-2 rounded-full ${nested ? "bg-[#FF4D5A]" : "bg-[#D0202E]"}`} style={{ width: `${width}%` }} />
+      </div>
+    </div>
+  );
+}
+
 function Columns({ rows }: { rows: { label: string; value: number }[] }) {
   const max = Math.max(...rows.map((row) => row.value), 1);
   return (
@@ -295,6 +348,43 @@ function Dashboard({ onError }: { onError: (message: string) => void }) {
           <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#D0202E]" />Confirmed</span>
           <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#B7B3AD]" />Cancelled</span>
         </p>
+      </Panel>
+      <Panel title="Payments by method">
+        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Recorded payments on confirmed registrations. A channel line is the sum of its methods. Bar lengths compare amounts in the same currency.</p>
+        <div className="flex flex-col gap-4">
+          {[...(data.paymentMethods ?? [])].sort((left, right) => {
+            if (left.currency === right.currency) return 0;
+            if (left.currency === "PHP") return -1;
+            if (right.currency === "PHP") return 1;
+            return left.currency.localeCompare(right.currency);
+          }).map((channel, index, rows) => {
+            const max = Math.max(...rows.filter((row) => row.currency === channel.currency).map((row) => row.cents), 1);
+            const showCurrency = new Set(rows.map((row) => row.currency)).size > 1 && rows[index - 1]?.currency !== channel.currency;
+            return (
+              <div key={`${channel.channel}-${channel.currency}`} className="flex flex-col gap-2">
+                {showCurrency ? <h3 className="m-0 text-[12px] font-semibold uppercase tracking-[0.04em] text-[#5C5C63]">{currencyName(channel.currency)}</h3> : null}
+                <MethodRow
+                  label={channel.label}
+                  cents={channel.cents}
+                  max={max}
+                  summary={`${channel.label}, ${channel.currency} ${channel.cents / 100}, ${paymentCount(channel.count)}`}
+                  detail={<><MethodAmount cents={channel.cents} currency={channel.currency} /> · {paymentCount(channel.count)}</>}
+                />
+                {channel.methods.map((method) => (
+                  <MethodRow
+                    key={method.code}
+                    nested
+                    label={method.label}
+                    cents={method.cents}
+                    max={max}
+                    summary={`${method.label}, ${channel.currency} ${method.cents / 100}, ${paymentCount(method.count)}`}
+                    detail={<><MethodAmount cents={method.cents} currency={channel.currency} /> · {paymentCount(method.count)}</>}
+                  />
+                ))}
+              </div>
+            );
+          })}
+        </div>
       </Panel>
       <div className="grid gap-3 lg:grid-cols-2">
         <Panel title="Payments">
@@ -416,25 +506,173 @@ export function AdminSections() {
 
 const emptyRegistration = { fullName: "", email: "", mobile: "", business: "", industry: "", chapter: "", productCode: "first_mover", paymentPlan: "full" };
 
+function planPlace(row: Registration) {
+  if (row.status === "cancelled") return "This registration is cancelled.";
+  const total = row.payments.length;
+  const paidCount = row.payments.filter((item) => item.status === "paid").length;
+  const due = row.payments.find((item) => item.status === "due");
+  if (!due && row.balanceCents === 0) return `Paid in full. ${paidCount} of ${total} payments are complete.`;
+  if (due) return `Payment ${paidCount + 1} of ${total} is due. ${money(row.balanceCents, row.currency)} is still left.`;
+  return `${paidCount} of ${total} payments are recorded. ${money(row.balanceCents, row.currency)} is still left.`;
+}
+
+function RegistrationView({
+  row,
+  editing,
+  draft,
+  setDraft,
+  chapters,
+  onSave,
+  onEdit,
+  onCloseEdit,
+  onClose,
+  onCancel,
+}: {
+  row: Registration;
+  editing: boolean;
+  draft: typeof emptyRegistration;
+  setDraft: (value: typeof emptyRegistration) => void;
+  chapters: Chapter[];
+  onSave: () => void;
+  onEdit: () => void;
+  onCloseEdit: () => void;
+  onClose: () => void;
+  onCancel: () => void;
+}) {
+  const details = [
+    ["Name", row.attendee.fullName],
+    ["Email", row.attendee.email],
+    ["Mobile", row.attendee.mobile],
+    ["Business", row.attendee.business || ""],
+    ["Category", row.attendee.industry || ""],
+    ["Chapter", row.attendee.chapter || ""],
+    ["Ticket", row.tierName],
+    ["Reference", row.reference],
+    ["Registered", row.registeredOn || ""],
+    ["Status", row.status === "cancelled" ? "Cancelled" : row.balanceCents === 0 ? "Fully paid" : "Active"],
+  ];
+  return (
+    <section className="flex flex-col gap-4 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="m-0 text-xs font-bold tracking-[0.16em] text-[#A8131F] uppercase">Registration</p>
+          <h2 className="m-0 mt-1 font-archivo text-[24px] leading-tight font-extrabold">{row.attendee.fullName}</h2>
+          <p className="m-0 mt-1 text-sm text-[#5C5C63]">{row.reference} · {row.tierName}</p>
+        </div>
+        <button type="button" className={ghostButton} onClick={onClose}>Close</button>
+      </div>
+      <p className="m-0 rounded-[10px] bg-[#F6F4F1] px-3 py-2 text-sm font-semibold">{planPlace(row)}</p>
+      {editing ? (
+        <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event) => { event.preventDefault(); onSave(); }}>
+          <Field label="Name"><input className={field} required value={draft.fullName} onChange={(event) => setDraft({ ...draft, fullName: event.target.value })} /></Field>
+          <Field label="Email"><input className={field} type="email" required value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} /></Field>
+          <Field label="Mobile"><input className={field} required value={draft.mobile} onChange={(event) => setDraft({ ...draft, mobile: event.target.value })} /></Field>
+          <Field label="Business"><input className={field} value={draft.business} onChange={(event) => setDraft({ ...draft, business: event.target.value })} /></Field>
+          <Field label="Category"><input className={field} value={draft.industry} onChange={(event) => setDraft({ ...draft, industry: event.target.value })} /></Field>
+          <Field label="Chapter">
+            <select className={field} value={draft.chapter} onChange={(event) => setDraft({ ...draft, chapter: event.target.value })}>
+              <option value="">Select a chapter</option>
+              {draft.chapter && !chapters.some((chapter) => chapter.name.toLowerCase() === draft.chapter.toLowerCase()) ? <option value={draft.chapter}>{draft.chapter}</option> : null}
+              {chapters.map((chapter) => <option key={chapter.id} value={chapter.name}>{chapter.name}</option>)}
+            </select>
+          </Field>
+          <div className="flex flex-wrap gap-2 sm:col-span-2">
+            <button type="submit" className={buttonClass}>Save edits</button>
+            <button type="button" className={ghostButton} onClick={onCloseEdit}>Done</button>
+          </div>
+        </form>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {details.map(([label, value]) => (
+            <div key={label} className="flex flex-col gap-0.5">
+              <span className="text-[12px] font-semibold text-[#5C5C63]">{label}</span>
+              <span className="text-sm">{value || "—"}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-col gap-2">
+        <h3 className="m-0 text-[15px] font-bold">Payment plan</h3>
+        <p className="m-0 text-sm text-[#5C5C63]">{row.plan === "installment" ? "Installment" : "Paid in full"} · {money(row.totalCents, row.currency)} total · {money(row.totalCents - row.balanceCents, row.currency)} paid</p>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-left text-sm">
+            <thead>
+              <tr>{["Step", "Due", "Amount", "Paid", "Place"].map((column) => <th key={column} className={thClass}>{column}</th>)}</tr>
+            </thead>
+            <tbody>
+              {row.payments.map((item, index) => (
+                <tr key={`${item.dueOn}-${index}`}>
+                  <td className={tdClass}>{index + 1}</td>
+                  <td className={tdClass}>{item.label}</td>
+                  <td className={tdClass}>{money(item.amountCents, row.currency)}</td>
+                  <td className={tdClass}>{money(item.amountPaidCents || 0, row.currency)}</td>
+                  <td className={tdClass}>{item.status === "due" ? "Due now" : item.status === "paid" ? "Paid" : "Upcoming"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <h3 className="m-0 text-[15px] font-bold">Transactions</h3>
+        {(row.transactions || []).length === 0 ? <p className="m-0 text-sm text-[#5C5C63]">No payment attempts yet.</p> : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] border-collapse text-left text-sm">
+              <thead>
+                <tr>{["When", "Provider", "Channel", "Status", "Amount", "Reference", "Gateway", "On the record"].map((column) => <th key={column} className={thClass}>{column}</th>)}</tr>
+              </thead>
+              <tbody>
+                {(row.transactions || []).map((item) => (
+                  <tr key={`${item.provider}-${item.reference}-${item.at}`}>
+                    <td className={tdClass}>{item.at ? String(item.at).slice(0, 16).replace("T", " ") : "—"}</td>
+                    <td className={tdClass}>{item.provider}</td>
+                    <td className={tdClass}>{item.channel || "—"}</td>
+                    <td className={tdClass}>{titleCase(item.status || "")}</td>
+                    <td className={tdClass}>{money(item.amountCents, row.currency)}</td>
+                    <td className={`${tdClass} font-mono text-[12px]`}>{item.reference || "—"}</td>
+                    <td className={tdClass}>{item.gateway || "—"}</td>
+                    <td className={tdClass}>{item.recorded ? "Yes" : "No"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {editing ? null : <button type="button" className={buttonClass} onClick={onEdit}>Edit</button>}
+        {row.status !== "cancelled" ? <button type="button" className="rounded-full border border-[#D0202E] px-4 py-2.5 text-sm font-bold text-[#A8131F]" onClick={onCancel}>Cancel registration</button> : null}
+      </div>
+    </section>
+  );
+}
+
 function Registrations({ onError }: { onError: (message: string) => void }) {
   const [rows, setRows] = useState<Registration[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [chapters, setChapters] = useState<Chapter[]>([]);
   const [query, setQuery] = useState("");
   const [editor, setEditor] = useState<null | "add" | Registration>(null);
+  const [viewing, setViewing] = useState<Registration | null>(null);
+  const [editingDetails, setEditingDetails] = useState(false);
   const [draft, setDraft] = useState(emptyRegistration);
+  const [cancelTarget, setCancelTarget] = useState<null | { reference: string; name: string }>(null);
 
   async function load() {
-    const [registrations, ticketProducts] = await Promise.all([
+    const [registrations, ticketProducts, chapterRows] = await Promise.all([
       api("/api/admin/registrations"),
       api("/api/admin/products"),
+      api("/api/admin/chapters"),
     ]);
     setRows(registrations);
     setProducts(ticketProducts);
+    setChapters(chapterRows);
+    setViewing((current) => current ? registrations.find((row: Registration) => row.reference === current.reference) || null : null);
   }
-  useEffect(() => { load().catch((error) => onError(error.message)); }, []);
 
-  function edit(row: Registration) {
-    setEditor(row);
+  function openView(row: Registration) {
+    setViewing(row);
+    setEditingDetails(false);
     setDraft({
       fullName: row.attendee.fullName,
       email: row.attendee.email,
@@ -446,6 +684,7 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
       paymentPlan: row.plan,
     });
   }
+  useEffect(() => { load().catch((error) => onError(error.message)); }, []);
 
   async function addManual(event: FormEvent) {
     event.preventDefault();
@@ -459,37 +698,25 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
     }
   }
 
-  async function save(event: FormEvent) {
-    event.preventDefault();
-    if (!editor || editor === "add") return;
+  async function save(event?: FormEvent) {
+    event?.preventDefault();
+    if (!viewing) return;
     try {
-      await api(`/api/admin/registrations/${editor.reference}`, { method: "PATCH", body: JSON.stringify(draft) });
-      setEditor(null);
+      await api(`/api/admin/registrations/${viewing.reference}`, { method: "PATCH", body: JSON.stringify(draft) });
+      setEditingDetails(false);
       await load();
     } catch (error) {
       onError(error instanceof Error ? error.message : "Could not save");
     }
   }
 
-  async function comp(reference: string) {
-    if (!window.confirm("Mark the remaining balance as a complimentary ticket?")) return;
-    try {
-      const payload = await api(`/api/admin/registrations/${reference}/comp`, { method: "POST" });
-      if (payload.pending) {
-        onError("Waiting for another admin to approve this complimentary ticket.");
-        return;
-      }
-      await load();
-    } catch (error) {
-      onError(error instanceof Error ? error.message : "Could not comp this ticket");
-    }
-  }
-
-  async function cancel(reference: string) {
-    if (!window.confirm("Cancel this registration?")) return;
+  async function confirmCancel() {
+    if (!cancelTarget) return;
+    const reference = cancelTarget.reference;
+    setCancelTarget(null);
     try {
       await api(`/api/admin/registrations/${reference}/cancel`, { method: "POST" });
-      if (editor !== "add" && editor?.reference === reference) setEditor(null);
+      if (viewing?.reference === reference) setViewing(null);
       await load();
     } catch (error) {
       onError(error instanceof Error ? error.message : "Could not cancel");
@@ -529,21 +756,7 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
           </div>
         </form>
       ) : null}
-      {editor && editor !== "add" ? (
-        <form className="grid gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4 sm:grid-cols-2" onSubmit={save}>
-          <Field label="Name"><input className={field} required value={draft.fullName} onChange={(event) => setDraft({ ...draft, fullName: event.target.value })} /></Field>
-          <Field label="Email"><input className={field} type="email" required value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} /></Field>
-          <Field label="Mobile"><input className={field} required value={draft.mobile} onChange={(event) => setDraft({ ...draft, mobile: event.target.value })} /></Field>
-          <Field label="Business"><input className={field} value={draft.business} onChange={(event) => setDraft({ ...draft, business: event.target.value })} /></Field>
-          <Field label="Category"><input className={field} value={draft.industry} onChange={(event) => setDraft({ ...draft, industry: event.target.value })} /></Field>
-          <Field label="Chapter"><input className={field} value={draft.chapter} onChange={(event) => setDraft({ ...draft, chapter: event.target.value })} /></Field>
-          <div className="flex flex-wrap gap-2 sm:col-span-2">
-            <button type="submit" className={buttonClass}>Save edits</button>
-            <button type="button" className={ghostButton} onClick={() => setEditor(null)}>Back</button>
-            {editor.status !== "cancelled" ? <button type="button" className="rounded-full border border-[#D0202E] px-4 py-2.5 text-sm font-bold text-[#A8131F]" onClick={() => cancel(editor.reference)}>Cancel registration</button> : null}
-          </div>
-        </form>
-      ) : null}
+      {viewing ? <RegistrationView row={viewing} editing={editingDetails} draft={draft} setDraft={setDraft} chapters={chapters} onSave={save} onEdit={() => setEditingDetails(true)} onCloseEdit={() => setEditingDetails(false)} onClose={() => { setViewing(null); setEditingDetails(false); }} onCancel={() => setCancelTarget({ reference: viewing.reference, name: viewing.attendee.fullName })} /> : null}
       <DataTable columns={["Name", "Email", "Mobile", "Reference", "Ticket", "Paid", "Left", "Status", ""]} empty={empty}>
         {visible.map((row) => (
           <tr key={row.reference}>
@@ -556,13 +769,26 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
             <td className={tdClass}>{money(row.balanceCents, row.currency)}</td>
             <td className={tdClass}>{row.status === "cancelled" ? "Cancelled" : row.balanceCents === 0 ? "Fully paid" : "Active"}</td>
             <td className={`${tdClass} whitespace-nowrap text-right`}>
-              <button type="button" className={linkButton} onClick={() => edit(row)}>Edit</button>
-              {row.status !== "cancelled" && row.balanceCents > 0 ? <button type="button" className={`${linkButton} ml-3`} onClick={() => comp(row.reference)}>Comp</button> : null}
-              {row.status !== "cancelled" ? <button type="button" className={`${linkButton} ml-3`} onClick={() => cancel(row.reference)}>Cancel</button> : null}
+              <button type="button" className={linkButton} onClick={() => openView(row)}>View</button>
             </td>
           </tr>
         ))}
       </DataTable>
+      {cancelTarget ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#141416]/45 px-4" role="dialog" aria-modal="true" aria-labelledby="cancel-registration-title">
+          <div className="w-full max-w-[420px] rounded-[16px] border border-[#E4E1DC] bg-[#FDFCFA] p-5 shadow-[0_18px_50px_rgba(20,20,22,0.18)]">
+            <p className="m-0 text-xs font-bold tracking-[0.16em] text-[#A8131F] uppercase">IBMC 2027 · AMPLIFY</p>
+            <h2 id="cancel-registration-title" className="m-0 mt-2 font-archivo text-[26px] leading-tight font-extrabold">Cancel this registration?</h2>
+            <p className="m-0 mt-2 text-sm leading-normal text-[#5C5C63]">
+              {cancelTarget.name} · {cancelTarget.reference}. The seat is released. This does not refund a payment that already went through.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <button type="button" className={buttonClass} onClick={confirmCancel}>Cancel registration</button>
+              <button type="button" className={ghostButton} onClick={() => setCancelTarget(null)}>Keep it</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -1046,12 +1272,18 @@ type PaymentChannelSetting = {
 function PaymentSettings({ onError }: { onError: (message: string) => void }) {
   const [channels, setChannels] = useState<PaymentChannelSetting[]>([]);
   const [hitpayConfigured, setHitpayConfigured] = useState(true);
+  const [paynamicsConfigured, setPaynamicsConfigured] = useState(true);
+  const [paynamicsLiveWarning, setPaynamicsLiveWarning] = useState(false);
+  const [paynamicsCheckoutMode, setPaynamicsCheckoutMode] = useState<"sandbox" | "live" | "off">("off");
   const [saving, setSaving] = useState("");
 
   async function load() {
     const payload = await api("/api/admin/payment-channels");
     setChannels(payload.channels || []);
     setHitpayConfigured(Boolean(payload.hitpayConfigured));
+    setPaynamicsConfigured(Boolean(payload.paynamicsConfigured));
+    setPaynamicsLiveWarning(Boolean(payload.paynamics?.liveRealChargeWarning));
+    setPaynamicsCheckoutMode(payload.paynamics?.checkoutMode === "live" || payload.paynamics?.checkoutMode === "sandbox" ? payload.paynamics.checkoutMode : "off");
   }
 
   useEffect(() => {
@@ -1068,6 +1300,9 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
       });
       setChannels(payload.channels || []);
       setHitpayConfigured(Boolean(payload.hitpayConfigured));
+      setPaynamicsConfigured(Boolean(payload.paynamicsConfigured));
+    setPaynamicsLiveWarning(Boolean(payload.paynamics?.liveRealChargeWarning));
+    setPaynamicsCheckoutMode(payload.paynamics?.checkoutMode === "live" || payload.paynamics?.checkoutMode === "sandbox" ? payload.paynamics.checkoutMode : "off");
     } catch (error) {
       onError(error instanceof Error ? error.message : "Payment channels were not saved");
       await load().catch(() => {});
@@ -1104,6 +1339,16 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
         {hitpayConfigured ? null : (
           <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
             HitPay QR and HitPay online banking need HITPAY_API_KEY and HITPAY_SALT on the server before a buyer can be charged.
+          </p>
+        )}
+        {paynamicsLiveWarning ? (
+          <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] font-semibold leading-normal text-[#A8131F]">
+            Staging live Paynamics is armed ({paynamicsCheckoutMode}): successful buyer checkouts are real charges. Registration marks paid only after a signed Paynamics GR001 (webhook or query).
+          </p>
+        ) : null}
+        {paynamicsConfigured ? null : (
+          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
+            Paynamics Workflow needs confirmed PAYNAMICS_API_BASE_URL, PAYNAMICS_API_ACCOUNT_CONFIRMED, Basic auth, and merchant ID/key before checkout can start.
           </p>
         )}
       </div>

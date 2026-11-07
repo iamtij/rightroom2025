@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { claimCoupon, priceCoupon } from "./coupons.js";
-import { registrationBalance, testRegistrationEnabled, testTicketEnabled } from "./db.js";
+import { registrationBalance, testTicketEnabled } from "./db.js";
+import { stagingTestRegistrationAllowed } from "./staging-early-payments.js";
 import { addDays, manilaParts } from "./time.js";
 
 function dueOnFor(item, registeredOn) {
@@ -17,28 +18,66 @@ function token() {
   return crypto.randomBytes(18).toString("base64url");
 }
 
-function phoneKey(value) {
+/** Last 10 digits for PH mobile linkage; empty string when input is not a valid phone query. */
+export function registrationPhoneKey(value) {
   const digits = String(value || "").replace(/\D/g, "");
-  return digits.length >= 10 ? digits.slice(-10) : "";
+  if (digits.length < 10) return "";
+  return digits.slice(-10);
 }
 
-export function findRegistrationByContact(db, query) {
+/** True only when stored mobile normalizes to the query key (ignores stale phone_key column). */
+export function registrationMobileMatchesPhoneQuery(mobile, queryKey) {
+  const key = String(queryKey || "").trim();
+  if (!key) return false;
+  const mobileKey = registrationPhoneKey(mobile);
+  return mobileKey !== "" && mobileKey === key;
+}
+
+function phoneKey(value) {
+  return registrationPhoneKey(value);
+}
+
+/**
+ * Resolve a registration by email, mobile, or reference. Fails closed on ambiguous mobile matches.
+ */
+export function resolveRegistrationByContact(db, query) {
   const raw = String(query || "").trim();
-  if (!raw) return null;
+  if (!raw) return { registration: null };
   const byReference = db
     .prepare("SELECT id, status FROM registrations WHERE lower(reference) = ? ORDER BY id DESC")
     .all(raw.toLowerCase());
   if (byReference.length) {
     const chosen = byReference.find((row) => row.status !== "cancelled") || byReference[0];
-    return getRegistration(db, chosen.id);
+    return { registration: getRegistration(db, chosen.id) };
   }
   const value = raw.toLowerCase();
-  const rows = value.includes("@")
-    ? db.prepare("SELECT id, status FROM registrations WHERE lower(email) = ? ORDER BY id DESC").all(value)
-    : db.prepare("SELECT id, status FROM registrations WHERE phone_key = ? ORDER BY id DESC").all(phoneKey(value));
-  if (!rows.length) return null;
-  const chosen = rows.find((row) => row.status !== "cancelled") || rows[0];
-  return getRegistration(db, chosen.id);
+  if (value.includes("@")) {
+    const rows = db.prepare("SELECT id, status FROM registrations WHERE lower(email) = ? ORDER BY id DESC").all(value);
+    if (!rows.length) return { registration: null };
+    const chosen = rows.find((row) => row.status !== "cancelled") || rows[0];
+    return { registration: getRegistration(db, chosen.id) };
+  }
+  const key = registrationPhoneKey(raw);
+  if (!key) return { registration: null };
+  const active = db
+    .prepare("SELECT id, status, lower(email) AS email, mobile, phone_key FROM registrations WHERE mobile IS NOT NULL AND trim(mobile) != ''")
+    .all()
+    .filter((row) => row.status !== "cancelled" && registrationMobileMatchesPhoneQuery(row.mobile, key))
+    .sort((a, b) => b.id - a.id);
+  if (!active.length) return { registration: null };
+  const distinctEmails = [...new Set(active.map((row) => row.email).filter(Boolean))];
+  if (distinctEmails.length > 1) {
+    return {
+      registration: null,
+      error: "More than one registration uses this mobile. Use your email or registration reference instead.",
+      status: 409,
+    };
+  }
+  return { registration: getRegistration(db, active[0].id) };
+}
+
+export function findRegistrationByContact(db, query) {
+  return resolveRegistrationByContact(db, query).registration;
 }
 
 export function getRegistration(db, id) {
@@ -77,15 +116,27 @@ export function ensureResumeToken(db, registration) {
   return getRegistration(db, registration.id);
 }
 
+const TEST_ENTRY_PASS_PRODUCTS = new Set(["test", "test_50", "test_100", "test_200"]);
+
+export function entryPassProductAllowed(productCode) {
+  if (!TEST_ENTRY_PASS_PRODUCTS.has(productCode)) return true;
+  return stagingTestRegistrationAllowed();
+}
+
+export function entryPassEligible(registration) {
+  if (!registration) return false;
+  if (registration.status !== "confirmed" || !registration.fully_paid_at) return false;
+  if (registration.balance_cents !== 0 || !registration.qr_token) return false;
+  return entryPassProductAllowed(registration.product_code);
+}
+
 export function getEntryPass(db, qrToken) {
   const value = String(qrToken || "").trim();
   if (!value) return null;
   const row = db.prepare("SELECT id FROM registrations WHERE qr_token = ?").get(value);
   if (!row) return null;
   const registration = getRegistration(db, row.id);
-  if (!registration || registration.status !== "confirmed" || !registration.fully_paid_at) return null;
-  if (registration.balance_cents !== 0) return null;
-  if (["test", "test_50", "test_200"].includes(registration.product_code)) return null;
+  if (!entryPassEligible(registration)) return null;
   return {
     fullName: registration.full_name,
     tierName: registration.product_name,
@@ -97,7 +148,10 @@ export function getEntryPass(db, qrToken) {
 export function createRegistration(db, input) {
   const run = db.transaction(() => {
     if (input.productCode === "test" && !testTicketEnabled()) throw new Error("Unknown ticket");
-    if ((input.productCode === "test_50" || input.productCode === "test_200") && !testRegistrationEnabled()) {
+    if (
+      (input.productCode === "test_50" || input.productCode === "test_100" || input.productCode === "test_200")
+      && !stagingTestRegistrationAllowed()
+    ) {
       throw new Error("Unknown ticket");
     }
     const clash = registrationContactClash(db, { email: input.email, mobile: input.mobile });
@@ -249,6 +303,24 @@ export function cancelRegistration(db, id) {
   return getRegistration(db, id);
 }
 
+export function discardUnopenedRegistration(db, id) {
+  const row = db.prepare("SELECT id, coupon_code FROM registrations WHERE id = ?").get(id);
+  if (!row) return false;
+  const paid = db.prepare("SELECT COUNT(*) AS n FROM payments WHERE registration_id = ?").get(id).n;
+  if (paid) return false;
+  const remove = db.transaction(() => {
+    if (row.coupon_code) {
+      db.prepare("UPDATE coupons SET usage_count = MAX(usage_count - 1, 0) WHERE code = ?").run(row.coupon_code);
+    }
+    for (const table of ["upay_payments", "hitpay_payments", "paynamics_payments", "pass_scans", "reminder_dispatches", "schedule_sends", "payments", "registration_installments"]) {
+      db.prepare(`DELETE FROM ${table} WHERE registration_id = ?`).run(id);
+    }
+    db.prepare("DELETE FROM registrations WHERE id = ?").run(id);
+  });
+  remove();
+  return true;
+}
+
 export function recordPayment(db, input) {
   const run = db.transaction(() => {
     const registration = getRegistration(db, input.registrationId);
@@ -306,7 +378,12 @@ export function recordPayment(db, input) {
     }
     return registration.id;
   });
-  return getRegistration(db, run());
+  const registrationId = run();
+  const updated = getRegistration(db, registrationId);
+  if (updated.balance_cents === 0 && updated.fully_paid_at && updated.qr_token) {
+    import("./reminders.js").then(({ queueEntryPassAfterPayment }) => queueEntryPassAfterPayment(db, registrationId));
+  }
+  return updated;
 }
 
 export function compRegistration(db, registrationId, adminUserId) {

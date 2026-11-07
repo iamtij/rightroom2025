@@ -60,6 +60,8 @@ assert.equal(pass.reference, registration.reference);
 assert.equal(getEntryPass(db, "made-up-token"), null);
 
 process.env.ALLOW_TEST_REGISTRATION = "true";
+process.env.IBMC_STAGING_EARLY_PAYMENTS = "true";
+process.env.IBMC_DEPLOYMENT_ENV = "staging";
 db.prepare(`
   INSERT INTO ticket_products (
     code, name, audience, currency, full_price_cents, installment_total_cents,
@@ -76,8 +78,12 @@ const testRegistration = createRegistration(db, {
 });
 const testPaid = recordPayment(db, { registrationId: testRegistration.id, amountCents: 5_000, method: "manual" });
 assert.ok(testPaid.qr_token);
-assert.equal(getEntryPass(db, testPaid.qr_token), null);
+const testPass = getEntryPass(db, testPaid.qr_token);
+assert.ok(testPass);
+assert.equal(testPass.fullName, "Test Person");
 delete process.env.ALLOW_TEST_REGISTRATION;
+delete process.env.IBMC_STAGING_EARLY_PAYMENTS;
+assert.equal(getEntryPass(db, testPaid.qr_token), null);
 
 const file = path.join(os.tmpdir(), `ibmc-verify-${process.pid}.sqlite`);
 fs.rmSync(file, { force: true });
@@ -213,6 +219,8 @@ try {
   const looked = await verified.json();
   assert.equal(verified.status, 200);
   assert.equal(looked.member.email, "member.one@example.com");
+  assert.equal(looked.member.registered, false);
+  assert.equal(looked.registration, undefined);
   assert.ok(looked.member.memberToken);
 
   const proved = await fetch(`${base}/api/registrations`, {
@@ -235,6 +243,59 @@ try {
   assert.equal(proved.status, 201);
   assert.equal(provedBody.attendee.email, "member.one@example.com");
   assert.equal(provedBody.attendee.mobile, "09181234567");
+
+  const returnDb = openDatabase(file);
+  const returnCode = issueMemberOtp(returnDb, "member.one@example.com");
+  returnDb.close();
+  const returned = await fetch(`${base}/api/members/otp/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "member.one@example.com", code: returnCode.code }),
+  });
+  const returnedBody = await returned.json();
+  assert.equal(returned.status, 200);
+  assert.equal(returnedBody.member.registered, true);
+  assert.equal(returnedBody.registration.reference, provedBody.reference);
+  assert.equal(returnedBody.registration.attendee.fullName, "Member One");
+  assert.equal(returnedBody.registration.attendee.email, "member.one@example.com");
+  assert.equal(returnedBody.registration.resumeToken, provedBody.resumeToken);
+  assert.ok(String(returned.headers.get("set-cookie") || "").includes("ibmc_resume="));
+
+  const mobileDb = openDatabase(file);
+  mobileDb.prepare(`
+    INSERT INTO members (
+      full_name, email, mobile, phone_key, chapter, category, business_name, reg_status, registered_at
+    ) VALUES (
+      'Mobile Member', 'mobile.roster@example.com', '09175550000', '9175550000',
+      'Makati', 'Consulting', 'Mobile Co', 'updated', '2026-11-01'
+    )
+  `).run();
+  const mobileRegistration = createRegistration(mobileDb, {
+    productCode: "first_mover",
+    paymentPlan: "full",
+    fullName: "Mobile Member",
+    email: "ticket.email@example.com",
+    mobile: "09175550000",
+    business: "Mobile Co",
+    industry: "Consulting",
+    chapter: "Makati",
+    attendeeType: "member",
+    registeredOn: "2026-11-12",
+  });
+  const mobileCode = issueMemberOtp(mobileDb, "09175550000");
+  mobileDb.close();
+  const mobileVerified = await fetch(`${base}/api/members/otp/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "09175550000", code: mobileCode.code }),
+  });
+  const mobileBody = await mobileVerified.json();
+  assert.equal(mobileVerified.status, 200);
+  assert.equal(mobileBody.member.registered, true);
+  assert.equal(mobileBody.member.email, "mobile.roster@example.com");
+  assert.equal(mobileBody.registration.reference, mobileRegistration.reference);
+  assert.equal(mobileBody.registration.attendee.email, "ticket.email@example.com");
+  assert.ok(mobileBody.registration.resumeToken);
 
   const hiddenPay = await fetch(`${base}/api/payments/upay/IBMCSECURITYTEST`);
   const hiddenPayBody = await hiddenPay.json();

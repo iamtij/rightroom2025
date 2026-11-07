@@ -1,12 +1,10 @@
 import { Resend } from "resend";
+import { philippineMobile } from "./contact.js";
+import { outboundEmailSuppressed, outboundSmsSuppressed } from "./staging-safe.js";
 
 const SEMAPHORE_URL = "https://api.semaphore.co/api/v4/messages";
 
-export function philippineMobile(value) {
-  const digits = String(value || "").replace(/\D/g, "");
-  const local = digits.startsWith("63") ? `0${digits.slice(2)}` : digits.length === 10 ? `0${digits}` : digits;
-  return /^09\d{9}$/.test(local) ? local : null;
-}
+export { philippineMobile };
 
 function senderName() {
   const name = (process.env.SMS_SENDER_NAME || "").trim();
@@ -18,7 +16,8 @@ async function pause(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function sendEmail({ to, subject, html, text, idempotencyKey }) {
+export async function sendEmail({ to, subject, html, text, idempotencyKey, deliveryKind = "general" }) {
+  if (outboundEmailSuppressed({ to, deliveryKind })) return { status: "skipped", error: "staging_safe_mode" };
   if (!process.env.RESEND_API_KEY) return { status: "skipped", error: "provider_not_configured" };
   const resend = new Resend(process.env.RESEND_API_KEY);
   const payload = {
@@ -43,6 +42,7 @@ export async function sendEmail({ to, subject, html, text, idempotencyKey }) {
 }
 
 export async function sendSms({ to, message }) {
+  if (outboundSmsSuppressed()) return { status: "skipped", error: "staging_safe_mode" };
   if (!process.env.SEMAPHORE_API_KEY) return { status: "skipped", error: "provider_not_configured" };
   const number = philippineMobile(to);
   if (!number) return { status: "failed", error: "mobile_not_philippine" };

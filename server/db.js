@@ -3,6 +3,7 @@ import path from "path";
 import Database from "better-sqlite3";
 import { fileURLToPath } from "url";
 import { seedPaymentChannels } from "./payment-channels.js";
+import { stagingTestRegistrationAllowed } from "./staging-early-payments.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -276,6 +277,25 @@ CREATE TABLE IF NOT EXISTS hitpay_payments (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_hitpay_gateway ON hitpay_payments(gateway_ref) WHERE gateway_ref IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_hitpay_installment ON hitpay_payments(installment_id, channel, status);
 
+CREATE TABLE IF NOT EXISTS paynamics_payments (
+  id INTEGER PRIMARY KEY,
+  registration_id INTEGER NOT NULL REFERENCES registrations(id),
+  installment_id INTEGER NOT NULL REFERENCES registration_installments(id),
+  request_id TEXT NOT NULL UNIQUE,
+  gateway_response_id TEXT,
+  amount_cents INTEGER NOT NULL,
+  currency TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed', 'expired', 'cancelled')),
+  gateway_response_code TEXT,
+  gateway_message TEXT,
+  payment_channel TEXT,
+  payment_url TEXT,
+  expires_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_paynamics_installment ON paynamics_payments(installment_id, status);
+
 CREATE TABLE IF NOT EXISTS admin_audit (
   id INTEGER PRIMARY KEY,
   admin_id INTEGER,
@@ -415,9 +435,10 @@ export function openDatabase(file = process.env.IBMC_DB_PATH) {
   db.exec(SCHEMA);
   migrate(db);
   seed(db);
-  if (testRegistrationEnabled()) {
+  if (stagingTestRegistrationAllowed()) {
     ensureTestPayment(db);
     ensureTestInstallment(db);
+    ensureTest100(db);
   }
   return db;
 }
@@ -530,6 +551,17 @@ function migrate(db) {
     if (!names.has(name)) db.exec(`ALTER TABLE registrations ADD COLUMN ${name} ${type}`);
   }
   seedPaymentChannels(db);
+  const paynamicsColumns = new Set(
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'paynamics_payments'").get()
+      ? db.prepare("PRAGMA table_info(paynamics_payments)").all().map((column) => column.name)
+      : [],
+  );
+  if (paynamicsColumns.size && !paynamicsColumns.has("payment_url")) {
+    db.exec("ALTER TABLE paynamics_payments ADD COLUMN payment_url TEXT");
+  }
+  if (paynamicsColumns.size && !paynamicsColumns.has("untrusted_inbound_json")) {
+    db.exec("ALTER TABLE paynamics_payments ADD COLUMN untrusted_inbound_json TEXT");
+  }
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_registrations_resume ON registrations(resume_token) WHERE resume_token IS NOT NULL");
 }
 
@@ -598,8 +630,28 @@ function ensureTestInstallment(db) {
       WHERE id = ?
     `).run(product.id);
   }
-  const count = db.prepare("SELECT COUNT(*) AS count FROM installment_plan_items WHERE product_id = ?").get(product.id).count;
-  if (count === 3) return;
+  const items = db
+    .prepare("SELECT sequence, kind, days_after, amount_cents FROM installment_plan_items WHERE product_id = ? ORDER BY sequence")
+    .all(product.id);
+  const expect = [
+    { sequence: 1, kind: "on_registration", days_after: null, amount_cents: 10_000 },
+    { sequence: 2, kind: "days_after", days_after: 2, amount_cents: 5_000 },
+    { sequence: 3, kind: "days_after", days_after: 3, amount_cents: 5_000 },
+  ];
+  if (
+    items.length === 3
+    && expect.every((row, index) => {
+      const item = items[index];
+      return (
+        item.sequence === row.sequence
+        && item.kind === row.kind
+        && (item.days_after ?? null) === (row.days_after ?? null)
+        && item.amount_cents === row.amount_cents
+      );
+    })
+  ) {
+    return;
+  }
   const replace = db.transaction(() => {
     db.prepare("DELETE FROM installment_plan_items WHERE product_id = ?").run(product.id);
     const insert = db.prepare(`
@@ -621,6 +673,30 @@ function ensureTestPayment(db) {
       code, name, audience, currency, full_price_cents, installment_total_cents,
       sales_start, sales_end, allows_installment
     ) VALUES ('test_50', 'Test Payment', 'local', 'PHP', 5000, NULL, '2026-01-01', '2027-05-31', 0)
+  `).run();
+}
+
+function ensureTest100(db) {
+  const row = db.prepare("SELECT id FROM ticket_products WHERE code = 'test_100'").get();
+  if (row) {
+    db.prepare(`
+      UPDATE ticket_products
+      SET name = 'Staging Test · ₱100',
+          full_price_cents = 10000,
+          installment_total_cents = NULL,
+          allows_installment = 0,
+          active = 1,
+          sales_start = '2026-01-01',
+          sales_end = '2027-05-31'
+      WHERE id = ?
+    `).run(row.id);
+    return;
+  }
+  db.prepare(`
+    INSERT INTO ticket_products (
+      code, name, audience, currency, full_price_cents, installment_total_cents,
+      sales_start, sales_end, allows_installment
+    ) VALUES ('test_100', 'Staging Test · ₱100', 'local', 'PHP', 10000, NULL, '2026-01-01', '2027-05-31', 0)
   `).run();
 }
 
