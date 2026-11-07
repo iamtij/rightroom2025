@@ -872,8 +872,8 @@ function RegistrationWizard() {
     if (turnstileSiteKey && !turnstileToken) {
       setPayError(
         turnstileBlocked
-          ? "Fix the human-check widget above (or disable Turnstile in server env) before paying."
-          : "Confirm you are a person and try again.",
+          ? "Fix the human-check widget below (or disable Turnstile in server env) before paying."
+          : "Confirm you are a person below and try again.",
       );
       return;
     }
@@ -1386,7 +1386,7 @@ function RegistrationWizard() {
         label="Step 3 of 4"
         step={3}
         footer={
-          <div className="flex flex-col gap-2.5">
+          <div className="flex flex-col gap-3">
             <PrimaryButton disabled={!charging.onSale || saving || (charging.currency === "PHP" && !channel)} onClick={pay}>
               {charging.onSale
                 ? charging.currency === "PHP"
@@ -1394,12 +1394,17 @@ function RegistrationWizard() {
                   : `Submit registration · ${money(dueToday, charging.currency)} due`
                 : `Opens ${charging.opensLabel}`}
             </PrimaryButton>
+            {turnstileSiteKey ? (
+              <div className="pt-1">
+                <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} onBlocked={setTurnstileBlocked} />
+              </div>
+            ) : null}
+            {payError ? <p className="m-0 text-center text-sm leading-normal text-[#A8131F]">{payError}</p> : null}
           </div>
         }
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep("ticket")}>← Back</button>
         <input className="absolute -left-[9999px] h-0 w-0" tabIndex={-1} autoComplete="off" aria-hidden="true" value={companyWebsite} onChange={(event) => setCompanyWebsite(event.target.value)} />
-        {turnstileSiteKey ? <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} onBlocked={setTurnstileBlocked} /> : null}
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Payment</h1>
         <LevNote pose="focus" label="Lev holding a card">Secure payment. I've got this.</LevNote>
         <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-2">
@@ -1474,7 +1479,6 @@ function RegistrationWizard() {
             UnionBank UPay collects peso payments. This ticket is in US dollars, so the seat is held and IBMC records the payment separately. Receipt goes to {attendee.email} and {attendee.mobile}.
           </p>
         )}
-        {payError ? <p className="m-0 text-sm text-[#A8131F]">{payError}</p> : null}
       </Frame>
     );
   }
