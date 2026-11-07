@@ -525,7 +525,6 @@ function RegistrationView({
   onEdit,
   onCloseEdit,
   onClose,
-  onComp,
   onCancel,
 }: {
   row: Registration;
@@ -536,7 +535,6 @@ function RegistrationView({
   onEdit: () => void;
   onCloseEdit: () => void;
   onClose: () => void;
-  onComp: () => void;
   onCancel: () => void;
 }) {
   const details = [
@@ -635,7 +633,6 @@ function RegistrationView({
       </div>
       <div className="flex flex-wrap gap-2">
         {editing ? null : <button type="button" className={buttonClass} onClick={onEdit}>Edit</button>}
-        {row.status !== "cancelled" && row.balanceCents > 0 ? <button type="button" className={ghostButton} onClick={onComp}>Comp</button> : null}
         {row.status !== "cancelled" ? <button type="button" className="rounded-full border border-[#D0202E] px-4 py-2.5 text-sm font-bold text-[#A8131F]" onClick={onCancel}>Cancel registration</button> : null}
       </div>
     </section>
@@ -702,20 +699,6 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
     }
   }
 
-  async function comp(reference: string) {
-    if (!window.confirm("Mark the remaining balance as a complimentary ticket?")) return;
-    try {
-      const payload = await api(`/api/admin/registrations/${reference}/comp`, { method: "POST" });
-      if (payload.pending) {
-        onError("Waiting for another admin to approve this complimentary ticket.");
-        return;
-      }
-      await load();
-    } catch (error) {
-      onError(error instanceof Error ? error.message : "Could not comp this ticket");
-    }
-  }
-
   async function confirmCancel() {
     if (!cancelTarget) return;
     const reference = cancelTarget.reference;
@@ -762,7 +745,7 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
           </div>
         </form>
       ) : null}
-      {viewing ? <RegistrationView row={viewing} editing={editingDetails} draft={draft} setDraft={setDraft} onSave={save} onEdit={() => setEditingDetails(true)} onCloseEdit={() => setEditingDetails(false)} onClose={() => { setViewing(null); setEditingDetails(false); }} onComp={() => comp(viewing.reference)} onCancel={() => setCancelTarget({ reference: viewing.reference, name: viewing.attendee.fullName })} /> : null}
+      {viewing ? <RegistrationView row={viewing} editing={editingDetails} draft={draft} setDraft={setDraft} onSave={save} onEdit={() => setEditingDetails(true)} onCloseEdit={() => setEditingDetails(false)} onClose={() => { setViewing(null); setEditingDetails(false); }} onCancel={() => setCancelTarget({ reference: viewing.reference, name: viewing.attendee.fullName })} /> : null}
       <DataTable columns={["Name", "Email", "Mobile", "Reference", "Ticket", "Paid", "Left", "Status", ""]} empty={empty}>
         {visible.map((row) => (
           <tr key={row.reference}>
