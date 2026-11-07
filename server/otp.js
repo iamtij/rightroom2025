@@ -70,11 +70,15 @@ export async function sendMemberOtp(db, email) {
     text: `Your IBMC 2027 code is ${issued.code}. It expires in 10 minutes. If you did not ask to edit your details, you can ignore this email.`,
     html: `<p style="font-family:Inter,Arial,sans-serif;color:#141416">Your IBMC 2027 code is <strong style="letter-spacing:0.2em">${issued.code}</strong>.</p><p style="font-family:Inter,Arial,sans-serif;color:#5C5C63">It expires in 10 minutes. If you did not ask to edit your details, you can ignore this email.</p>`,
     idempotencyKey: `member-otp/${issued.email}/${issued.createdAt}`,
+    deliveryKind: "member_otp",
   });
   if (delivery.status !== "sent") {
     db.prepare("DELETE FROM member_otps WHERE id = ?").run(issued.id);
     if (delivery.error === "staging_safe_mode") {
-      return { error: "Email login codes are disabled while staging safe mode is on.", status: 503 };
+      return {
+        error: "Email login codes are disabled for this address while staging safe mode is on. Ask ops to allowlist your membership email.",
+        status: 503,
+      };
     }
     return { error: "We couldn't send the code. Try again.", status: 502 };
   }

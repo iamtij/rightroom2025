@@ -12,21 +12,33 @@ When off, behavior is unchanged from production.
 
 ## Suppressed when `IBMC_STAGING_SAFE_MODE=true`
 
-- All Resend email (`sendEmail`): reminders, scheduled messages, security alerts, member/registration OTP
+- Resend email except **allowlisted member-ownership OTP** (below)
 - All Semaphore SMS (`sendSms`)
 - Automatic encrypted nightly backups (`createEncryptedBackup`), including S3 **upload** and retention **prune**
+- Registration resume OTP, reminders, schedules, security alerts
+
+## Allowlisted member-ownership OTP (staging only)
+
+For TJ/manual checkout while safe mode stays on:
+
+| Variable | Purpose |
+| --- | --- |
+| `IBMC_STAGING_SAFE_MEMBERSHIP_OTP_ALLOWLIST` | Comma-separated **exact** membership emails (no wildcards). Default empty = none sent. |
+| Staging deployment identity | Same rules as Paynamics staging-live: Railway must not report `production`/conflict/unknown; see `docs/paynamics-staging.md`. |
+
+Only `POST /api/members/otp` emails for members whose stored email matches an allowlist entry. Auth flow unchanged (random code, hashed in DB, verify required).
 
 ## Not suppressed
 
-- Paynamics Workflow sandbox API calls (`paynamics.js` gates remain separate)
+- Paynamics Workflow API calls (separate gates)
 - HTTP app, registration DB, manual admin password login
-- On-demand backup **download/restore** (read-only S3) — only automatic write/prune is blocked
+- On-demand backup **download/restore** (read-only S3)
 
 ## Operational notes
 
-- **Email OTP login** (member edit + registration resume) returns HTTP 503 with a clear message; codes are not emailed.
+- Registration resume OTP stays blocked in safe mode.
+- `/api/members/otp` returns HTTP error JSON when delivery fails (not silent success).
 - Boot logs: `IBMC_STAGING_SAFE_MODE: outbound email/SMS and automatic backups are suppressed`
-- Railway stage DB/volumes are environment-isolated; backup buckets may not be — use this flag when testing Paynamics or other branch work on a staging service that shares backup credentials with production.
 
 ## Verification
 

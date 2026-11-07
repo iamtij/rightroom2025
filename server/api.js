@@ -272,8 +272,16 @@ export function createApi() {
 
   router.post("/members/otp", otpLimit, async (req, res) => {
     const result = await sendMemberOtp(db(), req.body?.query || req.body?.email);
-    if (result.error && result.status !== 404) console.error("Member code was not sent");
-    res.json({ ok: true });
+    if (result.error) {
+      if (result.status !== 404) console.error("Member code was not sent");
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    if (result.waited) {
+      res.json({ ok: true, maskedEmail: result.maskedEmail, waited: true });
+      return;
+    }
+    res.json({ ok: true, maskedEmail: result.maskedEmail });
   });
 
   router.post("/members/otp/verify", otpLimit, (req, res) => {
