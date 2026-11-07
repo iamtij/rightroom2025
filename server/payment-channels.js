@@ -67,6 +67,9 @@ export function paynamicsConfigured() {
   return Boolean(
     String(process.env.PAYNAMICS_MERCHANT_ID || "").trim()
     && String(process.env.PAYNAMICS_MERCHANT_KEY || "").trim()
-    && String(process.env.PAYNAMICS_MERCHANT_IP || "").trim(),
+    && String(process.env.PAYNAMICS_BASIC_AUTH_USER || "").trim()
+    && String(process.env.PAYNAMICS_BASIC_AUTH_PASSWORD || "").trim()
+    && String(process.env.PAYNAMICS_API_BASE_URL || "").trim()
+    && process.env.PAYNAMICS_API_ACCOUNT_CONFIRMED === "true",
   );
 }

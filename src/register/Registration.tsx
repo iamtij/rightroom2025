@@ -77,11 +77,11 @@ type HitpaySession = {
 type PaynamicsSession = {
   requestId: string;
   status: "pending" | "paid" | "failed" | "expired" | "cancelled";
-  checkoutUrl: string;
-  paymentRequest: string;
+  paymentUrl: string;
   gatewayResponseCode: string;
   gatewayMessage: string;
   expiresAt: string;
+  settlementPendingVerification?: boolean;
 };
 
 function isPayChannel(value: string): value is PayChannelCode {
@@ -106,18 +106,14 @@ function hitpayApiChannel(code: PayChannelCode) {
   return "";
 }
 
-function submitPaynamicsCheckout(session: PaynamicsSession) {
-  if (!session.checkoutUrl || !session.paymentRequest) return;
-  const form = document.createElement("form");
-  form.method = "POST";
-  form.action = session.checkoutUrl;
-  const input = document.createElement("input");
-  input.type = "hidden";
-  input.name = "paymentrequest";
-  input.value = session.paymentRequest;
-  form.appendChild(input);
-  document.body.appendChild(form);
-  form.submit();
+function safePaynamicsUrl(value: string) {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return "";
+    return url.toString();
+  } catch {
+    return "";
+  }
 }
 
 function payActionLabel(channel: PayChannelCode | "", amount: string, busy: boolean) {
@@ -869,7 +865,8 @@ function RegistrationWizard() {
         setHitpaySession(null);
         setPaynamicsSession(payload.paynamics);
         setStep("paying");
-        submitPaynamicsCheckout(payload.paynamics);
+        const url = safePaynamicsUrl(payload.paynamics.paymentUrl);
+        if (url) window.location.assign(url);
         return;
       }
       setStep("done");
@@ -1838,7 +1835,7 @@ function PaynamicsPending({
     <Frame label="Payment">
       <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Pay with Paynamics</h1>
       <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">
-        Finish payment on Paynamics. This page only updates after Paynamics sends a verified server notification.
+        Finish payment on Paynamics. This page does not confirm payment from a return link alone; settlement waits for a verified provider notification contract.
       </p>
       <div className="rounded-[14px] border border-[#E4E1DC] bg-white p-4 text-sm leading-normal text-[#3A3A40]">
         {current.status === "expired"
@@ -1860,14 +1857,10 @@ function PaynamicsPending({
         <button type="button" className="text-sm font-semibold text-[#3A3A40]" onClick={onLater}>
           Pay later
         </button>
-        {current.status === "pending" ? (
-          <button
-            type="button"
-            className="text-sm font-semibold text-[#A8131F]"
-            onClick={() => submitPaynamicsCheckout(current)}
-          >
+        {current.status === "pending" && safePaynamicsUrl(current.paymentUrl) ? (
+          <a className="text-sm font-semibold text-[#A8131F] no-underline" href={safePaynamicsUrl(current.paymentUrl)}>
             Open Paynamics again
-          </button>
+          </a>
         ) : null}
       </div>
       {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
@@ -2367,7 +2360,8 @@ function Manage({
         setHitpaySession(null);
         setPaynamicsSession(payload.paynamics);
         setPayingInstallment(false);
-        submitPaynamicsCheckout(payload.paynamics);
+        const url = safePaynamicsUrl(payload.paynamics.paymentUrl);
+        if (url) window.location.assign(url);
       }
     } catch (payError) {
       setError(payError instanceof Error ? payError.message : "The payment could not be started.");

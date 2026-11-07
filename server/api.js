@@ -503,8 +503,7 @@ export function createApi() {
     if (await rejectBot(req, res)) return;
     try {
       const registration = createPublicRegistration(req.body || {});
-      const clientIp = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim();
-      const result = await startPaynamicsPayment(db(), registration, clientIp);
+      const result = await startPaynamicsPayment(db(), registration);
       sendPaynamics(res, { ...result, resume: true }, true);
     } catch (error) {
       res.status(error.status || 400).json({ error: clientError(error, "Registration was not saved") });
@@ -522,8 +521,7 @@ export function createApi() {
       res.status(400).json({ error: "Registration is not payable" });
       return;
     }
-    const clientIp = String(req.headers["x-forwarded-for"] || req.socket?.remoteAddress || "").split(",")[0].trim();
-    const result = await startPaynamicsPayment(db(), registration, clientIp);
+    const result = await startPaynamicsPayment(db(), registration);
     sendPaynamics(res, { ...result, ...ownerAccess(registration, resumeCredential(req)) }, false);
   });
 
@@ -595,10 +593,11 @@ export function createApi() {
   router.post(
     "/webhooks/paynamics",
     paynamicsNotifyLimit,
+    express.json({ limit: "1mb" }),
     express.urlencoded({ extended: false, limit: "1mb" }),
     express.text({ type: "*/*", limit: "1mb" }),
     async (req, res) => {
-      const payload = typeof req.body === "object" && req.body ? req.body : { paymentresponse: String(req.body || "") };
+      const payload = req.body && typeof req.body === "object" ? req.body : String(req.body || "");
       const result = await handlePaynamicsNotification(db(), payload);
       recordSecurityEvent(db(), "paynamics.notify", result.status === 200 ? "accepted" : "rejected");
       res.status(result.status).type("text/plain").send(result.body);

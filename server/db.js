@@ -288,8 +288,7 @@ CREATE TABLE IF NOT EXISTS paynamics_payments (
   gateway_response_code TEXT,
   gateway_message TEXT,
   payment_channel TEXT,
-  checkout_url TEXT NOT NULL,
-  payment_request TEXT NOT NULL,
+  payment_url TEXT,
   expires_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -550,6 +549,14 @@ function migrate(db) {
     if (!names.has(name)) db.exec(`ALTER TABLE registrations ADD COLUMN ${name} ${type}`);
   }
   seedPaymentChannels(db);
+  const paynamicsColumns = new Set(
+    db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'paynamics_payments'").get()
+      ? db.prepare("PRAGMA table_info(paynamics_payments)").all().map((column) => column.name)
+      : [],
+  );
+  if (paynamicsColumns.size && !paynamicsColumns.has("payment_url")) {
+    db.exec("ALTER TABLE paynamics_payments ADD COLUMN payment_url TEXT");
+  }
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_registrations_resume ON registrations(resume_token) WHERE resume_token IS NOT NULL");
 }
 

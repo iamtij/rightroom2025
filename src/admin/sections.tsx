@@ -1111,7 +1111,7 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
         )}
         {paynamicsConfigured ? null : (
           <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
-            Paynamics needs PAYNAMICS_MERCHANT_ID, PAYNAMICS_MERCHANT_KEY, and PAYNAMICS_MERCHANT_IP on the server before checkout can start.
+            Paynamics Workflow needs confirmed PAYNAMICS_API_BASE_URL, PAYNAMICS_API_ACCOUNT_CONFIRMED, Basic auth, and merchant ID/key before checkout can start.
           </p>
         )}
       </div>
