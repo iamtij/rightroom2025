@@ -1343,7 +1343,7 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
         )}
         {paynamicsLiveWarning ? (
           <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] font-semibold leading-normal text-[#A8131F]">
-            Staging live Paynamics is armed ({paynamicsCheckoutMode}): successful buyer checkouts are real charges. IBMC registration settlement is still disabled until the notification contract is verified.
+            Staging live Paynamics is armed ({paynamicsCheckoutMode}): successful buyer checkouts are real charges. Registration marks paid only after a signed Paynamics GR001 (webhook or query).
           </p>
         ) : null}
         {paynamicsConfigured ? null : (

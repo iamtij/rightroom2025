@@ -118,8 +118,12 @@ export function paynamicsPaymentOutcome(responseCode) {
   return "pending";
 }
 
+/** Record IBMC payments when Paynamics sends a signed GR001 (webhook or query). Off on production unless explicitly opted in. */
 export function paynamicsSettlementEnabled() {
-  return false;
+  if (process.env.PAYNAMICS_SETTLEMENT_ENABLED === "false") return false;
+  if (!paynamicsApiCallsAllowed()) return false;
+  if (ibmcProductionDeployment() && process.env.PAYNAMICS_SETTLEMENT_ENABLED !== "true") return false;
+  return true;
 }
 
 export function paynamicsAmountCents(amountText) {
@@ -201,7 +205,12 @@ export function parseNotificationPayload(body) {
     }
   }
   if (typeof body !== "object") return {};
-  const parsed = parseWorkflowResponse(body);
+  let source = body;
+  const nested = body.transaction;
+  if (nested && typeof nested === "object" && (nested.request_id || nested.response_code || nested.signature)) {
+    source = { ...body, ...nested };
+  }
+  const parsed = parseWorkflowResponse(source);
   return {
     ...parsed,
     merchantid: parsed.merchant_id,
@@ -578,7 +587,7 @@ function presentPaynamics(row) {
     gatewayResponseCode: row.gateway_response_code || "",
     gatewayMessage: row.gateway_message || "",
     expiresAt: row.expires_at || "",
-    settlementDisabled: true,
+    settlementDisabled: !paynamicsSettlementEnabled(),
     checkoutMode: paynamicsCheckoutMode(),
     liveRealChargeWarning: liveWarning,
   };
@@ -704,12 +713,13 @@ function quarantinePaynamicsInbound(db, row, payload, reason) {
   return db.prepare("SELECT * FROM paynamics_payments WHERE id = ?").get(row.id);
 }
 
-/**
- * Status refresh only. Settlement requires independently verified notification/query contracts (currently disabled).
- * `allowSettle` is honored only when `IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE=true` (set in verify-paynamics.js only).
- */
 function paynamicsUnitTestSettleAllowed() {
   return process.env.IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE === "true";
+}
+
+function paynamicsMaySettle(allowSettle) {
+  if (!allowSettle) return false;
+  return paynamicsSettlementEnabled() || paynamicsUnitTestSettleAllowed();
 }
 
 export function applyPaynamicsStatus(db, row, payload, { allowSettle = false, requireAmountCurrency = false } = {}) {
@@ -740,7 +750,16 @@ export function applyPaynamicsStatus(db, row, payload, { allowSettle = false, re
   if (outcome === "query_ok") {
     return savePaynamics(db, row, { ...patch, status: row.status === "expired" ? "expired" : "pending", gatewayMessage: payload.response_message || "query ok" });
   }
-  if (outcome === "paid" && allowSettle && paynamicsUnitTestSettleAllowed()) {
+  if (outcome === "paid" && paynamicsMaySettle(allowSettle)) {
+    const amountOk = amountMatches(row, payload, { required: true });
+    const currencyOk = currencyMatches(payload, { required: true });
+    if (!amountOk || !currencyOk) {
+      return savePaynamics(db, row, {
+        ...patch,
+        status: "pending",
+        gatewayMessage: !amountOk ? "Paynamics reported paid; waiting for matching amount." : "Paynamics reported paid; waiting for PHP currency.",
+      });
+    }
     settlePaynamics(db, row);
     return db.prepare("SELECT * FROM paynamics_payments WHERE id = ?").get(row.id);
   }
@@ -757,6 +776,25 @@ function resolveInnerQueryPayload(body) {
     return { ...parseWorkflowResponse(nested), merchant_id: outer.merchant_id || nested.merchant_id };
   }
   return outer;
+}
+
+/** Query responses wrap status in QM001 + signed inner transaction, or return a signed row matching org_trxid2. */
+export function assessPaynamicsQueryBody(row, body, merchantKey) {
+  const outer = parseWorkflowResponse(body);
+  if (!workflowResponseSignatureValid(outer, merchantKey)) {
+    return { trusted: false, reason: "invalid_query_signature", payload: outer };
+  }
+  if (String(outer.response_code || "").trim().toUpperCase() !== "QM001") {
+    const trust = assessPaynamicsInboundTrust(row, outer, merchantKey, { requireAmountCurrency: false });
+    return { trusted: trust.trusted, reason: trust.reason, payload: outer };
+  }
+  const nested = body?.transaction || body?.data || body?.result;
+  if (!nested || typeof nested !== "object") {
+    return { trusted: false, reason: "missing_inner_transaction", payload: outer };
+  }
+  const inner = { ...parseWorkflowResponse(nested), merchant_id: outer.merchant_id || nested.merchant_id };
+  const trust = assessPaynamicsInboundTrust(row, inner, merchantKey, { requireAmountCurrency: false });
+  return { trusted: trust.trusted, reason: trust.reason, payload: inner };
 }
 
 async function queryWorkflowStatus(row) {
@@ -881,12 +919,12 @@ export async function refreshPaynamicsPayment(db, requestId) {
     const merchantKey = String(process.env.PAYNAMICS_MERCHANT_KEY || "").trim();
     const remote = await queryWorkflowStatus(current);
     if (remote?.body) {
-      const payload = resolveInnerQueryPayload(remote.body);
-      const trust = assessPaynamicsInboundTrust(current, payload, merchantKey, { requireAmountCurrency: false });
-      if (trust.trusted) {
-        current = applyPaynamicsStatus(db, current, payload, { allowSettle: false, requireAmountCurrency: false }) || current;
+      const assessed = assessPaynamicsQueryBody(current, remote.body, merchantKey);
+      if (assessed.trusted) {
+        current = applyPaynamicsStatus(db, current, assessed.payload, { allowSettle: true, requireAmountCurrency: false }) || current;
       } else {
-        quarantinePaynamicsInbound(db, current, payload, trust.reason);
+        const payload = resolveInnerQueryPayload(remote.body);
+        quarantinePaynamicsInbound(db, current, payload, assessed.reason);
       }
     }
   }
@@ -901,12 +939,12 @@ export async function handlePaynamicsNotification(db, body) {
   if (!row) return { status: 200, body: "OK" };
   try {
     const merchantKey = String(process.env.PAYNAMICS_MERCHANT_KEY || "").trim();
-    const trust = assessPaynamicsInboundTrust(row, payload, merchantKey, { requireAmountCurrency: true });
+    const trust = assessPaynamicsInboundTrust(row, payload, merchantKey, { requireAmountCurrency: false });
     if (!trust.trusted) {
       quarantinePaynamicsInbound(db, row, payload, trust.reason);
       return { status: 200, body: "OK" };
     }
-    applyPaynamicsStatus(db, row, payload, { allowSettle: false, requireAmountCurrency: false });
+    applyPaynamicsStatus(db, row, payload, { allowSettle: true, requireAmountCurrency: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("No installment is due") || message.includes("not payable")) {
