@@ -53,8 +53,14 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+process.once("SIGTERM", () => {
+  const force = setTimeout(() => process.exit(0), 10_000);
+  force.unref();
+  server.close(() => process.exit(0));
 });
 
 try {
