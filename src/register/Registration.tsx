@@ -291,7 +291,15 @@ function Frame({
         </header>
         {step ? <Steps step={step} /> : null}
         <main className="flex flex-1 flex-col gap-4 px-5 py-5">{children}</main>
-        {footer ? <div className="px-5 pt-2 pb-7">{footer}</div> : null}
+        <div className="mt-auto px-5 pt-2 pb-7">
+          {footer ? <div className="pb-4">{footer}</div> : null}
+          <p className="m-0 text-center text-sm leading-snug text-[#5C5C63]">
+            Need help? Email{" "}
+            <a href="mailto:helpdesk@bni.ph" className="font-semibold text-[#A8131F]">helpdesk@bni.ph</a>
+            {" "}or visit the{" "}
+            <a href="https://helpdesk.bni.ph/" target="_blank" rel="noreferrer" className="font-semibold text-[#A8131F]">helpdesk</a>.
+          </p>
+        </div>
       </div>
     </div>
   );
