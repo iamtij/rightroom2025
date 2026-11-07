@@ -37,14 +37,17 @@ For Railway **staging** when using **live** merchant credentials (real money at 
 
 | Variable | Purpose |
 | --- | --- |
-| `IBMC_DEPLOYMENT_ENV=staging` | Deployment identity — **required** |
+| `IBMC_DEPLOYMENT_ENV=staging` | App label (required when not on Railway) |
+| `RAILWAY_ENVIRONMENT` + `RAILWAY_ENVIRONMENT_NAME` | **Authoritative on Railway** — must be staging-like (`staging`, `preview`, `development`, …), not `production` |
 | `PAYNAMICS_STAGING_LIVE_MERCHANT=true` | Explicit opt-in |
 | `PAYNAMICS_API_LIVE_ACCOUNT_CONFIRMED=true` | Parent confirms live account + endpoint with Paynamics |
 | `PAYNAMICS_API_ENV=live` | Live Workflow mode |
 | `PAYNAMICS_LIVE_API_ORIGIN_ALLOWLIST` | Comma-separated **exact** HTTPS origin(s) Paynamics provided (no default live URL in repo) |
 | `PAYNAMICS_API_BASE_URL` | Must match an allowlisted origin |
 
-**Rejected on `IBMC_DEPLOYMENT_ENV=production`** — production app cannot arm staging-live mode. There is no arbitrary-host bypass (old `PAYNAMICS_ALLOW_PRODUCTION` is gone).
+**Rejected when Railway reports `production`**, when Railway labels conflict or are unknown/missing (while Railway signals are present), or when `IBMC_DEPLOYMENT_ENV=production`. `IBMC_DEPLOYMENT_ENV=staging` **cannot override** Railway `production`. No arbitrary-host bypass.
+
+`PAYNAMICS_API_BASE_URL` must be a bare **https origin** (no username/password, query, hash, or path). Outbound fetch uses the canonical origin only.
 
 Wiki §1.6 `payin.payserv.net` is the **test** host only — do not treat it as authenticated production. Extend `PAYNAMICS_PAYMENT_HOST_ALLOWLIST` if live hosted pages use a different host.
 

@@ -1,4 +1,12 @@
 import crypto from "crypto";
+import {
+  assessStagingLiveDeploymentIdentity,
+  ibmcDeploymentEnv,
+  railwayDeploymentClass,
+  railwaySignalsPresent,
+} from "./deployment-identity.js";
+
+export { assessStagingLiveDeploymentIdentity, ibmcDeploymentEnv, railwayDeploymentClass, railwaySignalsPresent };
 import { getRegistration, recordPayment } from "./registrations.js";
 import { isChannelEnabled } from "./payment-channels.js";
 
@@ -222,8 +230,26 @@ export function paynamicsWikiTestApiBase() {
   return WIKI_TEST_API_BASE;
 }
 
+/** Parse PAYNAMICS_API_BASE_URL to a canonical https origin (no userinfo, query, fragment, or path). */
+export function canonicalPaynamicsApiOrigin(raw = process.env.PAYNAMICS_API_BASE_URL) {
+  const text = String(raw || "").trim();
+  if (!text) return { ok: false, reason: "missing_api_base" };
+  let url;
+  try {
+    url = new URL(text.includes("://") ? text : `https://${text}`);
+  } catch {
+    return { ok: false, reason: "invalid_api_base" };
+  }
+  if (url.protocol !== "https:") return { ok: false, reason: "api_base_not_https" };
+  if (url.username || url.password) return { ok: false, reason: "api_base_userinfo" };
+  if (url.search || url.hash) return { ok: false, reason: "api_base_query_or_fragment" };
+  if (url.pathname && url.pathname !== "/") return { ok: false, reason: "api_base_path_not_allowed" };
+  return { ok: true, origin: url.origin, reason: "" };
+}
+
 export function paynamicsApiBaseUrl() {
-  return String(process.env.PAYNAMICS_API_BASE_URL || "").trim().replace(/\/$/, "");
+  const parsed = canonicalPaynamicsApiOrigin();
+  return parsed.ok ? parsed.origin : "";
 }
 
 export function paynamicsApiAccountConfirmed() {
@@ -250,10 +276,6 @@ function apiBaseMatchesWikiTest(base) {
   }
 }
 
-export function ibmcDeploymentEnv() {
-  return String(process.env.IBMC_DEPLOYMENT_ENV || "").trim().toLowerCase();
-}
-
 export function ibmcStagingDeployment() {
   return ibmcDeploymentEnv() === "staging";
 }
@@ -262,10 +284,15 @@ export function ibmcProductionDeployment() {
   return ibmcDeploymentEnv() === "production";
 }
 
+function canonicalAllowlistOrigin(entry) {
+  const parsed = canonicalPaynamicsApiOrigin(entry);
+  return parsed.ok ? parsed.origin : "";
+}
+
 function parsePaynamicsOriginAllowlist(raw) {
   return String(raw || "")
     .split(",")
-    .map((item) => item.trim().replace(/\/$/, ""))
+    .map((item) => canonicalAllowlistOrigin(item.trim()))
     .filter(Boolean);
 }
 
@@ -273,19 +300,11 @@ export function paynamicsLiveApiOriginAllowlist() {
   return parsePaynamicsOriginAllowlist(process.env.PAYNAMICS_LIVE_API_ORIGIN_ALLOWLIST);
 }
 
-function apiBaseMatchesLiveAllowlist(base) {
-  const origin = apiBaseOrigin(base);
+function apiBaseMatchesLiveAllowlist(origin) {
   if (!origin) return false;
   const entries = paynamicsLiveApiOriginAllowlist();
   if (!entries.length) return false;
-  return entries.some((entry) => {
-    try {
-      const normalized = entry.startsWith("http") ? entry : `https://${entry}`;
-      return new URL(normalized).origin === origin;
-    } catch {
-      return false;
-    }
-  });
+  return entries.includes(origin);
 }
 
 export function paynamicsStagingLiveMerchantOptIn() {
@@ -296,13 +315,11 @@ export function paynamicsLiveAccountConfirmed() {
   return process.env.PAYNAMICS_API_LIVE_ACCOUNT_CONFIRMED === "true";
 }
 
-/** Staging-only live merchant mode (explicit opt-in + deployment identity). Never on production deployment. */
+/** Staging-only live merchant mode (explicit opt-in + platform/custom deployment identity). */
 export function paynamicsStagingLiveMerchantAllowed() {
-  if (ibmcProductionDeployment()) return false;
-  if (!ibmcStagingDeployment()) return false;
   if (!paynamicsStagingLiveMerchantOptIn()) return false;
   if (!paynamicsLiveAccountConfirmed()) return false;
-  return true;
+  return assessStagingLiveDeploymentIdentity().allowed;
 }
 
 export function paynamicsApiEnv() {
@@ -329,26 +346,25 @@ function paynamicsApiCredentialsReady() {
 export function assessPaynamicsApiAdmission() {
   if (!paynamicsApiCallsEnabled()) return { allowed: false, reason: "api_calls_disabled" };
   if (!paynamicsApiAccountConfirmed()) return { allowed: false, reason: "account_not_confirmed" };
-  const base = paynamicsApiBaseUrl();
-  if (!base) return { allowed: false, reason: "missing_api_base" };
-  try {
-    if (new URL(base).protocol !== "https:") return { allowed: false, reason: "api_base_not_https" };
-  } catch {
-    return { allowed: false, reason: "invalid_api_base" };
-  }
+  const parsed = canonicalPaynamicsApiOrigin();
+  if (!parsed.ok) return { allowed: false, reason: parsed.reason };
+  const origin = parsed.origin;
   if (!String(process.env.PAYNAMICS_BASIC_AUTH_USER || "").trim()) return { allowed: false, reason: "missing_basic_auth" };
   if (!String(process.env.PAYNAMICS_BASIC_AUTH_PASSWORD || "").trim()) return { allowed: false, reason: "missing_basic_auth" };
   if (!String(process.env.PAYNAMICS_MERCHANT_ID || "").trim()) return { allowed: false, reason: "missing_merchant_id" };
   if (!String(process.env.PAYNAMICS_MERCHANT_KEY || "").trim()) return { allowed: false, reason: "missing_merchant_key" };
   const env = paynamicsApiEnv();
   if (env === "sandbox") {
-    if (!apiBaseMatchesWikiTest(base)) return { allowed: false, reason: "sandbox_host_mismatch" };
+    if (!apiBaseMatchesWikiTest(origin)) return { allowed: false, reason: "sandbox_host_mismatch" };
     return { allowed: true, reason: "sandbox", mode: "sandbox" };
   }
   if (env === "live") {
-    if (ibmcProductionDeployment()) return { allowed: false, reason: "live_blocked_on_production_deployment" };
-    if (!paynamicsStagingLiveMerchantAllowed()) return { allowed: false, reason: "staging_live_not_allowed" };
-    if (!apiBaseMatchesLiveAllowlist(base)) return { allowed: false, reason: "live_origin_not_allowlisted" };
+    const identity = assessStagingLiveDeploymentIdentity();
+    if (!identity.allowed) return { allowed: false, reason: identity.reason };
+    if (!paynamicsStagingLiveMerchantOptIn() || !paynamicsLiveAccountConfirmed()) {
+      return { allowed: false, reason: "staging_live_not_allowed" };
+    }
+    if (!apiBaseMatchesLiveAllowlist(origin)) return { allowed: false, reason: "live_origin_not_allowlisted" };
     return { allowed: true, reason: "staging_live", mode: "live" };
   }
   return { allowed: false, reason: "unsupported_api_env" };
@@ -392,8 +408,10 @@ async function paynamicsApiFetch(path, body) {
   if (!paynamicsApiCallsAllowed()) {
     throw new Error("Paynamics API calls are disabled until test Workflow credentials and host are confirmed.");
   }
-  const base = paynamicsApiBaseUrl();
-  const response = await fetch(`${base}${path}`, {
+  const origin = paynamicsApiBaseUrl();
+  if (!origin) throw new Error("Paynamics API calls are disabled until test Workflow credentials and host are confirmed.");
+  const suffix = String(path || "").startsWith("/") ? String(path) : `/${String(path || "")}`;
+  const response = await fetch(`${origin}${suffix}`, {
     method: "POST",
     headers: {
       Authorization: basicAuthHeader(),

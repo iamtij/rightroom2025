@@ -9,7 +9,9 @@ import {
   allowedPaymentRedirectUrl,
   applyPaynamicsStatus,
   assessPaynamicsApiAdmission,
+  assessStagingLiveDeploymentIdentity,
   buildWorkflowCreateBody,
+  canonicalPaynamicsApiOrigin,
   extractHostedPaymentUrl,
   handlePaynamicsNotification,
   ibmcProductionDeployment,
@@ -142,12 +144,22 @@ process.env.PAYNAMICS_ALLOW_PRODUCTION = "";
 delete process.env.PAYNAMICS_ALLOW_PRODUCTION;
 assert.equal(paynamicsApiCallsAllowed(), true);
 
+function clearRailwayEnv() {
+  delete process.env.RAILWAY_ENVIRONMENT;
+  delete process.env.RAILWAY_ENVIRONMENT_NAME;
+  delete process.env.RAILWAY_PROJECT_ID;
+  delete process.env.RAILWAY_SERVICE_ID;
+}
+
 function setLiveStagingEnv(baseOrigin) {
+  clearRailwayEnv();
   delete process.env.IBMC_DEPLOYMENT_ENV;
   delete process.env.PAYNAMICS_STAGING_LIVE_MERCHANT;
   delete process.env.PAYNAMICS_API_LIVE_ACCOUNT_CONFIRMED;
   delete process.env.PAYNAMICS_LIVE_API_ORIGIN_ALLOWLIST;
   process.env.IBMC_DEPLOYMENT_ENV = "staging";
+  process.env.RAILWAY_ENVIRONMENT = "staging";
+  process.env.RAILWAY_ENVIRONMENT_NAME = "staging";
   process.env.PAYNAMICS_API_ENV = "live";
   process.env.PAYNAMICS_STAGING_LIVE_MERCHANT = "true";
   process.env.PAYNAMICS_API_LIVE_ACCOUNT_CONFIRMED = "true";
@@ -162,12 +174,40 @@ setLiveStagingEnv("https://live-workflow.example.test");
 assert.equal(assessPaynamicsApiAdmission().allowed, true);
 assert.equal(paynamicsCheckoutMode(), "live");
 
+process.env.IBMC_DEPLOYMENT_ENV = "staging";
+process.env.RAILWAY_ENVIRONMENT = "production";
+process.env.RAILWAY_ENVIRONMENT_NAME = "production";
+assert.equal(assessPaynamicsApiAdmission().allowed, false);
+assert.equal(assessPaynamicsApiAdmission().reason, "railway_production_environment");
+assert.equal(JSON.stringify(assessPaynamicsApiAdmission()).includes("secret"), false);
+
 process.env.IBMC_DEPLOYMENT_ENV = "production";
 assert.equal(ibmcProductionDeployment(), true);
 assert.equal(assessPaynamicsApiAdmission().allowed, false);
-assert.equal(assessPaynamicsApiAdmission().reason, "live_blocked_on_production_deployment");
+
+clearRailwayEnv();
+process.env.IBMC_DEPLOYMENT_ENV = "staging";
+setLiveStagingEnv("https://live-workflow.example.test");
+
+process.env.RAILWAY_ENVIRONMENT = "staging";
+process.env.RAILWAY_ENVIRONMENT_NAME = "production";
+assert.equal(assessStagingLiveDeploymentIdentity().allowed, false);
+assert.equal(assessStagingLiveDeploymentIdentity().reason, "railway_identity_conflicting");
+
+process.env.RAILWAY_ENVIRONMENT = "qa-unknown";
+process.env.RAILWAY_ENVIRONMENT_NAME = "qa-unknown";
+assert.equal(assessStagingLiveDeploymentIdentity().allowed, false);
+assert.equal(assessStagingLiveDeploymentIdentity().reason, "railway_identity_unknown");
+
+process.env.RAILWAY_PROJECT_ID = "proj";
+delete process.env.RAILWAY_ENVIRONMENT;
+delete process.env.RAILWAY_ENVIRONMENT_NAME;
+assert.equal(assessStagingLiveDeploymentIdentity().allowed, false);
+assert.equal(assessStagingLiveDeploymentIdentity().reason, "railway_identity_missing");
 
 process.env.IBMC_DEPLOYMENT_ENV = "staging";
+process.env.RAILWAY_ENVIRONMENT = "staging";
+process.env.RAILWAY_ENVIRONMENT_NAME = "staging";
 process.env.PAYNAMICS_API_BASE_URL = "https://arbitrary.evil.test";
 assert.equal(assessPaynamicsApiAdmission().allowed, false);
 assert.equal(assessPaynamicsApiAdmission().reason, "live_origin_not_allowlisted");
@@ -176,8 +216,19 @@ delete process.env.PAYNAMICS_STAGING_LIVE_MERCHANT;
 process.env.PAYNAMICS_API_BASE_URL = "https://live-workflow.example.test";
 assert.equal(assessPaynamicsApiAdmission().allowed, false);
 
+assert.equal(canonicalPaynamicsApiOrigin("https://user:pass@payin.payserv.net").ok, false);
+assert.equal(canonicalPaynamicsApiOrigin("https://payin.payserv.net/evil").ok, false);
+assert.equal(canonicalPaynamicsApiOrigin("https://payin.payserv.net?x=1").ok, false);
+assert.equal(canonicalPaynamicsApiOrigin("https://payin.payserv.net#frag").ok, false);
+process.env.PAYNAMICS_API_BASE_URL = "https://leak:secret@payin.payserv.net";
+process.env.PAYNAMICS_API_ENV = "sandbox";
+assert.equal(assessPaynamicsApiAdmission().allowed, false);
+assert.equal(assessPaynamicsApiAdmission().reason, "api_base_userinfo");
+assert.equal(JSON.stringify(assessPaynamicsApiAdmission()).includes("secret"), false);
+
 process.env.PAYNAMICS_API_ENV = "sandbox";
 process.env.PAYNAMICS_API_BASE_URL = "https://payin.payserv.net";
+clearRailwayEnv();
 delete process.env.IBMC_DEPLOYMENT_ENV;
 delete process.env.PAYNAMICS_STAGING_LIVE_MERCHANT;
 delete process.env.PAYNAMICS_API_LIVE_ACCOUNT_CONFIRMED;
@@ -185,8 +236,12 @@ delete process.env.PAYNAMICS_LIVE_API_ORIGIN_ALLOWLIST;
 assert.equal(paynamicsApiCallsAllowed(), true);
 assert.equal(paynamicsCheckoutMode(), "sandbox");
 
+let fetchTarget = "";
+
 global.fetch = async (url, options = {}) => {
   const target = String(url);
+  fetchTarget = target;
+  assert.equal(target.includes("@"), false);
   if (target.includes("/paygate/transactions/") && !target.includes("/query")) {
     const payload = JSON.parse(options.body || "{}");
     assert.equal(options.headers.Authorization.startsWith("Basic "), true);
@@ -210,6 +265,7 @@ global.fetch = async (url, options = {}) => {
 
 const started = await startPaynamicsPayment(db, registration);
 assert.equal(started.paynamics?.status, "pending");
+assert.equal(fetchTarget.startsWith("https://payin.payserv.net/"), true);
 assert.equal(started.paynamics?.paymentUrl, "https://payin.payserv.net/hosted/checkout");
 
 const row = db.prepare("SELECT * FROM paynamics_payments WHERE request_id = ?").get(started.paynamics.requestId);
