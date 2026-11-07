@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -195,6 +196,7 @@ const pendingNotice = await handlePaynamicsNotification(db, {
 assert.equal(pendingNotice.status, 200);
 assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE external_reference = ?").get(row.request_id).count, 0);
 
+const beforeMismatch = db.prepare("SELECT status, gateway_response_code FROM paynamics_payments WHERE id = ?").get(row.id);
 const mismatch = await handlePaynamicsNotification(db, {
   merchant_id: TEST_MID,
   request_id: row.request_id,
@@ -203,9 +205,23 @@ const mismatch = await handlePaynamicsNotification(db, {
   amount: "0.01",
   currency: "PHP",
 });
-assert.equal(db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(row.id).status, "failed");
+assert.equal(mismatch.status, 200);
+const afterMismatch = db.prepare("SELECT status, gateway_response_code, untrusted_inbound_json FROM paynamics_payments WHERE id = ?").get(row.id);
+assert.equal(afterMismatch.status, beforeMismatch.status);
+assert.equal(afterMismatch.gateway_response_code, beforeMismatch.gateway_response_code);
+assert.ok(afterMismatch.untrusted_inbound_json);
 
-db.prepare("UPDATE paynamics_payments SET status = 'pending' WHERE id = ?").run(row.id);
+const unsignedFailed = await handlePaynamicsNotification(db, {
+  merchant_id: TEST_MID,
+  request_id: row.request_id,
+  response_code: "GR003",
+  response_message: "failed",
+  amount: amountLabel,
+  currency: "PHP",
+});
+assert.equal(unsignedFailed.status, 200);
+assert.equal(db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(row.id).status, "pending");
+
 const fixedRow = db.prepare("SELECT * FROM paynamics_payments WHERE id = ?").get(row.id);
 
 const unverifiedPaid = await handlePaynamicsNotification(db, {
@@ -217,7 +233,68 @@ const unverifiedPaid = await handlePaynamicsNotification(db, {
   currency: "PHP",
 });
 assert.equal(unverifiedPaid.status, 200);
+assert.equal(db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(fixedRow.id).status, "pending");
 assert.equal(db.prepare("SELECT COUNT(*) AS count FROM payments WHERE external_reference = ?").get(fixedRow.request_id).count, 0);
+
+let queryMode = "default";
+const defaultFetch = global.fetch;
+global.fetch = async (url, options = {}) => {
+  const target = String(url);
+  if (target.includes("/paygate/transactions/query") && queryMode === "unsigned_inner_gr003") {
+    const req = JSON.parse(options.body || "{}");
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        merchant_id: TEST_MID,
+        request_id: "QFAKE",
+        response_code: "QM001",
+        response_message: "Query Successful",
+        response_id: "QOUT",
+        gateway_id: "",
+        response_advise: "",
+        timestamp: "2026-11-07T10:00:00.000+08:00",
+        processor_response_id: "",
+        processor_response_authcode: "",
+        pay_reference: "",
+        signature: paynamicsWorkflowResponseSignature({
+          merchant_id: TEST_MID,
+          request_id: "QFAKE",
+          response_id: "QOUT",
+          gateway_id: "",
+          response_code: "QM001",
+          response_message: "Query Successful",
+          response_advise: "",
+          timestamp: "2026-11-07T10:00:00.000+08:00",
+          processor_response_id: "",
+          processor_response_authcode: "",
+          pay_reference: "",
+        }, TEST_KEY),
+        transaction: {
+          merchant_id: TEST_MID,
+          request_id: req.org_trxid2,
+          response_code: "GR003",
+          response_message: "failed",
+          amount: amountLabel,
+          currency: "PHP",
+        },
+      }),
+    };
+  }
+  return defaultFetch(url, options);
+};
+queryMode = "unsigned_inner_gr003";
+const beforeRefresh = db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(fixedRow.id).status;
+const badRefresh = await refreshPaynamicsPayment(db, fixedRow.request_id);
+assert.equal(badRefresh.paynamics?.status, beforeRefresh);
+assert.equal(db.prepare("SELECT status FROM paynamics_payments WHERE id = ?").get(fixedRow.id).status, "pending");
+queryMode = "default";
+global.fetch = defaultFetch;
+
+delete process.env.PAYNAMICS_API_CALLS_ENABLED;
+const apiOffRefresh = await refreshPaynamicsPayment(db, fixedRow.request_id);
+assert.equal(apiOffRefresh.paynamics?.status, "pending");
+process.env.PAYNAMICS_API_CALLS_ENABLED = "true";
 
 delete process.env.IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE;
 applyPaynamicsStatus(db, fixedRow, {
@@ -252,24 +329,153 @@ assert.equal(parseNotificationPayload({ request_id: "abc", response_code: "GR033
 
 global.fetch = originalFetch;
 
+function seedHttpPaynamicsRow(fileDb) {
+  fileDb.prepare("UPDATE ticket_products SET sales_start = '2020-01-01'").run();
+  fileDb.prepare("UPDATE payment_channels SET enabled = 1 WHERE code = 'paynamics'").run();
+  const reg = createRegistration(fileDb, {
+    productCode: "first_mover",
+    paymentPlan: "full",
+    fullName: "HTTP QA",
+    email: "http-qa@example.com",
+    mobile: "09170000001",
+    registeredOn: "2026-11-12",
+  });
+  const installment = fileDb.prepare(`
+    SELECT id, amount_cents FROM registration_installments
+    WHERE registration_id = ? AND status = 'due' ORDER BY sequence LIMIT 1
+  `).get(reg.id);
+  const requestId = `qa${crypto.randomBytes(8).toString("hex")}`;
+  const expires = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  fileDb.prepare(`
+    INSERT INTO paynamics_payments (
+      registration_id, installment_id, request_id, amount_cents, currency, status, expires_at, payment_url
+    ) VALUES (?, ?, ?, ?, 'PHP', 'pending', ?, 'https://payin.payserv.net/hosted/qa')
+  `).run(reg.id, installment.id, requestId, installment.amount_cents, expires);
+  return { requestId, amountLabel: (installment.amount_cents / 100).toFixed(2) };
+}
+
 const file = path.join(os.tmpdir(), `ibmc-verify-paynamics-${process.pid}.sqlite`);
 fs.rmSync(file, { force: true });
 process.env.IBMC_DB_PATH = file;
 process.env.TURNSTILE_SITE_KEY = "";
 process.env.TURNSTILE_SECRET_KEY = "";
+process.env.PAYNAMICS_MERCHANT_ID = TEST_MID;
+process.env.PAYNAMICS_MERCHANT_KEY = TEST_KEY;
+process.env.PUBLIC_WEB_URL = "https://staging.example.test";
+process.env.SITE_URL = "https://staging.example.test";
+const fileDb = openDatabase(file);
+const httpSeed = seedHttpPaynamicsRow(fileDb);
+
 const { createApi } = await import("./api.js");
-openDatabase(file).prepare("UPDATE ticket_products SET sales_start = '2020-01-01'").run();
 
 const server = createApi().listen(0);
 const base = `http://127.0.0.1:${server.address().port}`;
 try {
-  const webhook = await fetch(`${base}/api/webhooks/paynamics`, {
+  const missingId = await fetch(`${base}/api/webhooks/paynamics`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ response_code: "GR001" }),
   });
-  assert.equal(webhook.status, 400);
+  assert.equal(missingId.status, 400);
+
+  async function postWebhook(body) {
+    return fetch(`${base}/api/webhooks/paynamics`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
+  function rowState() {
+    return fileDb.prepare("SELECT status, gateway_response_code, untrusted_inbound_json FROM paynamics_payments WHERE request_id = ?").get(httpSeed.requestId);
+  }
+
+  const baseline = rowState();
+  assert.equal(baseline.status, "pending");
+
+  process.env.IBMC_STAGING_SAFE_MODE = "true";
+  delete process.env.PAYNAMICS_API_CALLS_ENABLED;
+  fileDb.prepare("UPDATE payment_channels SET enabled = 0 WHERE code = 'paynamics'").run();
+
+  let res = await postWebhook({
+    merchant_id: TEST_MID,
+    request_id: httpSeed.requestId,
+    response_code: "GR001",
+    response_message: "paid",
+    amount: "0.01",
+    currency: "PHP",
+  });
+  assert.equal(res.status, 200);
+  let state = rowState();
+  assert.equal(state.status, "pending");
+  assert.equal(state.gateway_response_code, baseline.gateway_response_code);
+  assert.ok(state.untrusted_inbound_json);
+
+  res = await postWebhook({
+    merchant_id: TEST_MID,
+    request_id: httpSeed.requestId,
+    response_code: "GR003",
+    response_message: "failed",
+    amount: httpSeed.amountLabel,
+    currency: "PHP",
+  });
+  assert.equal(res.status, 200);
+  state = rowState();
+  assert.equal(state.status, "pending");
+
+  const badSigBody = signedCreateResponse(httpSeed.requestId, {
+    response_code: "GR003",
+    response_message: "failed",
+    amount: httpSeed.amountLabel,
+    currency: "PHP",
+  });
+  badSigBody.signature = "f".repeat(128);
+  res = await postWebhook(badSigBody);
+  assert.equal(res.status, 200);
+  assert.equal(rowState().status, "pending");
+
+  process.env.PAYNAMICS_API_CALLS_ENABLED = "true";
+  process.env.PAYNAMICS_BASIC_AUTH_USER = "workflow_user";
+  process.env.PAYNAMICS_BASIC_AUTH_PASSWORD = "workflow_pass";
+  process.env.PAYNAMICS_API_BASE_URL = "https://payin.payserv.net";
+  process.env.PAYNAMICS_API_ACCOUNT_CONFIRMED = "true";
+  process.env.PAYNAMICS_API_ENV = "sandbox";
+
+  let refreshCalls = 0;
+  const httpFetch = global.fetch;
+  global.fetch = async (url, init) => {
+    const target = String(url);
+    if (target.includes("/paygate/transactions/query")) {
+      refreshCalls += 1;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          merchant_id: TEST_MID,
+          request_id: httpSeed.requestId,
+          response_code: "GR003",
+          response_message: "failed",
+          amount: httpSeed.amountLabel,
+          currency: "PHP",
+        }),
+      };
+    }
+    return httpFetch(url, init);
+  };
+  const poll = await fetch(`${base}/api/payments/paynamics/${httpSeed.requestId}`);
+  assert.equal(poll.status, 200);
+  assert.equal(refreshCalls, 1);
+  assert.equal(rowState().status, "pending");
+
+  delete process.env.PAYNAMICS_API_CALLS_ENABLED;
+  refreshCalls = 0;
+  const pollOff = await fetch(`${base}/api/payments/paynamics/${httpSeed.requestId}`);
+  assert.equal(pollOff.status, 200);
+  assert.equal(refreshCalls, 0);
+  assert.equal(rowState().status, "pending");
 } finally {
+  global.fetch = originalFetch;
+  delete process.env.IBMC_STAGING_SAFE_MODE;
   await new Promise((resolve) => server.close(resolve));
   fs.rmSync(file, { force: true });
   fs.rmSync(`${file}-wal`, { force: true });

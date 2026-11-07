@@ -557,6 +557,9 @@ function migrate(db) {
   if (paynamicsColumns.size && !paynamicsColumns.has("payment_url")) {
     db.exec("ALTER TABLE paynamics_payments ADD COLUMN payment_url TEXT");
   }
+  if (paynamicsColumns.size && !paynamicsColumns.has("untrusted_inbound_json")) {
+    db.exec("ALTER TABLE paynamics_payments ADD COLUMN untrusted_inbound_json TEXT");
+  }
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_registrations_resume ON registrations(resume_token) WHERE resume_token IS NOT NULL");
 }
 

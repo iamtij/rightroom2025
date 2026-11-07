@@ -509,6 +509,49 @@ function currencyMatches(payload, { required = false } = {}) {
   return String(payload.currency).toUpperCase() === "PHP";
 }
 
+/** Gate for webhook/query payloads — signature and associations must pass before any status change. */
+export function assessPaynamicsInboundTrust(row, payload, merchantKey, { requireAmountCurrency = false } = {}) {
+  if (!row) return { trusted: false, reason: "missing_row" };
+  if (!merchantKey) return { trusted: false, reason: "merchant_key_unconfigured" };
+  if (!payload?.signature || !workflowResponseSignatureValid(payload, merchantKey, { requestId: row.request_id })) {
+    return { trusted: false, reason: "invalid_signature" };
+  }
+  if (!merchantMatches(row, payload)) return { trusted: false, reason: "merchant_mismatch" };
+  if (!referenceMatches(row, payload)) return { trusted: false, reason: "request_mismatch" };
+  const amountPresent = payload?.amount !== undefined && payload?.amount !== null && String(payload.amount).trim() !== "";
+  const currencyPresent = payload?.currency !== undefined && payload?.currency !== null && String(payload.currency).trim() !== "";
+  if (amountPresent && !amountMatches(row, payload, { required: true })) {
+    return { trusted: false, reason: "amount_mismatch" };
+  }
+  if (currencyPresent && !currencyMatches(payload, { required: true })) {
+    return { trusted: false, reason: "currency_mismatch" };
+  }
+  if (requireAmountCurrency) {
+    if (!amountMatches(row, payload, { required: true })) return { trusted: false, reason: "amount_required" };
+    if (!currencyMatches(payload, { required: true })) return { trusted: false, reason: "currency_required" };
+  }
+  return { trusted: true, reason: "" };
+}
+
+function quarantinePaynamicsInbound(db, row, payload, reason) {
+  const snapshot = {
+    reason: String(reason || "untrusted"),
+    received_at: new Date().toISOString(),
+    response_code: payload?.response_code || null,
+    response_message: payload?.response_message || null,
+    response_id: payload?.response_id || null,
+    amount: payload?.amount ?? null,
+    currency: payload?.currency ?? null,
+    had_signature: Boolean(payload?.signature),
+  };
+  db.prepare(`
+    UPDATE paynamics_payments
+    SET untrusted_inbound_json = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(JSON.stringify(snapshot), row.id);
+  return db.prepare("SELECT * FROM paynamics_payments WHERE id = ?").get(row.id);
+}
+
 /**
  * Status refresh only. Settlement requires independently verified notification/query contracts (currently disabled).
  * `allowSettle` is honored only when `IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE=true` (set in verify-paynamics.js only).
@@ -671,10 +714,16 @@ export async function refreshPaynamicsPayment(db, requestId) {
     current = savePaynamics(db, current, { status: "expired", gatewayMessage: "checkout expired" });
   }
   if (current.status === "pending" && paynamicsApiCallsAllowed()) {
+    const merchantKey = String(process.env.PAYNAMICS_MERCHANT_KEY || "").trim();
     const remote = await queryWorkflowStatus(current);
     if (remote?.body) {
       const payload = resolveInnerQueryPayload(remote.body);
-      current = applyPaynamicsStatus(db, current, payload, { allowSettle: false, requireAmountCurrency: false }) || current;
+      const trust = assessPaynamicsInboundTrust(current, payload, merchantKey, { requireAmountCurrency: false });
+      if (trust.trusted) {
+        current = applyPaynamicsStatus(db, current, payload, { allowSettle: false, requireAmountCurrency: false }) || current;
+      } else {
+        quarantinePaynamicsInbound(db, current, payload, trust.reason);
+      }
     }
   }
   const registration = getRegistration(db, current.registration_id);
@@ -688,16 +737,12 @@ export async function handlePaynamicsNotification(db, body) {
   if (!row) return { status: 200, body: "OK" };
   try {
     const merchantKey = String(process.env.PAYNAMICS_MERCHANT_KEY || "").trim();
-    const signed = payload.signature && merchantKey && workflowResponseSignatureValid(payload, merchantKey, { requestId: row.request_id });
-    let current = applyPaynamicsStatus(db, row, payload, { allowSettle: false, requireAmountCurrency: true }) || row;
-    if (!signed) {
-      current = savePaynamics(db, current, {
-        status: current.status,
-        gatewayResponseCode: payload.response_code || current.gateway_response_code,
-        gatewayMessage: "notification stored; settlement disabled pending Paynamics contract",
-        gatewayResponseId: payload.response_id || current.gateway_response_id,
-      });
+    const trust = assessPaynamicsInboundTrust(row, payload, merchantKey, { requireAmountCurrency: true });
+    if (!trust.trusted) {
+      quarantinePaynamicsInbound(db, row, payload, trust.reason);
+      return { status: 200, body: "OK" };
     }
+    applyPaynamicsStatus(db, row, payload, { allowSettle: false, requireAmountCurrency: false });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     if (message.includes("No installment is due") || message.includes("not payable")) {

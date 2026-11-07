@@ -40,8 +40,8 @@ Outbound calls require **all** of:
 | Path | Behavior |
 | --- | --- |
 | Browser `response_url` | UX only — never settles |
-| `POST /api/webhooks/paynamics` | Updates status fields when merchant/request/amount/currency match; **never** `recordPayment` |
-| Query poll | `QM001` = query succeeded, **not paid**; may refresh inner status when present |
+| `POST /api/webhooks/paynamics` | §10.3 signature + merchant/request/amount/currency must validate before status changes; untrusted payloads quarantined in `untrusted_inbound_json` only; **never** `recordPayment` |
+| Query poll | Same trust gate on query/inner transaction payloads; `QM001` = query succeeded, **not paid** |
 
 There is **no** env flag to enable production settlement. `recordPayment` is only reachable via `settlePaynamics` inside `applyPaynamicsStatus` when both `allowSettle: true` **and** `IBMC_PAYNAMICS_UNIT_TEST_ALLOW_SETTLE=true` (set only in `server/verify-paynamics.js`). HTTP handlers always pass `allowSettle: false`.
 
