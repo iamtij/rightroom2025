@@ -16,7 +16,7 @@ async function pause(ms) {
   await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function sendEmail({ to, subject, html, text, idempotencyKey, deliveryKind = "general" }) {
+export async function sendEmail({ to, subject, html, text, idempotencyKey, deliveryKind = "general", headers }) {
   if (outboundEmailSuppressed({ to, deliveryKind })) return { status: "skipped", error: "staging_safe_mode" };
   if (!process.env.RESEND_API_KEY) return { status: "skipped", error: "provider_not_configured" };
   const resend = new Resend(process.env.RESEND_API_KEY);
@@ -28,6 +28,7 @@ export async function sendEmail({ to, subject, html, text, idempotencyKey, deliv
     text,
   };
   if (process.env.EMAIL_REPLY_TO) payload.replyTo = process.env.EMAIL_REPLY_TO;
+  if (headers) payload.headers = headers;
 
   let lastError = null;
   for (let attempt = 0; attempt < 3; attempt += 1) {

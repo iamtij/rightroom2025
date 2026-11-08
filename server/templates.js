@@ -45,6 +45,64 @@ function shell({ headline, intro, body, action }) {
 </html>`;
 }
 
+const OTP_PREVIEW = "Expires in 10 minutes.";
+
+export function renderOtpEmail({ code, purpose = "registration" }) {
+  const lead = purpose === "member"
+    ? "Use this OTP (One-time password) to edit your IBMC 2027 details:"
+    : "Use this OTP (One-time password) to open your IBMC 2027 registration:";
+  const subject = `${code} is your IBMC 2027 code`;
+  const text = [
+    `${lead} ${code}`,
+    "It expires in 10 minutes. Didn't ask for this? You can ignore this email.",
+    "Don't share this code. BNI PH staff will never ask for it.",
+    "IBMC 2027 · Hosted by BNI Philippines",
+    "Need help? Email helpdesk@bni.ph or visit https://helpdesk.bni.ph",
+  ].join("\n");
+  const safeCode = escapeHtml(code);
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>${safeCode} is your IBMC 2027 code</title>
+</head>
+<body style="margin:0;padding:0;background:#F6F4F1;">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">${OTP_PREVIEW}&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F6F4F1;">
+  <tr>
+    <td align="center" style="padding:32px 16px;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;">
+        <tr>
+          <td style="background:#141416;padding:16px 28px;border-bottom:4px solid #D0202E;font-family:Arial,Helvetica,sans-serif;">
+            <span style="font-size:16px;font-weight:bold;color:#FFFFFF;letter-spacing:0.02em;">IBMC 2027</span>
+            <span style="font-size:16px;font-weight:bold;color:#FF4D5A;letter-spacing:0.08em;">&nbsp;AMPLIFY</span>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#FFFFFF;padding:32px 28px 28px;font-family:Arial,Helvetica,sans-serif;color:#141416;">
+            <p style="margin:0 0 20px;font-size:16px;line-height:1.5;color:#2A2A2E;">${escapeHtml(lead)}</p>
+            <p style="margin:0 0 20px;font-size:40px;line-height:1;font-weight:bold;letter-spacing:0.12em;color:#141416;font-family:'Courier New',Courier,monospace;">${safeCode}</p>
+            <p style="margin:0 0 20px;font-size:15px;line-height:1.5;color:#2A2A2E;">It expires in 10 minutes.</p>
+            <p style="margin:0;padding-top:16px;border-top:1px solid #ECE8E2;font-size:13px;line-height:1.6;color:#5C5C63;">Didn't ask for this? You can ignore this email.<br>Don't share this code. BNI PH staff will never ask for it.</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:20px 28px;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.6;color:#5C5C63;">
+            IBMC 2027 · Hosted by BNI Philippines<br>
+            Need help? Email <a href="mailto:helpdesk@bni.ph" style="color:#A8131F;">helpdesk@bni.ph</a> or visit <a href="https://helpdesk.bni.ph" style="color:#A8131F;">helpdesk.bni.ph</a>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>
+</table>
+</body>
+</html>`;
+  return { subject, text, html };
+}
+
 function button(href, label) {
   return `<p style="margin:28px 0 0;">
     <a href="${escapeHtml(href)}" style="display:inline-block;background:#D0202E;color:#FFFFFF;text-decoration:none;font-weight:700;font-size:16px;padding:14px 24px;border-radius:999px;">${escapeHtml(label)}</a>

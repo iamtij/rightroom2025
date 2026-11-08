@@ -2,6 +2,7 @@ import { createHmac, randomInt, timingSafeEqual } from "crypto";
 import { parseLookupContact } from "./contact.js";
 import { findMemberRow } from "./members.js";
 import { sendEmail } from "./providers.js";
+import { renderOtpEmail } from "./templates.js";
 import { findRegistrationByContact, resolveRegistrationByContact } from "./registrations.js";
 
 const TEN_MINUTES = 10 * 60 * 1000;
@@ -67,13 +68,15 @@ export function issueMemberOtp(db, query) {
 export async function sendMemberOtp(db, email) {
   const issued = issueMemberOtp(db, email);
   if (issued.error || issued.waited) return issued;
+  const rendered = renderOtpEmail({ code: issued.code, purpose: "member" });
   const delivery = await sendEmail({
     to: issued.email,
-    subject: "Your IBMC 2027 code",
-    text: `Your IBMC 2027 code is ${issued.code}. It expires in 10 minutes. If you did not ask to edit your details, you can ignore this email.`,
-    html: `<p style="font-family:Inter,Arial,sans-serif;color:#141416">Your IBMC 2027 code is <strong style="letter-spacing:0.2em">${issued.code}</strong>.</p><p style="font-family:Inter,Arial,sans-serif;color:#5C5C63">It expires in 10 minutes. If you did not ask to edit your details, you can ignore this email.</p>`,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
     idempotencyKey: `member-otp/${issued.email}/${issued.createdAt}`,
     deliveryKind: "member_otp",
+    headers: { "X-Entity-Ref-ID": `member-otp-${issued.createdAt}` },
   });
   if (delivery.status !== "sent") {
     db.prepare("DELETE FROM member_otps WHERE id = ?").run(issued.id);
@@ -133,13 +136,15 @@ export function issueRegistrationOtp(db, query) {
 export async function sendRegistrationOtp(db, query) {
   const issued = issueRegistrationOtp(db, query);
   if (issued.error || issued.waited) return issued;
+  const rendered = renderOtpEmail({ code: issued.code, purpose: "registration" });
   const delivery = await sendEmail({
     to: issued.email,
-    subject: "Your IBMC 2027 code",
-    text: `Your IBMC 2027 code is ${issued.code}. It expires in 10 minutes. Check your email for this code. If you did not ask to manage your registration, you can ignore this email.`,
-    html: `<p style="font-family:Inter,Arial,sans-serif;color:#141416">Your IBMC 2027 code is <strong style="letter-spacing:0.2em">${issued.code}</strong>.</p><p style="font-family:Inter,Arial,sans-serif;color:#5C5C63">It expires in 10 minutes. Check your email for this code. If you did not ask to manage your registration, you can ignore this email.</p>`,
+    subject: rendered.subject,
+    text: rendered.text,
+    html: rendered.html,
     idempotencyKey: `registration-otp/${issued.email}/${issued.createdAt}`,
     deliveryKind: "registration_otp",
+    headers: { "X-Entity-Ref-ID": `registration-otp-${issued.createdAt}` },
   });
   if (delivery.status !== "sent") {
     db.prepare("DELETE FROM registration_otps WHERE id = ?").run(issued.id);
