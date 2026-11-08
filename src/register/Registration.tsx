@@ -435,10 +435,7 @@ function Frame({
         <div className="mt-auto px-5 pt-2 pb-7">
           {footer ? <div className="pb-4">{footer}</div> : null}
           <p className="m-0 text-center text-sm leading-snug text-[#5C5C63]">
-            Need help? Email{" "}
-            <a href="mailto:helpdesk@bni.ph" className="font-semibold text-[#A8131F]">helpdesk@bni.ph</a>
-            {" "}or visit the{" "}
-            <a href="https://helpdesk.bni.ph/" className="font-semibold text-[#A8131F]">helpdesk</a>.
+            Need help? Email <a href="mailto:helpdesk@bni.ph" className="font-semibold text-[#A8131F]">helpdesk@bni.ph</a>, visit the <a href="https://helpdesk.bni.ph/" target="_blank" rel="noreferrer" className="font-semibold text-[#A8131F]">helpdesk</a>, or read the <a href="/faq" target="_blank" rel="noreferrer" className="font-semibold text-[#A8131F]">FAQ</a>.
           </p>
         </div>
       </div>

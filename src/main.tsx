@@ -4,6 +4,7 @@ import Admin from './admin/Admin.tsx';
 import AmplifyHome from './AmplifyHome.tsx';
 import Pass from './pass/Pass.tsx';
 import Registration from './register/Registration.tsx';
+import Faq from './Faq.tsx';
 import Privacy from './Privacy.tsx';
 import Terms from './Terms.tsx';
 import './index.css';
@@ -19,7 +20,9 @@ const Page = path.startsWith('/admin')
         ? Terms
         : path.startsWith('/privacy') || path.startsWith('/data-privacy')
           ? Privacy
-          : AmplifyHome;
+          : path.startsWith('/faq')
+            ? Faq
+            : AmplifyHome;
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
