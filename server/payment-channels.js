@@ -3,21 +3,25 @@ export const PAYMENT_CHANNELS = [
     code: "upay",
     label: "U Pay · UnionBank",
     detail: "InstaPay, UnionBank Online, or other banks through UnionBank.",
+    note: "UnionBank collects this for GLOBAL REFERRAL MARKETING INC.",
   },
   {
     code: "hitpay_qr",
     label: "HitPay QR",
     detail: "QR Ph on this page. Any QR Ph bank or e-wallet can scan it.",
+    note: "You'll get a QR Ph code on the next screen. Stay on that page if you already paid.",
   },
   {
     code: "hitpay_online",
     label: "HitPay online banking",
     detail: "UnionBank Online on HitPay's secure page.",
+    note: "You'll continue to HitPay to pay with UnionBank Online. That page closes after 5 minutes. Coming back here does not by itself mean the payment went through.",
   },
   {
     code: "paynamics",
     label: "Paynamics",
     detail: "Maya, GrabPay, BPI, UnionBank, or Landbank on Paynamics' secure page.",
+    note: "You'll continue to Paynamics to finish this payment.",
   },
 ];
 
@@ -29,6 +33,7 @@ const DEFAULTS = {
 };
 
 const CUSTOM_LABEL_MAX = 80;
+const CUSTOM_NOTE_MAX = 400;
 
 export function seedPaymentChannels(db) {
   const insert = db.prepare("INSERT OR IGNORE INTO payment_channels (code, enabled) VALUES (?, ?)");
@@ -44,8 +49,17 @@ export function normalizeCustomLabel(value) {
   return { ok: true, value: text };
 }
 
+export function normalizeCustomNote(value) {
+  const text = String(value ?? "").replace(/[\u0000-\u001F\u007F]/g, "").replace(/\s+/g, " ").trim();
+  if (!text) return { ok: true, value: null };
+  if (text.length > CUSTOM_NOTE_MAX) {
+    return { ok: false, error: "Checkout note must be 400 characters or fewer." };
+  }
+  return { ok: true, value: text };
+}
+
 export function listPaymentChannels(db, { enabledOnly = false } = {}) {
-  const rows = db.prepare("SELECT code, enabled, custom_label FROM payment_channels").all();
+  const rows = db.prepare("SELECT code, enabled, custom_label, custom_note FROM payment_channels").all();
   const saved = new Map(rows.map((row) => [row.code, row]));
   return PAYMENT_CHANNELS.filter((channel) => !enabledOnly || saved.get(channel.code)?.enabled === 1).map((channel) => {
     const row = saved.get(channel.code);
@@ -54,6 +68,8 @@ export function listPaymentChannels(db, { enabledOnly = false } = {}) {
       label: channel.label,
       customLabel: String(row?.custom_label || "").trim(),
       detail: channel.detail,
+      note: channel.note,
+      customNote: String(row?.custom_note || "").trim(),
       enabled: row?.enabled === 1,
     };
   });
@@ -64,6 +80,7 @@ export function buyerPaymentChannels(db) {
     code: channel.code,
     label: channel.customLabel || channel.label,
     detail: channel.detail,
+    note: channel.customNote || channel.note,
   }));
 }
 
@@ -90,6 +107,15 @@ export function savePaymentChannels(db, input) {
         }
         patch.label = normalized.value;
       }
+      if (Object.prototype.hasOwnProperty.call(value, "note")) {
+        const normalized = normalizeCustomNote(value.note);
+        if (!normalized.ok) {
+          const error = new Error(normalized.error);
+          error.status = 400;
+          throw error;
+        }
+        patch.note = normalized.value === channel.note ? null : normalized.value;
+      }
     } else {
       patch.enabled = value ? 1 : 0;
     }
@@ -97,10 +123,12 @@ export function savePaymentChannels(db, input) {
   }
   const updateEnabled = db.prepare("UPDATE payment_channels SET enabled = ? WHERE code = ?");
   const updateLabel = db.prepare("UPDATE payment_channels SET custom_label = ? WHERE code = ?");
+  const updateNote = db.prepare("UPDATE payment_channels SET custom_note = ? WHERE code = ?");
   db.transaction(() => {
     for (const patch of patches) {
       if (patch.enabled !== undefined) updateEnabled.run(patch.enabled, patch.code);
       if (patch.label !== undefined) updateLabel.run(patch.label, patch.code);
+      if (patch.note !== undefined) updateNote.run(patch.note, patch.code);
     }
   })();
   return listPaymentChannels(db);

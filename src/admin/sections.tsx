@@ -1267,6 +1267,8 @@ type PaymentChannelSetting = {
   label: string;
   customLabel?: string;
   detail: string;
+  note: string;
+  customNote?: string;
   enabled: boolean;
 };
 
@@ -1280,12 +1282,14 @@ type PaymentChannelPayload = {
 function PaymentSettings({ onError }: { onError: (message: string) => void }) {
   const [channels, setChannels] = useState<PaymentChannelSetting[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [hitpayConfigured, setHitpayConfigured] = useState(true);
   const [paynamicsConfigured, setPaynamicsConfigured] = useState(true);
   const [paynamicsLiveWarning, setPaynamicsLiveWarning] = useState(false);
   const [paynamicsCheckoutMode, setPaynamicsCheckoutMode] = useState<"sandbox" | "live" | "off">("off");
   const [saving, setSaving] = useState("");
   const draftsRef = useRef<Record<string, string>>({});
+  const noteDraftsRef = useRef<Record<string, string>>({});
   const channelsRef = useRef<PaymentChannelSetting[]>([]);
   const saveQueue = useRef(Promise.resolve());
 
@@ -1309,6 +1313,17 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
         if (current[item.code] === undefined || draft === previous || draft === saved) merged[item.code] = saved;
       }
       draftsRef.current = merged;
+      return merged;
+    });
+    setNoteDrafts((current) => {
+      const merged = { ...current };
+      for (const item of next) {
+        const saved = item.customNote || "";
+        const previous = (previousChannels.find((channel) => channel.code === item.code)?.customNote || "").trim();
+        const draft = (current[item.code] ?? "").replace(/\s+/g, " ").trim();
+        if (current[item.code] === undefined || draft === previous || draft === saved) merged[item.code] = saved;
+      }
+      noteDraftsRef.current = merged;
       return merged;
     });
     setHitpayConfigured(Boolean(payload.hitpayConfigured));
@@ -1369,13 +1384,39 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
     });
   }
 
+  function saveNote(code: string) {
+    return enqueue(async () => {
+      const note = (noteDraftsRef.current[code] ?? "").replace(/\s+/g, " ").trim();
+      const current = (channelsRef.current.find((item) => item.code === code)?.customNote || "").trim();
+      if (note === current) {
+        if ((noteDraftsRef.current[code] ?? "") !== current) {
+          noteDraftsRef.current = { ...noteDraftsRef.current, [code]: current };
+          setNoteDrafts(noteDraftsRef.current);
+        }
+        return;
+      }
+      setSaving(code);
+      try {
+        applyPayload(await api("/api/admin/payment-channels", {
+          method: "PATCH",
+          body: JSON.stringify({ [code]: { note } }),
+        }));
+      } catch (error) {
+        onError(error instanceof Error ? error.message : "Checkout note was not saved");
+        await load().catch(() => {});
+      } finally {
+        setSaving("");
+      }
+    });
+  }
+
   return (
     <section className="flex flex-col gap-3">
       <h1 className="m-0 font-archivo text-[28px] font-extrabold">Settings</h1>
       <div className="flex max-w-[640px] flex-col gap-4 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
         <div className="flex flex-col gap-1">
           <h2 className="m-0 text-[17px] font-bold">Payment channels</h2>
-          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Checked channels are the ones a buyer can use when paying. Buyer label is the name on checkout. Leave it blank to keep the name above.</p>
+          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Checked channels are the ones a buyer can use when paying. Buyer label is the name on checkout. Leave it blank to keep the name above. Checkout note is the line shown after a buyer selects that channel. Leave it blank to keep the original note.</p>
         </div>
         <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF]">
           {channels.map((channel) => (
@@ -1414,6 +1455,23 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
                     }
                   }}
                 />
+              </label>
+              <label className="ml-8 flex flex-col gap-1 text-[12px] font-semibold text-[#5C5C63]">
+                Checkout note
+                <textarea
+                  className={`${field} min-h-20 w-full resize-y`}
+                  value={noteDrafts[channel.code] ?? ""}
+                  placeholder={channel.note}
+                  maxLength={400}
+                  rows={3}
+                  disabled={saving === channel.code}
+                  onChange={(event) => {
+                    noteDraftsRef.current = { ...noteDraftsRef.current, [channel.code]: event.target.value };
+                    setNoteDrafts(noteDraftsRef.current);
+                  }}
+                  onBlur={() => saveNote(channel.code)}
+                />
+                <span className="font-normal leading-snug">Buyers see: {(noteDrafts[channel.code] || "").replace(/\s+/g, " ").trim() || channel.note}</span>
               </label>
             </div>
           ))}

@@ -255,7 +255,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_chapters_name ON chapters(lower(name));
 CREATE TABLE IF NOT EXISTS payment_channels (
   code TEXT PRIMARY KEY,
   enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
-  custom_label TEXT
+  custom_label TEXT,
+  custom_note TEXT
 );
 
 CREATE TABLE IF NOT EXISTS hitpay_payments (
@@ -554,6 +555,7 @@ function migrate(db) {
   seedPaymentChannels(db);
   const paymentChannelColumns = new Set(db.prepare("PRAGMA table_info(payment_channels)").all().map((column) => column.name));
   if (!paymentChannelColumns.has("custom_label")) db.exec("ALTER TABLE payment_channels ADD COLUMN custom_label TEXT");
+  if (!paymentChannelColumns.has("custom_note")) db.exec("ALTER TABLE payment_channels ADD COLUMN custom_note TEXT");
   const paynamicsColumns = new Set(
     db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'paynamics_payments'").get()
       ? db.prepare("PRAGMA table_info(paynamics_payments)").all().map((column) => column.name)

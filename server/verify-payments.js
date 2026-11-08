@@ -15,8 +15,15 @@ const db = openDatabase(":memory:");
 db.prepare("UPDATE ticket_products SET sales_start = '2020-01-01'").run();
 
 const qrChannel = () => listPaymentChannels(db).find((item) => item.code === "hitpay_qr");
+const qrNote = "You'll get a QR Ph code on the next screen. Stay on that page if you already paid.";
 assert.equal(qrChannel().customLabel, "");
+assert.equal(qrChannel().customNote, "");
+assert.equal(qrChannel().note, qrNote);
 assert.equal(qrChannel().enabled, false);
+assert.equal(
+  buyerPaymentChannels(db).find((item) => item.code === "upay").note,
+  "UnionBank collects this for GLOBAL REFERRAL MARKETING INC.",
+);
 savePaymentChannels(db, { hitpay_qr: { label: "  QR Ph  " } });
 assert.equal(qrChannel().customLabel, "QR Ph");
 assert.equal(qrChannel().enabled, false);
@@ -31,6 +38,23 @@ assert.equal(buyerPaymentChannels(db).find((item) => item.code === "hitpay_qr").
 assert.throws(() => savePaymentChannels(db, { hitpay_qr: { label: "x".repeat(81) } }), /80 characters/);
 savePaymentChannels(db, { hitpay_qr: false });
 assert.equal(qrChannel().enabled, false);
+savePaymentChannels(db, { hitpay_qr: { note: "  Scan this QR.  ", enabled: true } });
+assert.equal(qrChannel().customNote, "Scan this QR.");
+assert.equal(qrChannel().enabled, true);
+assert.equal(buyerPaymentChannels(db).find((item) => item.code === "hitpay_qr").note, "Scan this QR.");
+savePaymentChannels(db, { hitpay_qr: { label: "QR Ph" } });
+assert.equal(qrChannel().customLabel, "QR Ph");
+assert.equal(qrChannel().customNote, "Scan this QR.");
+savePaymentChannels(db, { hitpay_qr: false });
+assert.equal(qrChannel().enabled, false);
+assert.equal(qrChannel().customNote, "Scan this QR.");
+savePaymentChannels(db, { hitpay_qr: { note: `  ${qrNote}  ` } });
+assert.equal(qrChannel().customNote, "");
+savePaymentChannels(db, { hitpay_qr: { note: " " } });
+assert.equal(qrChannel().customNote, "");
+assert.throws(() => savePaymentChannels(db, { hitpay_qr: { note: "x".repeat(401) } }), /400 characters/);
+savePaymentChannels(db, { hitpay_qr: { label: "" } });
+assert.equal(qrChannel().customLabel, "");
 
 const legacyFile = path.join(os.tmpdir(), `ibmc-channel-label-${process.pid}.sqlite`);
 fs.rmSync(legacyFile, { force: true });
@@ -46,8 +70,9 @@ legacy.close();
 const migrated = openDatabase(legacyFile);
 assert.equal(listPaymentChannels(migrated).find((item) => item.code === "hitpay_qr").enabled, true);
 assert.equal(listPaymentChannels(migrated).find((item) => item.code === "upay").enabled, false);
-savePaymentChannels(migrated, { hitpay_qr: { label: "Legacy QR" } });
+savePaymentChannels(migrated, { hitpay_qr: { label: "Legacy QR", note: "Legacy note" } });
 assert.equal(buyerPaymentChannels(migrated).find((item) => item.code === "hitpay_qr").label, "Legacy QR");
+assert.equal(buyerPaymentChannels(migrated).find((item) => item.code === "hitpay_qr").note, "Legacy note");
 migrated.close();
 fs.rmSync(legacyFile, { force: true });
 fs.rmSync(`${legacyFile}-wal`, { force: true });
@@ -383,6 +408,18 @@ try {
   const buyerChannels = await fetch(`${base}/api/payment-channels`);
   const buyerChannelBody = await buyerChannels.json();
   assert.equal(buyerChannelBody.channels.find((item) => item.code === "hitpay_qr").label, "Scan to pay");
+  const noted = await fetch(`${base}/api/admin/payment-channels`, {
+    method: "PATCH",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ hitpay_qr: { note: "  Official partner page.  " } }),
+  });
+  const notedBody = await noted.json();
+  assert.equal(noted.status, 200);
+  assert.equal(notedBody.channels.find((item) => item.code === "hitpay_qr").customNote, "Official partner page.");
+  assert.equal(notedBody.channels.find((item) => item.code === "hitpay_qr").customLabel, "Scan to pay");
+  const buyerNoted = await fetch(`${base}/api/payment-channels`);
+  const buyerNotedBody = await buyerNoted.json();
+  assert.equal(buyerNotedBody.channels.find((item) => item.code === "hitpay_qr").note, "Official partner page.");
   const kept = await fetch(`${base}/api/admin/payment-channels`, {
     method: "PATCH",
     headers: { cookie, "Content-Type": "application/json" },
@@ -391,6 +428,7 @@ try {
   const keptBody = await kept.json();
   assert.equal(kept.status, 200);
   assert.equal(keptBody.channels.find((item) => item.code === "hitpay_qr").customLabel, "Scan to pay");
+  assert.equal(keptBody.channels.find((item) => item.code === "hitpay_qr").customNote, "Official partner page.");
   assert.equal(keptBody.channels.find((item) => item.code === "hitpay_qr").enabled, false);
   const tooLong = await fetch(`${base}/api/admin/payment-channels`, {
     method: "PATCH",
@@ -406,6 +444,26 @@ try {
   const clearedBody = await cleared.json();
   assert.equal(cleared.status, 200);
   assert.equal(clearedBody.channels.find((item) => item.code === "hitpay_qr").customLabel, "");
+  const noteTooLong = await fetch(`${base}/api/admin/payment-channels`, {
+    method: "PATCH",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ hitpay_qr: { note: "n".repeat(401) } }),
+  });
+  assert.equal(noteTooLong.status, 400);
+  const noteCleared = await fetch(`${base}/api/admin/payment-channels`, {
+    method: "PATCH",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ hitpay_qr: { note: "" } }),
+  });
+  const noteClearedBody = await noteCleared.json();
+  assert.equal(noteCleared.status, 200);
+  assert.equal(noteClearedBody.channels.find((item) => item.code === "hitpay_qr").customNote, "");
+  const buyerDefault = await fetch(`${base}/api/payment-channels`);
+  const buyerDefaultBody = await buyerDefault.json();
+  assert.equal(
+    buyerDefaultBody.channels.find((item) => item.code === "upay").note,
+    "UnionBank collects this for GLOBAL REFERRAL MARKETING INC.",
+  );
   const marked = await fetch(`${base}/api/admin/registrations/${body.reference}/payments`, {
     method: "POST",
     headers: { cookie },

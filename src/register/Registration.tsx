@@ -162,6 +162,7 @@ type PayChannel = {
   code: PayChannelCode;
   label: string;
   detail: string;
+  note?: string;
 };
 
 type HitpaySession = {
@@ -1808,6 +1809,8 @@ function PaymentChoices({
 }) {
   if (channels === null) return <p className="m-0 text-sm text-[#5C5C63]">Loading payment options.</p>;
   if (channels.length === 0) return <p className="m-0 text-sm text-[#5C5C63]">Payment isn't open right now.</p>;
+  const selected = channels.find((item) => item.code === channel);
+  const checkoutNote = selected?.note?.trim() || "";
   return (
     <>
       {channels.length > 1 ? (
@@ -1826,15 +1829,6 @@ function PaymentChoices({
         <p className="m-0 text-[15px] font-semibold">{channels[0].label}</p>
       )}
       {channel === "upay" ? <UpayMethods method={method} onChange={onMethod} /> : null}
-      {channel === "upay" ? (
-        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">UnionBank collects this for GLOBAL REFERRAL MARKETING INC.</p>
-      ) : null}
-      {channel === "hitpay_qr" ? (
-        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">You'll get a QR Ph code on the next screen. Stay on that page if you already paid.</p>
-      ) : null}
-      {channel === "hitpay_online" ? (
-        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">You'll continue to HitPay to pay with UnionBank Online. That page closes after 5 minutes. Coming back here does not by itself mean the payment went through.</p>
-      ) : null}
       {channel === "paynamics" ? (
         <>
           <PaynamicsMethods channel={paynamicsChannel} onChange={onPaynamicsChannel} />
@@ -1844,10 +1838,12 @@ function PaymentChoices({
               {paynamicsCheckout.apiAdmissionReason ? ` (${paynamicsCheckout.apiAdmissionReason})` : ""}
               . See <code className="text-[12px]">docs/paynamics-staging.md</code>.
             </p>
-          ) : (
-            <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">You'll continue to Paynamics to finish this payment.</p>
-          )}
+          ) : checkoutNote ? (
+            <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">{checkoutNote}</p>
+          ) : null}
         </>
+      ) : checkoutNote ? (
+        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">{checkoutNote}</p>
       ) : null}
     </>
   );
