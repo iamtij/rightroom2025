@@ -1286,9 +1286,9 @@ function RegistrationWizard() {
                 <AudienceCard title="I'm a guest" body="New to BNI? You're welcome here." onClick={() => choose("guest")} />
               ) : null}
             </div>
-            {(import.meta.env.DEV && testTicketOpen) || testsOpen ? (
+            {testTicketOpen || testsOpen ? (
               <div className="mt-6 flex flex-col gap-3">
-                {import.meta.env.DEV && testTicketOpen ? <AudienceCard title="Test ticket · ₱10" body="Available now, for a local payment test." onClick={startTest} /> : null}
+                {testTicketOpen ? <AudienceCard title="Test ticket · ₱10" body="Available now, for a local payment test." onClick={startTest} /> : null}
                 {testsOpen ? <AudienceCard title="Staging test · ₱100 full" body="One ₱100 payment. For staging Paynamics checkout before public ticket windows open." onClick={startFullPaymentTest} /> : null}
                 {testsOpen ? <AudienceCard title="Staging test · ₱200 installment" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." onClick={startInstallmentTest} /> : null}
                 {testsOpen ? <AudienceCard title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." onClick={startMemberTest} /> : null}

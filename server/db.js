@@ -4,6 +4,7 @@ import Database from "better-sqlite3";
 import { fileURLToPath } from "url";
 import { seedPaymentChannels } from "./payment-channels.js";
 import { stagingTestRegistrationAllowed } from "./staging-early-payments.js";
+import { ibmcDeploymentEnv, railwayDeploymentClass } from "./deployment-identity.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -453,7 +454,9 @@ export function openDatabase(file = process.env.IBMC_DB_PATH) {
 }
 
 export function testTicketEnabled() {
-  return String(process.env.ALLOW_TEST_TICKET || "").trim().toLowerCase() === "true";
+  if (String(process.env.ALLOW_TEST_TICKET || "").trim().toLowerCase() !== "true") return false;
+  if (railwayDeploymentClass() === "production" || ibmcDeploymentEnv() === "production") return false;
+  return true;
 }
 
 export function testRegistrationEnabled() {
