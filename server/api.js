@@ -2,6 +2,7 @@ import "dotenv/config";
 import express from "express";
 import { randomBytes } from "crypto";
 import { openDatabase, testTicketEnabled } from "./db.js";
+import { assessStagingLiveDeploymentIdentity } from "./deployment-identity.js";
 import {
   assessStagingEarlyPayments,
   stagingTestRegistrationAllowed,
@@ -362,6 +363,13 @@ export function createApi() {
   const otpLimit = rateLimit({ windowMs: 15 * 60 * 1000, max: 8, bucket: "otp", db });
   const passLimit = rateLimit({ windowMs: 60 * 1000, max: 120, bucket: "pass", db });
 
+  function stagingTurnstileBypassed() {
+    return (
+      process.env.IBMC_STAGING_SKIP_TURNSTILE_CHECKOUT === "true"
+      && assessStagingLiveDeploymentIdentity().allowed
+    );
+  }
+
   router.get("/chapters", (_req, res) => {
     res.json(listChapters(db()));
   });
@@ -381,12 +389,14 @@ export function createApi() {
     const siteKey = String(process.env.TURNSTILE_SITE_KEY || "").trim();
     const secret = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
     const stagingEarly = assessStagingEarlyPayments();
+    const skipTurnstileCheckout = stagingTurnstileBypassed();
     res.json({
       tests: stagingTestRegistrationAllowed(),
       testTicket: testTicketEnabled(),
       stagingEarlyPayments: { enabled: stagingEarly.allowed, reason: stagingEarly.reason },
       turnstileConfigured: Boolean(siteKey && secret),
-      turnstileSiteKey: siteKey && secret ? siteKey : "",
+      turnstileSiteKey: siteKey && secret && !skipTurnstileCheckout ? siteKey : "",
+      turnstileRequiredForCheckout: Boolean(siteKey && secret && !skipTurnstileCheckout),
       tickets: publicTicketGates(db()).map((ticket) => ({ code: ticket.code, paymentsOpen: ticket.paymentsOpen })),
     });
   });
@@ -410,7 +420,7 @@ export function createApi() {
     }
     db().prepare("DELETE FROM form_challenges WHERE token = ?").run(token);
     const secret = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
-    if (secret) {
+    if (secret && !stagingTurnstileBypassed()) {
       const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
