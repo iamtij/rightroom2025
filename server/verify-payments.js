@@ -6,7 +6,7 @@ import Database from "better-sqlite3";
 import { openDatabase } from "./db.js";
 import { currentTotp } from "./auth.js";
 import { createRegistration, getEntryPass, recordPayment, resumeTokenMatches } from "./registrations.js";
-import { upaySettlement } from "./upay.js";
+import { upayPublicCheckoutInfo, upaySettlement } from "./upay.js";
 import { buyerPaymentChannels, listPaymentChannels, savePaymentChannels } from "./payment-channels.js";
 
 delete process.env.ALLOW_TEST_TICKET;
@@ -105,6 +105,27 @@ assert.equal(upaySettlement({ code: "TF", amount: 1000 }, 100_000), "failed");
 assert.equal(upaySettlement({ code: "SP", amount: 1000 }, 100_000), "pending");
 assert.equal(upaySettlement({ data: [{ status: "SUCCESS", amount: "1000.00" }] }, 100_000), "paid");
 assert.equal(upaySettlement({ data: [{ status: "SUCCESS", amount: "10.00" }], amount: 1000 }, 100_000), "pending");
+
+const savedUpay = {
+  UPAY_BILLER_UUID: process.env.UPAY_BILLER_UUID,
+  UPAY_BASE_URL: process.env.UPAY_BASE_URL,
+  UPAY_CLIENT_ID: process.env.UPAY_CLIENT_ID,
+};
+delete process.env.UPAY_BILLER_UUID;
+assert.equal(upayPublicCheckoutInfo().checkoutMode, "off");
+process.env.UPAY_BILLER_UUID = "uuid-test";
+assert.equal(upayPublicCheckoutInfo().checkoutMode, "biller_page");
+process.env.UPAY_BASE_URL = "https://api.unionbankph.com/ubp/external";
+process.env.UPAY_CLIENT_ID = "c";
+process.env.UPAY_CLIENT_SECRET = "s";
+process.env.UPAY_PARTNER_ID = "p";
+process.env.UPAY_USERNAME = "u";
+process.env.UPAY_PASSWORD = "pw";
+assert.equal(upayPublicCheckoutInfo().checkoutMode, "live");
+for (const [key, value] of Object.entries(savedUpay)) {
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
+}
 
 const registration = createRegistration(db, {
   productCode: "first_mover",

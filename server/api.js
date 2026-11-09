@@ -17,7 +17,7 @@ import { parseLookupContact } from "./contact.js";
 import { maskEmail, readMemberEditToken, sendMemberOtp, sendRegistrationOtp, verifyMemberOtp, verifyRegistrationOtp } from "./otp.js";
 import { rateLimit } from "./limits.js";
 import { formatLongDate, manilaParts } from "./time.js";
-import { handleUpayCallback, refreshUpayPayment, startUpayPayment } from "./upay.js";
+import { handleUpayCallback, refreshUpayPayment, startUpayPayment, upayPublicCheckoutInfo } from "./upay.js";
 import { handleHitpayWebhook, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
 import { handlePaynamicsNotification, paynamicsCheckoutChannel, paynamicsPublicCheckoutInfo, refreshPaynamicsPayment, startPaynamicsPayment } from "./paynamics.js";
 import { buyerPaymentChannels, buyerPaynamicsMethods, hitpayConfigured, listPaymentChannels, listPaynamicsMethods, paynamicsConfigured, paynamicsMethodByCode, savePaymentChannels, savePaynamicsMethods } from "./payment-channels.js";
@@ -328,6 +328,7 @@ export function createApi() {
   router.get("/payment-channels", (_req, res) => {
     res.json({
       channels: buyerPaymentChannels(db()),
+      upay: upayPublicCheckoutInfo(),
       paynamics: {
         ...paynamicsPublicCheckoutInfo(),
         methods: buyerPaynamicsMethods(db()),

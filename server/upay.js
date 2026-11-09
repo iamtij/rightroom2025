@@ -16,6 +16,51 @@ function billerUuid() {
   return required("UPAY_BILLER_UUID");
 }
 
+function envPresent(name) {
+  return Boolean(String(process.env[name] || "").trim());
+}
+
+/** Whitelabel biller page (live UnionBank checkout URL). */
+export function upayBillerPageConfigured() {
+  return envPresent("UPAY_BILLER_UUID");
+}
+
+/** Partner REST API (status polling after checkout). */
+export function upayPartnerApiConfigured() {
+  return (
+    envPresent("UPAY_BASE_URL")
+    && envPresent("UPAY_CLIENT_ID")
+    && envPresent("UPAY_CLIENT_SECRET")
+    && envPresent("UPAY_PARTNER_ID")
+    && envPresent("UPAY_USERNAME")
+    && envPresent("UPAY_PASSWORD")
+  );
+}
+
+export function upayCallbackConfigured() {
+  return upayBillerPageConfigured() && Boolean(aesKey()) && Boolean(callbackUrl());
+}
+
+export function upayPublicCheckoutInfo() {
+  const biller = upayBillerPageConfigured();
+  const partner = upayPartnerApiConfigured();
+  const callback = upayCallbackConfigured();
+  let checkoutMode = "off";
+  if (biller) checkoutMode = partner ? "live" : "biller_page";
+  const reasons = [];
+  if (!biller) reasons.push("missing_biller_uuid");
+  if (biller && !partner) reasons.push("missing_partner_api");
+  if (biller && !callback) reasons.push("missing_callback_crypto");
+  return {
+    checkoutMode,
+    billerPageReady: biller,
+    partnerApiReady: partner,
+    callbackReady: callback,
+    liveOnStaging: checkoutMode === "live",
+    admissionReason: reasons.length ? reasons.join(",") : "",
+  };
+}
+
 function aesKey() {
   const raw = String(process.env.UPAY_AES_KEY || "").trim();
   if (!raw) return null;
