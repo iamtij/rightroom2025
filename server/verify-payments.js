@@ -12,6 +12,7 @@ import { buyerPaymentChannels, listPaymentChannels, savePaymentChannels } from "
 delete process.env.ALLOW_TEST_TICKET;
 
 const db = openDatabase(":memory:");
+assert.equal(db.prepare("SELECT payments_open FROM ticket_products WHERE code = 'first_mover'").get().payments_open, 0);
 db.prepare("UPDATE ticket_products SET sales_start = '2020-01-01'").run();
 
 const qrChannel = () => listPaymentChannels(db).find((item) => item.code === "hitpay_qr");
@@ -189,7 +190,7 @@ process.env.TURNSTILE_SITE_KEY = "";
 process.env.TURNSTILE_SECRET_KEY = "";
 const { createApi } = await import("./api.js");
 const seeded = openDatabase(file);
-seeded.prepare("UPDATE ticket_products SET sales_start = '2020-01-01'").run();
+seeded.prepare("UPDATE ticket_products SET sales_start = '2020-01-01', payments_open = 1").run();
 seeded.close();
 
 const server = createApi().listen(0);
@@ -716,6 +717,80 @@ try {
   const approvedBody = await approved.json();
   assert.equal(approvedBody.balanceCents, 0);
 
+  const ticketList = await fetch(`${base}/api/admin/tickets`, { headers: { cookie } });
+  const ticketListBody = await ticketList.json();
+  assert.equal(ticketList.status, 200);
+  assert.equal(ticketListBody.find((row) => row.code === "first_mover").paymentsOpen, true);
+  const locked = await fetch(`${base}/api/admin/tickets`, {
+    method: "PATCH",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ code: "first_mover", paymentsOpen: false }),
+  });
+  const lockedBody = await locked.json();
+  assert.equal(locked.status, 200);
+  assert.equal(lockedBody.find((row) => row.code === "first_mover").paymentsOpen, false);
+  const publicLocked = await fetch(`${base}/api/registration-options`);
+  const publicLockedBody = await publicLocked.json();
+  assert.equal(publicLockedBody.tickets.find((row) => row.code === "first_mover").paymentsOpen, false);
+  const denied = await fetch(`${base}/api/registrations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      productCode: "first_mover",
+      paymentPlan: "full",
+      fullName: "Locked Buyer",
+      email: "locked.buyer@example.com",
+      mobile: "09170000991",
+      attendeeType: "member",
+    }),
+  });
+  const deniedBody = await denied.json();
+  assert.equal(denied.status, 400);
+  assert.match(deniedBody.error, /not open for payment/);
+  const gateDb = openDatabase(file);
+  gateDb.prepare("UPDATE ticket_products SET sales_start = '2099-01-01', sales_end = '2099-12-31', payments_open = 0 WHERE code = 'early_bird'").run();
+  gateDb.close();
+  const earlyLocked = await fetch(`${base}/api/registrations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      productCode: "early_bird",
+      paymentPlan: "full",
+      fullName: "Early Locked",
+      email: "early.locked@example.com",
+      mobile: "09170000992",
+      attendeeType: "member",
+    }),
+  });
+  assert.equal(earlyLocked.status, 400);
+  const opened = await fetch(`${base}/api/admin/tickets`, {
+    method: "PATCH",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ code: "early_bird", paymentsOpen: true }),
+  });
+  const openedBody = await opened.json();
+  assert.equal(opened.status, 200);
+  assert.equal(openedBody.find((row) => row.code === "early_bird").paymentsOpen, true);
+  const early = await fetch(`${base}/api/registrations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      productCode: "early_bird",
+      paymentPlan: "full",
+      fullName: "Early Buyer",
+      email: "early.buyer@example.com",
+      mobile: "09170000993",
+      attendeeType: "member",
+    }),
+  });
+  assert.equal(early.status, 201);
+  const unknownTicket = await fetch(`${base}/api/admin/tickets`, {
+    method: "PATCH",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ code: "test_100", paymentsOpen: true }),
+  });
+  assert.equal(unknownTicket.status, 400);
+
   await fetch(`${base}/api/admin/logout`, { method: "POST", headers: { cookie } });
   const afterLogout = await fetch(`${base}/api/admin/me`, { headers: { cookie } });
   assert.equal(afterLogout.status, 401);
@@ -725,6 +800,8 @@ try {
   assert.ok(audit.some((row) => row.action === "registration.payment" && row.target === body.reference && row.amount_cents === 1_200_000 && row.admin_id));
   assert.ok(audit.some((row) => row.action === "registration.list" && row.target === "registrations"));
   assert.ok(audit.some((row) => row.action === "admin.create" && row.target === "door@example.com"));
+  assert.ok(audit.some((row) => row.action === "ticket.payments_open" && row.target === "first_mover:locked"));
+  assert.ok(audit.some((row) => row.action === "ticket.payments_open" && row.target === "early_bird:open"));
   const payment = check.prepare("SELECT admin_user_id, method FROM payments WHERE registration_id = ?").get(registrationId);
   assert.equal(payment.method, "admin");
   assert.equal(payment.admin_user_id, audit.find((row) => row.action === "registration.payment").admin_id);

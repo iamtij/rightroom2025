@@ -705,6 +705,7 @@ function RegistrationWizard() {
   const [companyWebsite, setCompanyWebsite] = useState("");
   const [testsOpen, setTestsOpen] = useState(false);
   const [testTicketOpen, setTestTicketOpen] = useState(false);
+  const [ticketGates, setTicketGates] = useState<Record<string, boolean> | null>(null);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
   const [turnstileToken, setTurnstileToken] = useState("");
   const [turnstileBlocked, setTurnstileBlocked] = useState(false);
@@ -733,6 +734,13 @@ function RegistrationWizard() {
           setTestsOpen(Boolean(payload.tests));
           setTestTicketOpen(Boolean(payload.testTicket));
           setTurnstileSiteKey(payload.turnstileSiteKey || "");
+          if (Array.isArray(payload.tickets)) {
+            const next: Record<string, boolean> = {};
+            for (const ticket of payload.tickets) {
+              if (ticket?.code) next[String(ticket.code)] = Boolean(ticket.paymentsOpen);
+            }
+            setTicketGates(next);
+          }
         }
       })
       .catch(() => undefined);
@@ -780,10 +788,9 @@ function RegistrationWizard() {
 
   const international = attendee?.international ?? false;
   const tier = useMemo(() => {
-    if (fullPaymentTest) return test100PaymentTier();
-    if (installmentTest) return testInstallmentTier();
-    return testMode ? testTier() : tierFor(today, international);
-  }, [today, international, testMode, installmentTest, fullPaymentTest]);
+    const base = fullPaymentTest ? test100PaymentTier() : installmentTest ? testInstallmentTier() : testMode ? testTier() : tierFor(today, international);
+    return gateTier(base, ticketGates);
+  }, [today, international, testMode, installmentTest, fullPaymentTest, ticketGates]);
 
   function clearOtp() {
     setOtpSentTo("");
@@ -1236,8 +1243,8 @@ function RegistrationWizard() {
   }
 
   if (step === "start") {
-    const localTier = tierFor(today, false);
-    const internationalOnSale = today >= "2027-01-01" && today <= "2027-05-31";
+    const localTier = gateTier(tierFor(today, false), ticketGates);
+    const internationalOnSale = Boolean(gateTier(tierFor(today, true), ticketGates)?.onSale);
     const closedLines = [
       today < "2027-01-01" ? "International delegates open Jan 1." : "",
       !guestsOpen ? "Guests open Feb 1." : "",
@@ -1553,9 +1560,9 @@ function RegistrationWizard() {
         <div className="flex flex-col gap-1.5 rounded-[14px] bg-[#141416] p-4 text-[#F6F4F1]">
           <div className="flex items-center justify-between gap-3">
             <span className="font-archivo text-xl font-extrabold">{charging?.name}</span>
-            <span className="rounded-full bg-[#D0202E] px-2.5 py-1 text-[11px] font-bold tracking-[0.1em] text-white uppercase">{charging?.code === "test_50" || charging?.code === "test_100" || charging?.code === "test_200" ? "Test" : charging?.onSale ? "Best price" : "Opens soon"}</span>
+            <span className="rounded-full bg-[#D0202E] px-2.5 py-1 text-[11px] font-bold tracking-[0.1em] text-white uppercase">{charging ? paymentStatus(charging).badge : ""}</span>
           </div>
-          <span className="text-sm text-[#C9C7C2]">{charging?.code === "test_50" || charging?.code === "test_100" || charging?.code === "test_200" ? "Payment is open" : charging?.onSale ? `Register by ${charging.windowLabel.replace("until ", "")}` : `Registration opens ${charging?.opensLabel}`}</span>
+          <span className="text-sm text-[#C9C7C2]">{charging ? paymentStatus(charging).line : ""}</span>
         </div>
         <h2 className="m-0 mt-1 text-[17px] font-bold">How would you like to pay?</h2>
         <PayChoice
@@ -1621,7 +1628,7 @@ function RegistrationWizard() {
           </label>
         ) : null}
         {ticketError ? <p className="m-0 text-sm text-[#A8131F]">{ticketError}</p> : null}
-        {plan !== "test" && tier.opensLabel ? <p className="m-0 text-[13px] text-[#5C5C63]">Sales open {tier.opensLabel}. This screen shows the price. No card is charged.</p> : null}
+        {plan !== "test" && !charging.onSale ? <p className="m-0 text-[13px] text-[#5C5C63]">Payment is locked. This screen shows the price. No card is charged.</p> : null}
       </Frame>
     );
   }
@@ -1690,7 +1697,7 @@ function RegistrationWizard() {
                 ? charging.currency === "PHP"
                   ? payActionLabel(channel, money(dueToday, charging.currency), saving, paynamicsMethods.find((item) => item.code === paynamicsChannel)?.label || "")
                   : `Submit registration · ${money(dueToday, charging.currency)} due`
-                : `Opens ${charging.opensLabel}`}
+                : "Payment is locked"}
             </PrimaryButton>
             {turnstileSiteKey ? (
               <div className="pt-1">
@@ -1855,6 +1862,22 @@ function RegistrationWizard() {
   return null;
 }
 
+const TEST_TICKET_CODES = new Set(["test", "test_50", "test_100", "test_200"]);
+
+function gateTier(tier: Tier | null, gates: Record<string, boolean> | null): Tier | null {
+  if (!tier || TEST_TICKET_CODES.has(tier.code)) return tier;
+  const open = Boolean(gates?.[tier.code]);
+  if (open) return { ...tier, onSale: true, opensLabel: null };
+  return { ...tier, onSale: false, opensLabel: null };
+}
+
+function paymentStatus(tier: Tier) {
+  if (TEST_TICKET_CODES.has(tier.code)) return { badge: "Test", line: "Payment is open" };
+  if (!tier.onSale) return { badge: "Locked", line: "Payment is locked" };
+  if (tier.windowLabel.startsWith("Opens")) return { badge: "Open", line: "Payment is open" };
+  return { badge: "Best price", line: `Register by ${tier.windowLabel.replace(/^until /, "")}` };
+}
+
 function tierDates(tier: Tier) {
   if (tier.code === "first_mover") return "Nov 11 to Nov 30, 2026";
   if (tier.code === "early_bird") return "Dec 1, 2026 to Jan 31, 2027";
@@ -1884,6 +1907,9 @@ function StartTierCard({ tier }: { tier: Tier }) {
             <MoneyText text={savings} />
           </p>
         ) : null}
+        <p className={`m-0 mt-2 text-[14px] font-semibold leading-none ${tier.onSale ? "text-[#141416]" : "text-[#A8131F]"}`}>
+          {tier.onSale ? "Payment is open" : "Payment is locked"}
+        </p>
       </div>
     </article>
   );

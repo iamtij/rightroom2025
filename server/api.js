@@ -237,6 +237,7 @@ function clientError(error, fallback) {
   const safe = [
     "Unknown ticket",
     "is not on sale",
+    "is not open for payment",
     "This ticket is paid in full",
     "This ticket has no installment schedule",
     "Add a code",
@@ -300,6 +301,46 @@ function attachResume(res, registration) {
   if (registration?.resume_token) res.append("Set-Cookie", resumeCookie(registration.resume_token));
 }
 
+const PUBLIC_TICKETS = ["first_mover", "early_bird", "regular", "intl_early_bird", "intl_regular"];
+
+function publicTicketGates(database) {
+  const rows = database.prepare(`
+    SELECT code, name, currency, full_price_cents, sales_start, sales_end, payments_open
+    FROM ticket_products
+    WHERE code IN (${PUBLIC_TICKETS.map(() => "?").join(", ")})
+    ORDER BY sales_start, id
+  `).all(...PUBLIC_TICKETS);
+  return rows.map((row) => ({
+    code: row.code,
+    name: row.name,
+    currency: row.currency,
+    fullPriceCents: row.full_price_cents,
+    salesStart: row.sales_start,
+    salesEnd: row.sales_end,
+    paymentsOpen: row.payments_open === 1,
+  }));
+}
+
+function saveTicketPayment(database, body) {
+  const code = String(body.code || "");
+  if (!PUBLIC_TICKETS.includes(code)) {
+    const error = new Error("Unknown ticket");
+    error.status = 400;
+    throw error;
+  }
+  if (typeof body.paymentsOpen !== "boolean") {
+    const error = new Error("Choose open or locked");
+    error.status = 400;
+    throw error;
+  }
+  const result = database.prepare("UPDATE ticket_products SET payments_open = ? WHERE code = ?").run(body.paymentsOpen ? 1 : 0, code);
+  if (!result.changes) {
+    const error = new Error("Unknown ticket");
+    error.status = 400;
+    throw error;
+  }
+}
+
 export function createApi() {
   const app = express();
   const router = express.Router();
@@ -346,6 +387,7 @@ export function createApi() {
       stagingEarlyPayments: { enabled: stagingEarly.allowed, reason: stagingEarly.reason },
       turnstileConfigured: Boolean(siteKey && secret),
       turnstileSiteKey: siteKey && secret ? siteKey : "",
+      tickets: publicTicketGates(db()).map((ticket) => ({ code: ticket.code, paymentsOpen: ticket.paymentsOpen })),
     });
   });
 
@@ -509,7 +551,12 @@ export function createApi() {
       error.status = 400;
       throw error;
     }
-    if (today < product.sales_start || today > product.sales_end) {
+    if (!testProduct && product.payments_open !== 1) {
+      const error = new Error(`${product.name} is not open for payment`);
+      error.status = 400;
+      throw error;
+    }
+    if (testProduct && (today < product.sales_start || today > product.sales_end)) {
       const error = new Error(`${product.name} is not on sale today`);
       error.status = 400;
       throw error;
@@ -1147,6 +1194,23 @@ export function createApi() {
 
   router.get("/admin/products", requireAdmin, (_req, res) => {
     res.json(db().prepare("SELECT code, name, allows_installment, currency FROM ticket_products WHERE active = 1 ORDER BY sales_start").all());
+  });
+
+  router.get("/admin/tickets", requireAdmin, (_req, res) => {
+    res.json(publicTicketGates(db()));
+  });
+
+  router.patch("/admin/tickets", requireAdmin, (req, res) => {
+    const body = req.body || {};
+    try {
+      saveTicketPayment(db(), body);
+    } catch (error) {
+      const status = error.status === 400 ? 400 : 500;
+      res.status(status).json({ error: status === 400 ? error.message : "Ticket was not saved" });
+      return;
+    }
+    writeAudit(db(), req.admin.id, "ticket.payments_open", `${body.code}:${body.paymentsOpen ? "open" : "locked"}`);
+    res.json(publicTicketGates(db()));
   });
 
   router.get("/admin/coupons", requireAdmin, (_req, res) => {

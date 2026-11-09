@@ -558,7 +558,13 @@ export function AdminSections() {
       {section === "Templates" ? <Templates onError={setError} /> : null}
       {section === "Members" ? <Members onError={setError} /> : null}
       {section === "Chapters" ? <Chapters onError={setError} /> : null}
-      {section === "Settings" ? <PaymentSettings onError={setError} /> : null}
+      {section === "Settings" ? (
+        <div className="flex flex-col gap-6">
+          <h1 className="m-0 font-archivo text-[28px] font-extrabold">Settings</h1>
+          <TicketPaymentSettings onError={setError} />
+          <PaymentSettings onError={setError} />
+        </div>
+      ) : null}
       {section === "Admins" && role === "super" ? <Admins onError={setError} /> : null}
     </div>
   );
@@ -1390,6 +1396,83 @@ function PaynamicsMethodChecks({
   );
 }
 
+type TicketGate = {
+  code: string;
+  name: string;
+  currency: "PHP" | "USD";
+  fullPriceCents: number;
+  salesStart: string;
+  salesEnd: string;
+  paymentsOpen: boolean;
+};
+
+function saleDate(iso: string) {
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(year, month - 1, day)));
+}
+
+function TicketPaymentSettings({ onError }: { onError: (message: string) => void }) {
+  const [tickets, setTickets] = useState<TicketGate[]>([]);
+  const [saving, setSaving] = useState("");
+  const saveQueue = useRef(Promise.resolve());
+
+  async function load() {
+    setTickets(await api("/api/admin/tickets"));
+  }
+
+  useEffect(() => {
+    load().catch((error) => onError(error.message));
+  }, []);
+
+  function toggle(code: string, paymentsOpen: boolean) {
+    setTickets((current) => current.map((ticket) => (ticket.code === code ? { ...ticket, paymentsOpen } : ticket)));
+    const run = saveQueue.current.then(async () => {
+      setSaving(code);
+      try {
+        setTickets(await api("/api/admin/tickets", {
+          method: "PATCH",
+          body: JSON.stringify({ code, paymentsOpen }),
+        }));
+      } catch (error) {
+        onError(error instanceof Error ? error.message : "Ticket was not saved");
+        await load().catch(() => {});
+      } finally {
+        setSaving("");
+      }
+    });
+    saveQueue.current = run.then(() => undefined, () => undefined);
+  }
+
+  return (
+    <div className="flex max-w-[640px] flex-col gap-4 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+      <div className="flex flex-col gap-1">
+        <h2 className="m-0 text-[17px] font-bold">Tickets</h2>
+        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Open means buyers can pay for that ticket now. Locked means payment stays closed. Sale dates on the registration page stay as a label. They do not open or close payment.</p>
+      </div>
+      <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF]">
+        {tickets.map((ticket) => (
+          <label key={ticket.code} className={`flex items-start gap-3 border-t border-[#E4E1DC] px-4 py-4 first:border-t-0 ${ticket.paymentsOpen ? "bg-[#FBE9EA]" : ""}`}>
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-5 accent-[#D0202E]"
+              checked={ticket.paymentsOpen}
+              disabled={saving === ticket.code}
+              onChange={(event) => toggle(ticket.code, event.target.checked)}
+            />
+            <span className="flex flex-col gap-0.5">
+              <span className="text-[15px] font-semibold">{ticket.name}</span>
+              <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">
+                {money(ticket.fullPriceCents, ticket.currency)} · {saleDate(ticket.salesStart)} – {saleDate(ticket.salesEnd)}
+              </span>
+              <span className="text-[13px] font-semibold leading-snug text-[#3A3A40]">{ticket.paymentsOpen ? "Open for payment" : "Locked"}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PaymentSettings({ onError }: { onError: (message: string) => void }) {
   const [channels, setChannels] = useState<PaymentChannelSetting[]>([]);
   const [paynamicsMethods, setPaynamicsMethods] = useState<PaynamicsMethodSetting[]>([]);
@@ -1563,7 +1646,6 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
 
   return (
     <section className="flex flex-col gap-3">
-      <h1 className="m-0 font-archivo text-[28px] font-extrabold">Settings</h1>
       <div className="flex max-w-[640px] flex-col gap-4 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
         <div className="flex flex-col gap-1">
           <h2 className="m-0 text-[17px] font-bold">Payment channels</h2>

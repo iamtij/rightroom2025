@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS ticket_products (
   sales_start TEXT NOT NULL,
   sales_end TEXT NOT NULL,
   allows_installment INTEGER NOT NULL DEFAULT 0 CHECK (allows_installment IN (0, 1)),
-  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
+  active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+  payments_open INTEGER NOT NULL DEFAULT 0 CHECK (payments_open IN (0, 1))
 );
 
 CREATE TABLE IF NOT EXISTS installment_plan_items (
@@ -545,6 +546,10 @@ function migrate(db) {
     );
   `);
   if (testTicketEnabled()) ensureTestTicket(db);
+  const ticketColumns = new Set(db.prepare("PRAGMA table_info(ticket_products)").all().map((column) => column.name));
+  if (!ticketColumns.has("payments_open")) {
+    db.exec("ALTER TABLE ticket_products ADD COLUMN payments_open INTEGER NOT NULL DEFAULT 0");
+  }
   const names = new Set(db.prepare("PRAGMA table_info(registrations)").all().map((column) => column.name));
   const columns = [
     ["attendee_type", "TEXT NOT NULL DEFAULT 'guest'"],
