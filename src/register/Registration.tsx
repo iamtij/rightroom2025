@@ -1220,7 +1220,11 @@ function RegistrationWizard() {
           }
           setPayError("Your session check expired. Press Pay again after the human check below shows Success.");
         } else if (turnstileRejected) {
-          setPayError("Human check was not accepted. Wait for Success below, then press Pay again.");
+          setPayError(
+            "Human check was not accepted. Wait for Success below, then press Pay again. If it keeps failing, try a private window with wallet extensions (Phantom, MetaMask) disabled — they often break Cloudflare.",
+          );
+        } else if (serverMessage === "That mobile number is already on a registration." || serverMessage === "That email is already on a registration.") {
+          setPayError(`${serverMessage} Open Manage my registration to pay, or use a different email/mobile.`);
         } else {
           setPayError(serverMessage);
         }
@@ -1705,7 +1709,7 @@ function RegistrationWizard() {
                 || saving
                 || (charging.currency === "PHP" && !channel)
                 || (charging.currency === "PHP" && channel === "paynamics" && !paynamicsChannel)
-                || Boolean(turnstileSiteKey && !turnstileToken)
+                || Boolean(turnstileSiteKey && !turnstileToken && !checkoutReference)
               }
               onClick={pay}
             >
