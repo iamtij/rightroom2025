@@ -34,7 +34,7 @@ import {
   startPaynamicsPayment,
   workflowResponseSignatureValid,
 } from "./paynamics.js";
-import { listPaymentChannels } from "./payment-channels.js";
+import { buyerPaynamicsMethods, listPaymentChannels, listPaynamicsMethods, savePaynamicsMethods } from "./payment-channels.js";
 
 const TEST_KEY = "test_merchant_key_only_for_ci";
 const TEST_MID = "TESTMID";
@@ -133,10 +133,40 @@ const registration = createRegistration(db, {
   registeredOn: "2026-11-12",
 });
 
-assert.equal(paynamicsCheckoutChannel("gc"), null);
+assert.equal(paynamicsCheckoutChannel("not_a_channel"), null);
 assert.equal(paynamicsCheckoutChannel("wallet"), null);
-assert.deepEqual(paynamicsCheckoutChannel("paymaya_ph"), { pmethod: "wallet", pchannel: "paymaya_ph" });
-assert.deepEqual(paynamicsCheckoutChannel("bpi_online"), { pmethod: "onlinebanktransfer", pchannel: "bpi_online" });
+assert.deepEqual(paynamicsCheckoutChannel("gc"), { code: "gc", pmethod: "wallet", pchannel: "gc" });
+assert.deepEqual(paynamicsCheckoutChannel("paymaya_ph"), { code: "paymaya_ph", pmethod: "wallet", pchannel: "paymaya_ph" });
+assert.deepEqual(paynamicsCheckoutChannel("bpi_online"), { code: "bpi_online", pmethod: "onlinebanktransfer", pchannel: "bpi_online" });
+assert.deepEqual(paynamicsCheckoutChannel("creditcard"), { code: "creditcard", pmethod: "creditcard", pchannel: "" });
+const cardBody = buildWorkflowCreateBody({
+  merchantId: TEST_MID,
+  merchantKey: TEST_KEY,
+  requestId: "card1",
+  registration: { mobile: "09171234567", full_name: "Paynamics Tester", email: "paynamics@example.com", reference: "REF" },
+  amountCents: 10000,
+  pmethod: "creditcard",
+  pchannel: "",
+  trxType: "sale",
+});
+assert.equal(cardBody.transaction.pmethod, "creditcard");
+assert.equal(cardBody.transaction.pchannel, "");
+assert.equal(cardBody.transaction.trx_type, "sale");
+assert.equal(cardBody.transaction.signature.length, 128);
+const enabledByDefault = ["paymaya_ph", "grabpay_ph", "bpi_online", "ubp_online", "br_landbank_ph"];
+for (const code of enabledByDefault) {
+  assert.equal(listPaynamicsMethods(db).find((item) => item.code === code).enabled, true, code);
+}
+assert.equal(listPaynamicsMethods(db).find((item) => item.code === "gc").enabled, false);
+assert.equal(listPaynamicsMethods(db).find((item) => item.code === "creditcard").enabled, false);
+assert.equal(buyerPaynamicsMethods(db).some((item) => item.code === "gc"), false);
+savePaynamicsMethods(db, { gc: true, alipay: false, nope: true });
+assert.equal(buyerPaynamicsMethods(db).some((item) => item.code === "gc"), true);
+assert.equal(buyerPaynamicsMethods(db).some((item) => item.code === "alipay"), false);
+savePaynamicsMethods(db, Object.fromEntries(enabledByDefault.map((code) => [code, false])));
+assert.equal(buyerPaynamicsMethods(db).some((item) => enabledByDefault.includes(item.code)), false);
+savePaynamicsMethods(db, { ...Object.fromEntries(enabledByDefault.map((code) => [code, true])), gc: false });
+assert.equal((await startPaynamicsPayment(db, registration, "gc")).error, "That Paynamics option is turned off.");
 assert.equal((await startPaynamicsPayment(db, registration, "paymaya_ph")).status, 503);
 
 process.env.PAYNAMICS_BASIC_AUTH_USER = "workflow_user";
@@ -312,7 +342,10 @@ global.fetch = async (url, options = {}) => {
 
 const rejectedMethod = await startPaynamicsPayment(db, registration, "creditcard");
 assert.equal(rejectedMethod.status, 400);
-assert.equal(rejectedMethod.error, "Choose a Paynamics option.");
+assert.equal(rejectedMethod.error, "That Paynamics option is turned off.");
+const rejectedUnknown = await startPaynamicsPayment(db, registration, "wallet");
+assert.equal(rejectedUnknown.status, 400);
+assert.equal(rejectedUnknown.error, "Choose a Paynamics option.");
 const started = await startPaynamicsPayment(db, registration, "paymaya_ph");
 assert.equal(started.paynamics?.status, "pending");
 assert.equal(fetchTarget.startsWith("https://payin.payserv.net/"), true);

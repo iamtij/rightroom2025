@@ -6,7 +6,7 @@ import {
   assessStagingEarlyPayments,
   stagingTestRegistrationAllowed,
 } from "./staging-early-payments.js";
-import { beginMfaSetup, clearSessionCookie, cookieValue, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
+import { beginMfaSetup, clearSessionCookie, cookieValue, createAdmin, listAdmins, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
 import { admitPass, cancelRegistration, compRegistration, createRegistration, discardUnopenedRegistration, ensureResumeToken, entryPassEligible, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
 import { sendEntryPassForRegistration } from "./reminders.js";
 import { dashboardStats } from "./dashboard.js";
@@ -20,7 +20,7 @@ import { formatLongDate, manilaParts } from "./time.js";
 import { handleUpayCallback, refreshUpayPayment, startUpayPayment } from "./upay.js";
 import { handleHitpayWebhook, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
 import { handlePaynamicsNotification, paynamicsCheckoutChannel, paynamicsPublicCheckoutInfo, refreshPaynamicsPayment, startPaynamicsPayment } from "./paynamics.js";
-import { buyerPaymentChannels, hitpayConfigured, listPaymentChannels, paynamicsConfigured, savePaymentChannels } from "./payment-channels.js";
+import { buyerPaymentChannels, buyerPaynamicsMethods, hitpayConfigured, listPaymentChannels, listPaynamicsMethods, paynamicsConfigured, paynamicsMethodByCode, savePaymentChannels, savePaynamicsMethods } from "./payment-channels.js";
 import { entryQrPng } from "./templates.js";
 import { recordSecurityEvent } from "./alerts.js";
 
@@ -35,13 +35,9 @@ function db() {
 }
 
 function channelLabel(value) {
+  const method = paynamicsMethodByCode(value);
+  if (method) return method.label;
   const labels = {
-    paymaya_ph: "Maya",
-    grabpay_ph: "GrabPay",
-    bpi_online: "BPI",
-    ubp_online: "UnionBank Online",
-    br_landbank_ph: "Landbank",
-    gc: "GCash",
     qr: "QR Ph",
     online: "Online banking",
     instapay: "InstaPay",
@@ -50,6 +46,16 @@ function channelLabel(value) {
   };
   const key = String(value || "").trim();
   return labels[key] || key.replaceAll("_", " ");
+}
+
+function adminPaymentSettings(database) {
+  return {
+    channels: listPaymentChannels(database),
+    paynamicsMethods: listPaynamicsMethods(database),
+    hitpayConfigured: hitpayConfigured(),
+    paynamicsConfigured: paynamicsConfigured(),
+    paynamics: paynamicsPublicCheckoutInfo(),
+  };
 }
 
 function registrationTransactions(database, registrationId) {
@@ -255,13 +261,23 @@ function clientError(error, fallback) {
 function requireAdmin(req, res, next) {
   const token = cookieValue(req.headers.cookie, "ibmc_admin");
   const session = readSession(db(), token);
-  const admin = session && db().prepare("SELECT id, email FROM admin_users WHERE id = ?").get(session.id);
+  const admin = session && db().prepare("SELECT id, email, role FROM admin_users WHERE id = ?").get(session.id);
   if (!admin) {
     res.status(401).json({ error: "Sign in required" });
     return;
   }
-  req.admin = admin;
+  req.admin = { id: admin.id, email: admin.email, role: admin.role === "super" ? "super" : "admin" };
   next();
+}
+
+function requireSuperAdmin(req, res, next) {
+  requireAdmin(req, res, () => {
+    if (req.admin.role !== "super") {
+      res.status(403).json({ error: "Only a super admin can manage admins." });
+      return;
+    }
+    next();
+  });
 }
 
 function writeAudit(database, adminId, action, target, amountCents = null) {
@@ -312,7 +328,10 @@ export function createApi() {
   router.get("/payment-channels", (_req, res) => {
     res.json({
       channels: buyerPaymentChannels(db()),
-      paynamics: paynamicsPublicCheckoutInfo(),
+      paynamics: {
+        ...paynamicsPublicCheckoutInfo(),
+        methods: buyerPaynamicsMethods(db()),
+      },
     });
   });
 
@@ -684,7 +703,7 @@ export function createApi() {
     let registration;
     try {
       registration = createPublicRegistration(req.body || {});
-      const result = await startPaynamicsPayment(db(), registration, selection.pchannel);
+      const result = await startPaynamicsPayment(db(), registration, selection.code);
       finishNewCheckout(res, sendPaynamics, registration, result);
     } catch (error) {
       if (registration) discardUnopenedRegistration(db(), registration.id);
@@ -708,7 +727,7 @@ export function createApi() {
       res.status(400).json({ error: "Registration is not payable" });
       return;
     }
-    const result = await startPaynamicsPayment(db(), registration, selection.pchannel);
+    const result = await startPaynamicsPayment(db(), registration, selection.code);
     sendPaynamics(res, { ...result, ...ownerAccess(registration, resumeCredential(req)) }, false);
   });
 
@@ -943,34 +962,40 @@ export function createApi() {
   });
 
   router.get("/admin/me", requireAdmin, (req, res) => {
-    res.json({ email: req.admin.email });
+    res.json({ email: req.admin.email, role: req.admin.role });
+  });
+
+  router.get("/admin/admins", requireSuperAdmin, (_req, res) => {
+    res.json(listAdmins(db()));
+  });
+
+  router.post("/admin/admins", requireSuperAdmin, (req, res) => {
+    const result = createAdmin(db(), req.body || {});
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    writeAudit(db(), req.admin.id, "admin.create", result.admin.email);
+    recordSecurityEvent(db(), "admin.create", result.admin.email);
+    res.status(201).json(result.admin);
   });
 
   router.get("/admin/payment-channels", requireAdmin, (_req, res) => {
-    res.json({
-      channels: listPaymentChannels(db()),
-      hitpayConfigured: hitpayConfigured(),
-      paynamicsConfigured: paynamicsConfigured(),
-      paynamics: paynamicsPublicCheckoutInfo(),
-    });
+    res.json(adminPaymentSettings(db()));
   });
 
   router.patch("/admin/payment-channels", requireAdmin, (req, res) => {
-    let channels;
+    const body = req.body || {};
     try {
-      channels = savePaymentChannels(db(), req.body || {});
+      savePaymentChannels(db(), body);
+      if (Object.prototype.hasOwnProperty.call(body, "paynamicsMethods")) savePaynamicsMethods(db(), body.paynamicsMethods);
     } catch (error) {
       const status = error.status === 400 ? 400 : 500;
       res.status(status).json({ error: status === 400 ? error.message : "Payment channels were not saved." });
       return;
     }
     writeAudit(db(), req.admin.id, "payment_channel.update", "payment_channels");
-    res.json({
-      channels,
-      hitpayConfigured: hitpayConfigured(),
-      paynamicsConfigured: paynamicsConfigured(),
-      paynamics: paynamicsPublicCheckoutInfo(),
-    });
+    res.json(adminPaymentSettings(db()));
   });
 
   router.get("/admin/dashboard", requireAdmin, (_req, res) => {

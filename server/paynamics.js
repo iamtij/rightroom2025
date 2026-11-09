@@ -16,18 +16,11 @@ export {
 };
 import { reportError } from "./report-error.js";
 import { getRegistration, recordPayment } from "./registrations.js";
-import { isChannelEnabled } from "./payment-channels.js";
+import { isChannelEnabled, isPaynamicsMethodEnabled, paynamicsMethodByCode } from "./payment-channels.js";
 
 const locks = new Set();
 const DEFAULT_CHECKOUT_TTL_MINUTES = 30;
 const PAYMENT_ACTION = "url_link";
-const PAYNAMICS_CHECKOUT_CHANNELS = {
-  paymaya_ph: "wallet",
-  grabpay_ph: "wallet",
-  bpi_online: "onlinebanktransfer",
-  ubp_online: "onlinebanktransfer",
-  br_landbank_ph: "onlinebanktransfer",
-};
 const WIKI_TEST_API_BASE = "https://payin.payserv.net";
 
 const TRANSACTION_SUCCESS = new Set(["GR001"]);
@@ -512,9 +505,9 @@ function amountLabel(cents) {
 }
 
 export function paynamicsCheckoutChannel(value) {
-  const pchannel = String(value || "").trim().toLowerCase();
-  const pmethod = PAYNAMICS_CHECKOUT_CHANNELS[pchannel];
-  return pmethod ? { pmethod, pchannel } : null;
+  const method = paynamicsMethodByCode(value);
+  if (!method) return null;
+  return { code: method.code, pmethod: method.pmethod, pchannel: method.pchannel };
 }
 
 export function buildWorkflowCreateBody({
@@ -525,6 +518,7 @@ export function buildWorkflowCreateBody({
   amountCents,
   pmethod,
   pchannel,
+  trxType,
 }) {
   const phone = formatPhone(registration.mobile);
   const name = splitName(registration.full_name);
@@ -539,7 +533,8 @@ export function buildWorkflowCreateBody({
     response_url: response,
     cancel_url: cancel,
     pmethod,
-    ...(pchannel ? { pchannel } : {}),
+    ...(pchannel != null ? { pchannel } : {}),
+    ...(trxType ? { trx_type: trxType } : {}),
     payment_action: PAYMENT_ACTION,
     collection_method: optional("PAYNAMICS_COLLECTION_METHOD", "single_pay"),
     payment_notification_status: optional("PAYNAMICS_PAYMENT_NOTIFICATION_STATUS", "1"),
@@ -892,6 +887,7 @@ export async function startPaynamicsPayment(db, registration, pchannel) {
   const selection = paynamicsCheckoutChannel(pchannel);
   if (!selection) return { error: "Choose a Paynamics option.", status: 400, registration };
   if (!isChannelEnabled(db, "paynamics")) return { error: "That payment option is turned off.", status: 400, registration };
+  if (!isPaynamicsMethodEnabled(db, selection.code)) return { error: "That Paynamics option is turned off.", status: 400, registration };
   if (registration.currency !== "PHP") return { error: "Paynamics collects peso payments.", status: 400, registration };
   if (!paynamicsApiCallsAllowed()) {
     return {
@@ -914,7 +910,7 @@ export async function startPaynamicsPayment(db, registration, pchannel) {
     `).get(due.id);
     if (open) {
       const expires = Date.parse(open.expires_at || "");
-      const sameMethod = String(open.payment_channel || "") === selection.pchannel;
+      const sameMethod = String(open.payment_channel || "") === selection.code;
       if (sameMethod && (!Number.isFinite(expires) || Date.now() < expires)) {
         return view(db, registration, open);
       }
@@ -934,6 +930,7 @@ export async function startPaynamicsPayment(db, registration, pchannel) {
       amountCents,
       pmethod: selection.pmethod,
       pchannel: selection.pchannel,
+      trxType: paynamicsMethodByCode(selection.code)?.trxType || "",
     });
     let created;
     try {
@@ -961,7 +958,7 @@ export async function startPaynamicsPayment(db, registration, pchannel) {
       failed ? "failed" : "pending",
       response.response_code || (failed ? "create_failed" : null),
       response.response_message || (failed ? "unsigned/invalid hosted link" : null),
-      selection.pchannel,
+      selection.code,
       paymentUrl || null,
       expiresAt(),
     );

@@ -20,7 +20,7 @@ export const PAYMENT_CHANNELS = [
   {
     code: "paynamics",
     label: "Paynamics",
-    detail: "Maya, GrabPay, BPI, UnionBank, or Landbank on Paynamics' secure page.",
+    detail: "Pay on Paynamics' secure page with one of the options below.",
     note: "You'll continue to Paynamics to finish this payment.",
   },
 ];
@@ -32,12 +32,41 @@ const DEFAULTS = {
   paynamics: 0,
 };
 
+// Hosted Paynamics url_link channels. "available" matches the options already offered at checkout.
+export const PAYNAMICS_METHODS = [
+  { code: "paymaya_ph", pmethod: "wallet", pchannel: "paymaya_ph", group: "E-Wallet", label: "Maya", detail: "Pay with Maya.", preset: "available" },
+  { code: "grabpay_ph", pmethod: "wallet", pchannel: "grabpay_ph", group: "E-Wallet", label: "GrabPay", detail: "Pay with GrabPay.", preset: "available" },
+  { code: "gc", pmethod: "wallet", pchannel: "gc", group: "E-Wallet", label: "GCash", detail: "Pay with GCash.", preset: "other" },
+  { code: "coins_ph", pmethod: "wallet", pchannel: "coins_ph", group: "E-Wallet", label: "Coins.ph", detail: "Pay with Coins.ph.", preset: "other" },
+  { code: "alipay", pmethod: "wallet", pchannel: "alipay", group: "E-Wallet", label: "Alipay", detail: "Pay with Alipay.", preset: "other" },
+  { code: "wechat", pmethod: "wallet", pchannel: "wechat", group: "E-Wallet", label: "WeChat Pay", detail: "Pay with WeChat Pay.", preset: "other" },
+  { code: "bpi_online", pmethod: "onlinebanktransfer", pchannel: "bpi_online", group: "Online banking", label: "BPI", detail: "Pay from a BPI account.", preset: "available" },
+  { code: "ubp_online", pmethod: "onlinebanktransfer", pchannel: "ubp_online", group: "Online banking", label: "UnionBank Online", detail: "Pay from a UnionBank account.", preset: "available" },
+  { code: "br_landbank_ph", pmethod: "onlinebanktransfer", pchannel: "br_landbank_ph", group: "Online banking", label: "Landbank", detail: "Pay from a Landbank account.", preset: "available" },
+  { code: "br_bdo_ph", pmethod: "onlinebanktransfer", pchannel: "br_bdo_ph", group: "Online banking", label: "BDO", detail: "Pay from a BDO account.", preset: "other" },
+  { code: "br_metrobank_ph", pmethod: "onlinebanktransfer", pchannel: "br_metrobank_ph", group: "Online banking", label: "Metrobank", detail: "Pay from a Metrobank account.", preset: "other" },
+  { code: "ubp_qr_ph", pmethod: "onlinebanktransfer", pchannel: "ubp_qr_ph", group: "QR", label: "QR Ph", detail: "Pay by scanning a QR Ph code.", preset: "other" },
+  { code: "creditcard", pmethod: "creditcard", pchannel: "", trxType: "sale", group: "Card", label: "Credit or debit card", detail: "Pay with a credit or debit card on Paynamics.", preset: "other" },
+];
+
+const paynamicsMethodCatalog = new Map(PAYNAMICS_METHODS.map((method) => [method.code, method]));
+
 const CUSTOM_LABEL_MAX = 80;
 const CUSTOM_NOTE_MAX = 400;
 
 export function seedPaymentChannels(db) {
   const insert = db.prepare("INSERT OR IGNORE INTO payment_channels (code, enabled) VALUES (?, ?)");
   for (const channel of PAYMENT_CHANNELS) insert.run(channel.code, DEFAULTS[channel.code]);
+  seedPaynamicsMethods(db);
+}
+
+export function seedPaynamicsMethods(db) {
+  const insert = db.prepare("INSERT OR IGNORE INTO paynamics_methods (code, enabled) VALUES (?, ?)");
+  for (const method of PAYNAMICS_METHODS) insert.run(method.code, method.preset === "available" ? 1 : 0);
+}
+
+export function paynamicsMethodByCode(code) {
+  return paynamicsMethodCatalog.get(String(code || "").trim().toLowerCase()) || null;
 }
 
 export function normalizeCustomLabel(value) {
@@ -87,6 +116,56 @@ export function buyerPaymentChannels(db) {
 export function isChannelEnabled(db, code) {
   const row = db.prepare("SELECT enabled FROM payment_channels WHERE code = ?").get(code);
   return row?.enabled === 1;
+}
+
+export function listPaynamicsMethods(db) {
+  const rows = db.prepare("SELECT code, enabled FROM paynamics_methods").all();
+  const saved = new Map(rows.map((row) => [row.code, row]));
+  return PAYNAMICS_METHODS.map((method) => {
+    const row = saved.get(method.code);
+    return {
+      code: method.code,
+      label: method.label,
+      group: method.group,
+      detail: method.detail,
+      preset: method.preset,
+      enabled: row ? row.enabled === 1 : method.preset === "available",
+    };
+  });
+}
+
+export function buyerPaynamicsMethods(db) {
+  return listPaynamicsMethods(db)
+    .filter((method) => method.enabled)
+    .map(({ code, label, group, detail }) => ({ code, label, group, detail }));
+}
+
+export function isPaynamicsMethodEnabled(db, code) {
+  const method = paynamicsMethodByCode(code);
+  if (!method) return false;
+  const row = db.prepare("SELECT enabled FROM paynamics_methods WHERE code = ?").get(method.code);
+  if (!row) return method.preset === "available";
+  return row.enabled === 1;
+}
+
+export function savePaynamicsMethods(db, input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    const error = new Error("Paynamics channels were not saved.");
+    error.status = 400;
+    throw error;
+  }
+  const update = db.prepare("UPDATE paynamics_methods SET enabled = ? WHERE code = ?");
+  const patches = [];
+  for (const method of PAYNAMICS_METHODS) {
+    if (!Object.prototype.hasOwnProperty.call(input, method.code)) continue;
+    const value = input[method.code];
+    const enabled = value && typeof value === "object" ? Boolean(value.enabled) : Boolean(value);
+    patches.push({ code: method.code, enabled: enabled ? 1 : 0 });
+  }
+  db.transaction(() => {
+    for (const patch of patches) update.run(patch.enabled, patch.code);
+  })();
+  return listPaynamicsMethods(db);
 }
 
 export function savePaymentChannels(db, input) {

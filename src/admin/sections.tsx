@@ -473,13 +473,72 @@ function CheckIn({ onError }: { onError: (message: string) => void }) {
   );
 }
 
+type AdminAccount = {
+  id: number;
+  email: string;
+  role: "super" | "admin";
+  authenticator: boolean;
+  createdAt: string;
+};
+
+function Admins({ onError }: { onError: (message: string) => void }) {
+  const [rows, setRows] = useState<AdminAccount[]>([]);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [adding, setAdding] = useState(false);
+  async function load() { setRows(await api("/api/admin/admins")); }
+  useEffect(() => { load().catch((error) => onError(error.message)); }, []);
+  async function save(event: FormEvent) {
+    event.preventDefault();
+    onError("");
+    setAdding(true);
+    try {
+      await api("/api/admin/admins", { method: "POST", body: JSON.stringify({ email, password }) });
+      setEmail("");
+      setPassword("");
+      await load();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not add the admin");
+    } finally {
+      setAdding(false);
+    }
+  }
+  return (
+    <section className="flex flex-col gap-3">
+      <h1 className="m-0 font-archivo text-[28px] font-extrabold">Admins</h1>
+      <p className="m-0 max-w-[640px] text-sm leading-normal text-[#5C5C63]">People you add can use every section except this one. They set up an authenticator code the first time they sign in.</p>
+      <form className="flex flex-wrap items-end gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4" onSubmit={save}>
+        <Field label="Email"><input className={field} type="email" required autoComplete="off" value={email} onChange={(event) => setEmail(event.target.value)} /></Field>
+        <Field label="Password"><input className={field} type="password" required minLength={8} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} /></Field>
+        <button type="submit" className={buttonClass} disabled={adding}>{adding ? "Adding" : "Add admin"}</button>
+        <p className="m-0 w-full text-[13px] text-[#5C5C63]">Use at least 8 characters. This person is an admin, not a super admin.</p>
+      </form>
+      <DataTable columns={["Email", "Access", "Authenticator", "Added"]} empty={rows.length === 0 ? "No admins yet." : ""}>
+        {rows.map((row) => (
+          <tr key={row.id}>
+            <td className={`${tdClass} font-semibold`}>{row.email}</td>
+            <td className={tdClass}>{row.role === "super" ? "Super admin" : "Admin"}</td>
+            <td className={tdClass}>{row.authenticator ? "Ready" : "Waiting for first sign-in"}</td>
+            <td className={tdClass}>{row.createdAt?.slice(0, 10) || ""}</td>
+          </tr>
+        ))}
+      </DataTable>
+    </section>
+  );
+}
+
 export function AdminSections() {
   const [section, setSection] = useState("Dashboard");
   const [error, setError] = useState("");
+  const [role, setRole] = useState<"super" | "admin" | "">("");
+  useEffect(() => {
+    api("/api/admin/me").then((me) => setRole(me.role === "super" ? "super" : "admin")).catch(() => setRole("admin"));
+  }, []);
+  const sections = ["Dashboard", "Registrations", "Check-in", "Coupons", "Schedule", "Templates", "Members", "Chapters", "Settings", ...(role === "super" ? ["Admins"] : [])];
   return (
     <div className="flex flex-col gap-5">
       <nav className="flex flex-wrap gap-2">
-        {["Dashboard", "Registrations", "Check-in", "Coupons", "Schedule", "Templates", "Members", "Chapters", "Settings"].map((item) => (
+        {sections.map((item) => (
           <button
             key={item}
             type="button"
@@ -500,6 +559,7 @@ export function AdminSections() {
       {section === "Members" ? <Members onError={setError} /> : null}
       {section === "Chapters" ? <Chapters onError={setError} /> : null}
       {section === "Settings" ? <PaymentSettings onError={setError} /> : null}
+      {section === "Admins" && role === "super" ? <Admins onError={setError} /> : null}
     </div>
   );
 }
@@ -1272,15 +1332,67 @@ type PaymentChannelSetting = {
   enabled: boolean;
 };
 
+type PaynamicsMethodSetting = {
+  code: string;
+  label: string;
+  group: string;
+  detail: string;
+  preset: "available" | "other" | string;
+  enabled: boolean;
+};
+
 type PaymentChannelPayload = {
   channels?: PaymentChannelSetting[];
+  paynamicsMethods?: PaynamicsMethodSetting[];
   hitpayConfigured?: boolean;
   paynamicsConfigured?: boolean;
   paynamics?: { liveRealChargeWarning?: boolean; checkoutMode?: string };
 };
 
+function PaynamicsMethodChecks({
+  methods,
+  saving,
+  locked = false,
+  grouped = false,
+  onToggle,
+}: {
+  methods: PaynamicsMethodSetting[];
+  saving: string;
+  locked?: boolean;
+  grouped?: boolean;
+  onToggle: (code: string, enabled: boolean) => void;
+}) {
+  if (!methods.length) return null;
+  let group = "";
+  return (
+    <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF]">
+      {methods.map((method) => {
+        const showGroup = grouped && method.group !== group;
+        if (grouped) group = method.group;
+        return (
+          <label key={method.code} className={`flex items-start gap-3 border-t border-[#E4E1DC] px-4 py-3 first:border-t-0 ${method.enabled ? "bg-[#FBE9EA]" : ""}`}>
+            <input
+              type="checkbox"
+              className="mt-1 h-5 w-5 accent-[#D0202E]"
+              checked={method.enabled}
+              disabled={locked || saving === `pn:${method.code}`}
+              onChange={(event) => onToggle(method.code, event.target.checked)}
+            />
+            <span className="flex flex-col gap-0.5">
+              {showGroup ? <span className="text-xs font-bold tracking-[0.12em] text-[#A8131F] uppercase">{method.group}</span> : null}
+              <span className="text-[15px] font-semibold">{method.label}</span>
+              <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{method.detail}</span>
+            </span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 function PaymentSettings({ onError }: { onError: (message: string) => void }) {
   const [channels, setChannels] = useState<PaymentChannelSetting[]>([]);
+  const [paynamicsMethods, setPaynamicsMethods] = useState<PaynamicsMethodSetting[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
   const [hitpayConfigured, setHitpayConfigured] = useState(true);
@@ -1291,6 +1403,7 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
   const draftsRef = useRef<Record<string, string>>({});
   const noteDraftsRef = useRef<Record<string, string>>({});
   const channelsRef = useRef<PaymentChannelSetting[]>([]);
+  const availableAllRef = useRef<HTMLInputElement>(null);
   const saveQueue = useRef(Promise.resolve());
 
   function enqueue(task: () => Promise<void>) {
@@ -1326,6 +1439,7 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
       noteDraftsRef.current = merged;
       return merged;
     });
+    setPaynamicsMethods(Array.isArray(payload.paynamicsMethods) ? payload.paynamicsMethods : []);
     setHitpayConfigured(Boolean(payload.hitpayConfigured));
     setPaynamicsConfigured(Boolean(payload.paynamicsConfigured));
     setPaynamicsLiveWarning(Boolean(payload.paynamics?.liveRealChargeWarning));
@@ -1339,6 +1453,14 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
   useEffect(() => {
     load().catch((error) => onError(error.message));
   }, []);
+
+  const availableMethods = paynamicsMethods.filter((item) => item.preset === "available");
+  const otherMethods = paynamicsMethods.filter((item) => item.preset !== "available");
+  const availableAllOn = availableMethods.length > 0 && availableMethods.every((item) => item.enabled);
+  const availableSomeOn = availableMethods.some((item) => item.enabled);
+  useEffect(() => {
+    if (availableAllRef.current) availableAllRef.current.indeterminate = availableSomeOn && !availableAllOn;
+  }, [availableSomeOn, availableAllOn]);
 
   function toggle(code: string, enabled: boolean) {
     setChannels((current) => current.map((item) => (item.code === code ? { ...item, enabled } : item)));
@@ -1356,6 +1478,35 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
         setSaving("");
       }
     });
+  }
+
+  function savePaynamicsMethods(patch: Record<string, boolean>, savingKey: string) {
+    setPaynamicsMethods((current) => current.map((item) => (
+      Object.prototype.hasOwnProperty.call(patch, item.code) ? { ...item, enabled: patch[item.code] } : item
+    )));
+    return enqueue(async () => {
+      setSaving(savingKey);
+      try {
+        applyPayload(await api("/api/admin/payment-channels", {
+          method: "PATCH",
+          body: JSON.stringify({ paynamicsMethods: patch }),
+        }));
+      } catch (error) {
+        onError(error instanceof Error ? error.message : "Paynamics channels were not saved");
+        await load().catch(() => {});
+      } finally {
+        setSaving("");
+      }
+    });
+  }
+
+  function togglePaynamicsMethod(code: string, enabled: boolean) {
+    return savePaynamicsMethods({ [code]: enabled }, `pn:${code}`);
+  }
+
+  function toggleAvailablePaynamics(enabled: boolean) {
+    const patch = Object.fromEntries(availableMethods.map((item) => [item.code, enabled]));
+    return savePaynamicsMethods(patch, "pn:available");
   }
 
   function saveLabel(code: string) {
@@ -1416,7 +1567,7 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
       <div className="flex max-w-[640px] flex-col gap-4 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
         <div className="flex flex-col gap-1">
           <h2 className="m-0 text-[17px] font-bold">Payment channels</h2>
-          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Checked channels are the ones a buyer can use when paying. Buyer label is the name on checkout. Leave it blank to keep the name above. Checkout note is the line shown after a buyer selects that channel. Leave it blank to keep the original note.</p>
+          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Checked channels are the ones a buyer can use when paying. Buyer label is the name on checkout. Leave it blank to keep the name above. Checkout note is the line shown after a buyer selects that channel. Leave it blank to keep the original note. Under Paynamics, the channels already available start on. Other Paynamics channels stay off until you check them.</p>
         </div>
         <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF]">
           {channels.map((channel) => (
@@ -1473,6 +1624,31 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
                 />
                 <span className="font-normal leading-snug">Buyers see: {(noteDrafts[channel.code] || "").replace(/\s+/g, " ").trim() || channel.note}</span>
               </label>
+              {channel.code === "paynamics" ? (
+                <div className="ml-8 flex flex-col gap-3">
+                  <div className="flex flex-col gap-1">
+                    <span className="text-[12px] font-semibold text-[#5C5C63]">Paynamics options</span>
+                    <span className="text-[12px] font-normal leading-snug text-[#5C5C63]">Buyers only see checked options after they choose Paynamics. Turn on another channel only if Paynamics has activated it for this merchant.</span>
+                  </div>
+                  <label className={`flex items-start gap-3 rounded-[14px] border border-[#D9D5CF] px-4 py-3 ${availableAllOn ? "bg-[#FBE9EA]" : ""}`}>
+                    <input
+                      ref={availableAllRef}
+                      type="checkbox"
+                      className="mt-1 h-5 w-5 accent-[#D0202E]"
+                      checked={availableAllOn}
+                      disabled={saving === "pn:available" || availableMethods.length === 0}
+                      onChange={(event) => toggleAvailablePaynamics(event.target.checked)}
+                    />
+                    <span className="flex flex-col gap-0.5">
+                      <span className="text-[15px] font-semibold">All available channels</span>
+                      <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">Turns Maya, GrabPay, BPI, UnionBank Online, and Landbank on or off together.</span>
+                    </span>
+                  </label>
+                  <PaynamicsMethodChecks methods={availableMethods} saving={saving} locked={saving === "pn:available"} onToggle={togglePaynamicsMethod} />
+                  <span className="text-[12px] font-semibold text-[#5C5C63]">Other channels</span>
+                  <PaynamicsMethodChecks methods={otherMethods} saving={saving} grouped onToggle={togglePaynamicsMethod} />
+                </div>
+              ) : null}
             </div>
           ))}
         </div>

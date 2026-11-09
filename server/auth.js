@@ -22,10 +22,51 @@ export function verifyPassword(password, stored) {
 export function seedAdmin(db) {
   const email = (process.env.ADMIN_EMAIL || "admin@ibmcph.com").trim().toLowerCase();
   const password = process.env.ADMIN_PASSWORD;
-  if (!password) return;
+  if (password) {
+    const existing = db.prepare("SELECT id, role FROM admin_users WHERE email = ?").get(email);
+    if (!existing) {
+      db.prepare("INSERT INTO admin_users (email, password_hash, role) VALUES (?, ?, 'super')").run(email, hashPassword(password));
+    } else if (existing.role !== "super") {
+      db.prepare("UPDATE admin_users SET role = 'super' WHERE id = ?").run(existing.id);
+    }
+  }
+  const superCount = db.prepare("SELECT COUNT(*) AS n FROM admin_users WHERE role = 'super'").get().n;
+  if (superCount > 0) return;
+  const target = db.prepare("SELECT id FROM admin_users WHERE email = ?").get(email)
+    || db.prepare("SELECT id FROM admin_users ORDER BY id ASC LIMIT 1").get();
+  if (target) db.prepare("UPDATE admin_users SET role = 'super' WHERE id = ?").run(target.id);
+}
+
+export function listAdmins(db) {
+  return db.prepare(`
+    SELECT id, email, role, totp_enabled, created_at
+    FROM admin_users
+    ORDER BY CASE role WHEN 'super' THEN 0 ELSE 1 END, id
+  `).all().map(presentAdmin);
+}
+
+export function createAdmin(db, input) {
+  const email = String(input?.email || "").trim().toLowerCase();
+  const password = String(input?.password || "");
+  if (!email.includes("@") || email.startsWith("@") || email.endsWith("@")) {
+    return { error: "Add a valid email.", status: 400 };
+  }
+  if (password.length < 8) return { error: "Use a password of at least 8 characters.", status: 400 };
   const existing = db.prepare("SELECT id FROM admin_users WHERE email = ?").get(email);
-  if (existing) return;
-  db.prepare("INSERT INTO admin_users (email, password_hash) VALUES (?, ?)").run(email, hashPassword(password));
+  if (existing) return { error: "That email is already an admin.", status: 400 };
+  const result = db.prepare("INSERT INTO admin_users (email, password_hash, role) VALUES (?, ?, 'admin')").run(email, hashPassword(password));
+  const admin = db.prepare("SELECT id, email, role, totp_enabled, created_at FROM admin_users WHERE id = ?").get(result.lastInsertRowid);
+  return { admin: presentAdmin(admin) };
+}
+
+function presentAdmin(row) {
+  return {
+    id: row.id,
+    email: row.email,
+    role: row.role === "super" ? "super" : "admin",
+    authenticator: Boolean(row.totp_enabled),
+    createdAt: row.created_at,
+  };
 }
 
 function secret() {

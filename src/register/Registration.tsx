@@ -146,15 +146,26 @@ const UPAY_METHODS: { id: UpayMethod; label: string; detail: string }[] = [
   { id: "paygate", label: "Other banks", detail: "Pay through PCHC Paygate." },
 ];
 
-type PaynamicsChannel = "paymaya_ph" | "grabpay_ph" | "bpi_online" | "ubp_online" | "br_landbank_ph";
+type PaynamicsMethodOption = {
+  code: string;
+  group: string;
+  label: string;
+  detail: string;
+};
 
-const PAYNAMICS_CHANNELS: { id: PaynamicsChannel; group: string; label: string; detail: string }[] = [
-  { id: "paymaya_ph", group: "E-Wallet", label: "Maya", detail: "Pay with Maya." },
-  { id: "grabpay_ph", group: "E-Wallet", label: "GrabPay", detail: "Pay with GrabPay." },
-  { id: "bpi_online", group: "Online banking", label: "BPI", detail: "Pay from a BPI account." },
-  { id: "ubp_online", group: "Online banking", label: "UnionBank Online", detail: "Pay from a UnionBank account." },
-  { id: "br_landbank_ph", group: "Online banking", label: "Landbank", detail: "Pay from a Landbank account." },
-];
+function readPaynamicsMethods(value: unknown): PaynamicsMethodOption[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const row = item as Record<string, unknown>;
+    const code = String(row.code || "").trim();
+    const label = String(row.label || "").trim();
+    const group = String(row.group || "").trim();
+    const detail = String(row.detail || "").trim();
+    if (!code || !label) return [];
+    return [{ code, group: group || "Paynamics", label, detail }];
+  });
+}
 
 type PayChannelCode = "upay" | "hitpay_qr" | "hitpay_online" | "paynamics";
 
@@ -219,14 +230,11 @@ function safePaynamicsUrl(value: string) {
   }
 }
 
-function payActionLabel(channel: PayChannelCode | "", amount: string, busy: boolean, paynamicsChannel: PaynamicsChannel = "paymaya_ph") {
+function payActionLabel(channel: PayChannelCode | "", amount: string, busy: boolean, paynamicsLabel = "") {
   if (busy) return channel === "upay" || !channel ? "Opening UnionBank" : "Opening payment";
   if (channel === "hitpay_qr") return `Pay with QR · ${amount}`;
   if (channel === "hitpay_online") return `Pay with online banking · ${amount}`;
-  if (channel === "paynamics") {
-    const label = PAYNAMICS_CHANNELS.find((item) => item.id === paynamicsChannel)?.label || "Paynamics";
-    return `Pay with ${label} · ${amount}`;
-  }
+  if (channel === "paynamics") return `Pay with ${paynamicsLabel || "Paynamics"} · ${amount}`;
   return `Pay with UnionBank · ${amount}`;
 }
 
@@ -240,7 +248,8 @@ function usePaymentChannels() {
   const [channels, setChannels] = useState<PayChannel[] | null>(null);
   const [channel, setChannel] = useState<PayChannelCode | "">("");
   const [paynamicsCheckout, setPaynamicsCheckout] = useState<PaynamicsCheckoutPublic>({ checkoutMode: "off" });
-  const [paynamicsChannel, setPaynamicsChannel] = useState<PaynamicsChannel>("paymaya_ph");
+  const [paynamicsMethods, setPaynamicsMethods] = useState<PaynamicsMethodOption[]>([]);
+  const [paynamicsChannel, setPaynamicsChannel] = useState("");
   useEffect(() => {
     let stop = false;
     fetch("/api/payment-channels")
@@ -251,6 +260,9 @@ function usePaymentChannels() {
         setChannels(list);
         setChannel((current) => (current && list.some((item: PayChannel) => item.code === current) ? current : list[0]?.code || ""));
         const paynamics = payload.paynamics && typeof payload.paynamics === "object" ? payload.paynamics : {};
+        const methods = readPaynamicsMethods(paynamics.methods);
+        setPaynamicsMethods(methods);
+        setPaynamicsChannel((current) => (current && methods.some((item) => item.code === current) ? current : methods[0]?.code || ""));
         setPaynamicsCheckout({
           checkoutMode: String(paynamics.checkoutMode || "off"),
           apiAdmissionAllowed: Boolean(paynamics.apiAdmissionAllowed),
@@ -258,13 +270,16 @@ function usePaymentChannels() {
         });
       })
       .catch(() => {
-        if (!stop) setChannels([]);
+        if (!stop) {
+          setChannels([]);
+          setPaynamicsMethods([]);
+        }
       });
     return () => {
       stop = true;
     };
   }, []);
-  return { channels, channel, setChannel, paynamicsCheckout, paynamicsChannel, setPaynamicsChannel };
+  return { channels, channel, setChannel, paynamicsCheckout, paynamicsMethods, paynamicsChannel, setPaynamicsChannel };
 }
 
 type Attendee = {
@@ -496,45 +511,19 @@ function PrimaryButton({
   );
 }
 
-function Choice({
-  title,
-  body,
-  emphasis,
-  disabled,
-  onClick,
-}: {
-  title: string;
-  body: string;
-  emphasis?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-}) {
+function AudienceCard({ title, body, onClick }: { title: string; body: string; onClick: () => void }) {
   return (
     <button
       type="button"
-      disabled={disabled}
       onClick={onClick}
-      className={`flex items-center justify-between gap-3 rounded-[14px] bg-white p-4 text-left disabled:cursor-not-allowed ${disabled ? "border border-[#E4E1DC]" : emphasis ? "border-2 border-[#D0202E]" : "border border-[#D9D5CF]"}`}
+      className="flex w-full items-center justify-between gap-3 rounded-[14px] border-2 border-[#CF2030] bg-white px-4 py-3.5 text-left"
     >
-      <span className="flex flex-col gap-1">
-        <span className={`text-base font-bold ${disabled ? "text-[#8E8E96]" : ""}`}>{title}</span>
-        <span className="text-sm leading-snug text-[#5C5C63]">{body}</span>
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-[16px] font-bold leading-snug text-black">{title}</span>
+        <span className="text-[14px] leading-snug text-[#64666A]">{body}</span>
       </span>
-      <span aria-hidden="true" className={`text-xl font-bold ${disabled ? "text-[#C8C4BE]" : emphasis ? "text-[#D0202E]" : "text-[#5C5C63]"}`}>
-        →
-      </span>
+      <span aria-hidden="true" className="shrink-0 text-[22px] leading-none text-[#CF2030]">→</span>
     </button>
-  );
-}
-
-function ClosedChoice({ title, body }: { title: string; body: string }) {
-  return (
-    <div aria-disabled="true" className="flex items-center gap-3 rounded-[14px] border border-dashed border-[#D9D5CF] bg-[#EFECE7] p-4 text-[#8E8E96]">
-      <span className="flex flex-col gap-1">
-        <span className="text-base font-bold">{title}</span>
-        <span className="text-sm leading-snug">{body}</span>
-      </span>
-    </div>
   );
 }
 
@@ -663,7 +652,7 @@ function RegistrationWizard() {
   const [memberTest, setMemberTest] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [method, setMethod] = useState<UpayMethod>("instapay");
-  const { channels, channel, setChannel, paynamicsCheckout, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
+  const { channels, channel, setChannel, paynamicsCheckout, paynamicsMethods, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
   const [checkoutReference, setCheckoutReference] = useState("");
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
@@ -1088,6 +1077,10 @@ function RegistrationWizard() {
       setPayError(`Paynamics checkout is not enabled on this server${reason}. See docs/paynamics-staging.md for required env vars.`);
       return;
     }
+    if (peso && channel === "paynamics" && !paynamicsChannel) {
+      setPayError("Choose a Paynamics option.");
+      return;
+    }
     if (peso && !channel) return;
     const paynamics = peso && channel === "paynamics";
     const hitpay = peso && channel && channel !== "paynamics" ? hitpayApiChannel(channel) : "";
@@ -1209,37 +1202,69 @@ function RegistrationWizard() {
 
   if (step === "start") {
     const localTier = tierFor(today, false);
+    const internationalOnSale = today >= "2027-01-01" && today <= "2027-05-31";
+    const closedLines = [
+      today < "2027-01-01" ? "International delegates open Jan 1." : "",
+      !guestsOpen ? "Guests open Feb 1." : "",
+    ].filter(Boolean);
     return (
-      <Frame label="Registration">
-        <div className="flex flex-col gap-2">
-          <p className="m-0 text-xs font-bold tracking-[0.16em] text-[#A8131F] uppercase">IBMC 2027 · AMPLIFY</p>
-          <h1 className="m-0 font-archivo text-[32px] leading-[1.08] font-extrabold">Get your seat</h1>
-          <p className="m-0 text-[15px] leading-normal text-[#5C5C63]">June 16–17, 2027 · Newport Performing Arts Theater, Pasay City</p>
+      <div className="scroll-wrapper min-h-svh bg-[#F2F2F2] font-sans text-black">
+        <header className="border-b border-[#C8C8C8] bg-white">
+          <div className="mx-auto flex w-full max-w-[480px] items-center gap-3 px-5 py-3.5">
+            <a href="/" aria-label="BNI" className="shrink-0">
+              <img src="/assets/bni-logo-white.png" alt="" className="h-8 w-auto brightness-0" />
+            </a>
+            <span aria-hidden="true" className="h-5 w-px shrink-0 bg-[#C8C8C8]" />
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-[16px] font-bold leading-none text-black">IBMC 2027</span>
+              <span className="text-[12px] leading-none whitespace-nowrap text-[#64666A]">June 16–17, 2027 · Newport, Pasay City</span>
+            </span>
+          </div>
+        </header>
+        <div className="mx-auto w-full max-w-[480px] px-5 py-6">
+          {localTier ? <StartTierCard tier={localTier} /> : <p className="m-0 text-[15px]">Registration closed on May 31, 2027.</p>}
+          <h1 className="m-0 mt-6 text-[22px] font-bold leading-tight">Who's registering?</h1>
+          <div className="mt-3 flex flex-col gap-3">
+            <AudienceCard title="I'm a BNI Philippines member" body="We'll fill in your details." onClick={() => choose("member")} />
+            {internationalOnSale ? (
+              <AudienceCard title="I'm an international delegate" body="Joining from outside the Philippines. Priced in USD." onClick={() => choose("international")} />
+            ) : null}
+            {guestsOpen ? (
+              <AudienceCard title="I'm a guest" body="New to BNI? You're welcome here." onClick={() => choose("guest")} />
+            ) : null}
+          </div>
+          {closedLines.length ? (
+            <p className="m-0 mt-3 text-[13px] leading-normal text-[#64666A]">
+              {closedLines.map((line) => (
+                <span key={line} className="block">{line}</span>
+              ))}
+            </p>
+          ) : null}
+          <div className="mt-6 border-t border-[#C8C8C8] pt-5 text-center text-[14px] leading-normal text-[#64666A]">
+            <p className="m-0">
+              Already registered?{" "}
+              <button type="button" className="font-semibold text-[#CF2030] no-underline" onClick={() => { setLookup(""); setManagedRecord(null); setStep("manage"); }}>
+                Manage my registration
+              </button>
+            </p>
+            <p className="m-0 mt-1">
+              Need help? Email{" "}
+              <a href="mailto:helpdesk@bni.ph" className="font-semibold text-[#CF2030] no-underline">helpdesk@bni.ph</a>
+              <br />
+              or visit{" "}
+              <a href="https://helpdesk.bni.ph" target="_blank" rel="noreferrer" className="font-semibold text-[#CF2030] no-underline">helpdesk.bni.ph</a>
+            </p>
+          </div>
+          {(import.meta.env.DEV && testTicketOpen) || testsOpen ? (
+            <div className="mt-6 flex flex-col gap-3">
+              {import.meta.env.DEV && testTicketOpen ? <AudienceCard title="Test ticket · ₱10" body="Available now, for a local payment test." onClick={startTest} /> : null}
+              {testsOpen ? <AudienceCard title="Staging test · ₱100 full" body="One ₱100 payment. For staging Paynamics checkout before public ticket windows open." onClick={startFullPaymentTest} /> : null}
+              {testsOpen ? <AudienceCard title="Staging test · ₱200 installment" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." onClick={startInstallmentTest} /> : null}
+              {testsOpen ? <AudienceCard title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." onClick={startMemberTest} /> : null}
+            </div>
+          ) : null}
         </div>
-        {localTier ? <PriceStrip tier={localTier} /> : <p className="m-0 text-[15px]">Registration closed on May 31, 2027.</p>}
-        <h2 className="m-0 mt-1.5 text-[17px] font-bold">Who's registering?</h2>
-        {import.meta.env.DEV && testTicketOpen ? <Choice title="Test ticket · ₱10" body="Available now, for a local payment test." emphasis onClick={startTest} /> : null}
-        {testsOpen ? <Choice title="Staging test · ₱100 full" body="One ₱100 payment. For staging Paynamics checkout before public ticket windows open." emphasis onClick={startFullPaymentTest} /> : null}
-        {testsOpen ? <Choice title="Staging test · ₱200 installment" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." emphasis onClick={startInstallmentTest} /> : null}
-        <Choice title={liveCopy ? "I'm a BNI Philippines Member" : "I'm a BNI member"} body="Quick registration. We'll fill in your details." emphasis onClick={() => choose("member")} />
-        {testsOpen ? <Choice title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." emphasis onClick={startMemberTest} /> : null}
-        {guestsOpen ? (
-          <Choice title={liveCopy ? "I'm a Guest (Non BNI Member)" : "I'm a guest"} body="New to BNI? You're welcome here." onClick={() => choose("guest")} />
-        ) : (
-          <ClosedChoice title={liveCopy ? "I'm a Guest (Non BNI Member)" : "I'm a guest"} body="Opens February 1, 2027" />
-        )}
-        {internationalOpen ? (
-          <Choice title={liveCopy ? "International Delegate" : "International delegate"} body="Joining from outside the Philippines. Priced in USD." onClick={() => choose("international")} />
-        ) : (
-          <ClosedChoice title="International Delegate" body="Opens January 1, 2027" />
-        )}
-        <p className="m-0 mt-auto text-center text-sm text-[#5C5C63]">
-          Already registered?{" "}
-          <button type="button" className="font-semibold text-[#A8131F]" onClick={() => { setLookup(""); setManagedRecord(null); setStep("manage"); }}>
-            Manage my registration
-          </button>
-        </p>
-      </Frame>
+      </div>
     );
   }
 
@@ -1644,13 +1669,14 @@ function RegistrationWizard() {
                 !charging.onSale
                 || saving
                 || (charging.currency === "PHP" && !channel)
+                || (charging.currency === "PHP" && channel === "paynamics" && !paynamicsChannel)
                 || Boolean(turnstileSiteKey && !turnstileToken)
               }
               onClick={pay}
             >
               {charging.onSale
                 ? charging.currency === "PHP"
-                  ? payActionLabel(channel, money(dueToday, charging.currency), saving, paynamicsChannel)
+                  ? payActionLabel(channel, money(dueToday, charging.currency), saving, paynamicsMethods.find((item) => item.code === paynamicsChannel)?.label || "")
                   : `Submit registration · ${money(dueToday, charging.currency)} due`
                 : `Opens ${charging.opensLabel}`}
             </PrimaryButton>
@@ -1727,6 +1753,7 @@ function RegistrationWizard() {
               onChannel={setChannel}
               method={method}
               onMethod={setMethod}
+              paynamicsMethods={paynamicsMethods}
               paynamicsChannel={paynamicsChannel}
               onPaynamicsChannel={setPaynamicsChannel}
               paynamicsCheckout={paynamicsCheckout}
@@ -1813,22 +1840,37 @@ function RegistrationWizard() {
   return null;
 }
 
-function PriceStrip({ tier }: { tier: Tier }) {
-  const from = tier.installmentCents ? money(tier.rows[0]?.amountCents || tier.installmentCents, tier.currency) : null;
+function tierDates(tier: Tier) {
+  if (tier.code === "first_mover") return "Nov 11 to Nov 30, 2026";
+  if (tier.code === "early_bird") return "Dec 1, 2026 to Jan 31, 2027";
+  if (tier.code === "regular") return "Feb 1 to May 31, 2027";
+  return tier.windowLabel;
+}
+
+function tierSavings(tier: Tier) {
+  const saved = tier.saveLabel?.match(/Save\s+(.+?)\s+against\s+Regular/i);
+  return saved ? `Save ${saved[1]} vs Regular` : null;
+}
+
+function StartTierCard({ tier }: { tier: Tier }) {
+  const savings = tierSavings(tier);
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[14px] bg-[#141416] px-4 py-3.5 text-[#F6F4F1]">
-      <div className="flex flex-col gap-0.5">
-        <span className="text-xs font-bold tracking-[0.12em] text-[#FF4D5A] uppercase">{tier.name} · {tier.windowLabel}</span>
-        <MoneyText text={money(tier.fullCents, tier.currency)} className="font-archivo text-2xl font-extrabold" />
+    <article className="overflow-hidden rounded-[16px] border-2 border-[#CF2030] bg-white">
+      <div className="bg-[#CF2030] px-5 py-4 text-white">
+        <p className="m-0 text-[20px] font-bold uppercase leading-none">{tier.name}</p>
+        <p className="m-0 mt-1.5 text-[14px] font-semibold leading-none">{tierDates(tier)}</p>
       </div>
-      {from ? (
-        <span className="text-right text-[13px] leading-snug text-[#C9C7C2]">
-          or {money(tier.installmentCents || 0, tier.currency)} in installments,<br />from {from} today
-        </span>
-      ) : (
-        <span className="text-right text-[13px] leading-snug text-[#C9C7C2]">One payment</span>
-      )}
-    </div>
+      <div className="px-5 py-4">
+        <p className="m-0 text-[40px] font-bold leading-none text-black">
+          <MoneyText text={money(tier.fullCents, tier.currency)} />
+        </p>
+        {savings ? (
+          <p className="m-0 mt-1.5 text-[15px] font-semibold leading-none text-[#CF2030]">
+            <MoneyText text={savings} />
+          </p>
+        ) : null}
+      </div>
+    </article>
   );
 }
 
@@ -1856,6 +1898,7 @@ function PaymentChoices({
   onChannel,
   method,
   onMethod,
+  paynamicsMethods,
   paynamicsChannel,
   onPaynamicsChannel,
   paynamicsCheckout,
@@ -1865,8 +1908,9 @@ function PaymentChoices({
   onChannel: (channel: PayChannelCode) => void;
   method: UpayMethod;
   onMethod: (method: UpayMethod) => void;
-  paynamicsChannel: PaynamicsChannel;
-  onPaynamicsChannel: (channel: PaynamicsChannel) => void;
+  paynamicsMethods: PaynamicsMethodOption[];
+  paynamicsChannel: string;
+  onPaynamicsChannel: (channel: string) => void;
   paynamicsCheckout?: PaynamicsCheckoutPublic;
 }) {
   if (channels === null) return <p className="m-0 text-sm text-[#5C5C63]">Loading payment options.</p>;
@@ -1893,7 +1937,7 @@ function PaymentChoices({
       {channel === "upay" ? <UpayMethods method={method} onChange={onMethod} /> : null}
       {channel === "paynamics" ? (
         <>
-          <PaynamicsMethods channel={paynamicsChannel} onChange={onPaynamicsChannel} />
+          <PaynamicsMethods methods={paynamicsMethods} channel={paynamicsChannel} onChange={onPaynamicsChannel} />
           {paynamicsCheckout?.checkoutMode === "off" ? (
             <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] leading-normal text-[#A8131F]">
               Paynamics checkout is not enabled on this server
@@ -1911,18 +1955,21 @@ function PaymentChoices({
   );
 }
 
-function PaynamicsMethods({ channel, onChange }: { channel: PaynamicsChannel; onChange: (channel: PaynamicsChannel) => void }) {
+function PaynamicsMethods({ methods, channel, onChange }: { methods: PaynamicsMethodOption[]; channel: string; onChange: (channel: string) => void }) {
+  if (!methods.length) {
+    return <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] leading-normal text-[#A8131F]">No Paynamics options are turned on.</p>;
+  }
   let group = "";
   return (
     <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF] bg-white">
-      {PAYNAMICS_CHANNELS.map((item) => {
+      {methods.map((item) => {
         const heading = item.group !== group;
         group = item.group;
         return (
-          <div key={item.id}>
+          <div key={item.code}>
             {heading ? <p className="m-0 border-t border-[#E4E1DC] px-4 pt-3 text-xs font-bold tracking-[0.12em] text-[#A8131F] uppercase first:border-t-0">{item.group}</p> : null}
-            <label className={`flex items-start gap-3 px-4 py-3 ${channel === item.id ? "bg-[#FBE9EA]" : ""}`}>
-              <input type="radio" name="paynamics-channel" className="mt-1 h-5 w-5 accent-[#D0202E]" checked={channel === item.id} onChange={() => onChange(item.id)} />
+            <label className={`flex items-start gap-3 px-4 py-3 ${channel === item.code ? "bg-[#FBE9EA]" : ""}`}>
+              <input type="radio" name="paynamics-channel" className="mt-1 h-5 w-5 accent-[#D0202E]" checked={channel === item.code} onChange={() => onChange(item.code)} />
               <span className="flex flex-col gap-0.5">
                 <span className="text-[15px] font-semibold">{item.label}</span>
                 <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{item.detail}</span>
@@ -2491,7 +2538,7 @@ function Manage({
   const [busy, setBusy] = useState(false);
   const { secondsLeft: resendSeconds, start: startResendCooldown, reset: resetResendCooldown } = useResendCooldown();
   const [method, setMethod] = useState<UpayMethod>("instapay");
-  const { channels, channel, setChannel, paynamicsCheckout, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
+  const { channels, channel, setChannel, paynamicsCheckout, paynamicsMethods, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
   const [payingInstallment, setPayingInstallment] = useState(false);
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
@@ -2761,6 +2808,10 @@ function Manage({
       setError(`Paynamics checkout is not enabled on this server${reason}.`);
       return;
     }
+    if (channel === "paynamics" && !paynamicsChannel) {
+      setError("Choose a Paynamics option.");
+      return;
+    }
     const paynamics = channel === "paynamics";
     const hitpay = paynamics ? "" : hitpayApiChannel(channel);
     setBusy(true);
@@ -2926,17 +2977,18 @@ function Manage({
                   onChannel={setChannel}
                   method={method}
                   onMethod={setMethod}
+                  paynamicsMethods={paynamicsMethods}
                   paynamicsChannel={paynamicsChannel}
                   onPaynamicsChannel={setPaynamicsChannel}
                   paynamicsCheckout={paynamicsCheckout}
                 />
                 <button
                   type="button"
-                  disabled={busy || !channel}
+                  disabled={busy || !channel || (channel === "paynamics" && !paynamicsChannel)}
                   onClick={startPayment}
                   className="rounded-full bg-[#D0202E] px-4 py-3.5 text-base font-bold text-white disabled:bg-[#E4A0A6]"
                 >
-                  {payActionLabel(channel, money(due.amountCents, record.currency), busy, paynamicsChannel)}
+                  {payActionLabel(channel, money(due.amountCents, record.currency), busy, paynamicsMethods.find((item) => item.code === paynamicsChannel)?.label || "")}
                 </button>
                 <button
                   type="button"

@@ -65,6 +65,7 @@ CREATE TABLE IF NOT EXISTS admin_users (
   id INTEGER PRIMARY KEY,
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'admin' CHECK (role IN ('super', 'admin')),
   totp_secret TEXT,
   totp_enabled INTEGER NOT NULL DEFAULT 0 CHECK (totp_enabled IN (0, 1)),
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -257,6 +258,11 @@ CREATE TABLE IF NOT EXISTS payment_channels (
   enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
   custom_label TEXT,
   custom_note TEXT
+);
+
+CREATE TABLE IF NOT EXISTS paynamics_methods (
+  code TEXT PRIMARY KEY,
+  enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1))
 );
 
 CREATE TABLE IF NOT EXISTS hitpay_payments (
@@ -502,6 +508,7 @@ function migrate(db) {
   const adminColumns = new Set(db.prepare("PRAGMA table_info(admin_users)").all().map((column) => column.name));
   if (!adminColumns.has("totp_secret")) db.exec("ALTER TABLE admin_users ADD COLUMN totp_secret TEXT");
   if (!adminColumns.has("totp_enabled")) db.exec("ALTER TABLE admin_users ADD COLUMN totp_enabled INTEGER NOT NULL DEFAULT 0");
+  if (!adminColumns.has("role")) db.exec("ALTER TABLE admin_users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'");
   const registrationColumns = new Set(db.prepare("PRAGMA table_info(registrations)").all().map((column) => column.name));
   if (!registrationColumns.has("phone_key")) db.exec("ALTER TABLE registrations ADD COLUMN phone_key TEXT");
   const memberColumns = new Set(db.prepare("PRAGMA table_info(members)").all().map((column) => column.name));

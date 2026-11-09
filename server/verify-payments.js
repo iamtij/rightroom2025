@@ -471,6 +471,38 @@ try {
   assert.equal(confirmed.status, 200);
   const cookie = (confirmed.headers.get("set-cookie") || "").split(";")[0];
   assert.ok(cookie.startsWith("ibmc_admin="));
+  const me = await fetch(`${base}/api/admin/me`, { headers: { cookie } });
+  const meBody = await me.json();
+  assert.equal(me.status, 200);
+  assert.equal(meBody.email, "audit@example.com");
+  assert.equal(meBody.role, "super");
+  const createdAdmin = await fetch(`${base}/api/admin/admins`, {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "door@example.com", password: "door-pass-8" }),
+  });
+  const createdAdminBody = await createdAdmin.json();
+  assert.equal(createdAdmin.status, 201);
+  assert.equal(createdAdminBody.email, "door@example.com");
+  assert.equal(createdAdminBody.role, "admin");
+  assert.equal(createdAdminBody.authenticator, false);
+  const shortPassword = await fetch(`${base}/api/admin/admins`, {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "short@example.com", password: "short" }),
+  });
+  assert.equal(shortPassword.status, 400);
+  const duplicateAdmin = await fetch(`${base}/api/admin/admins`, {
+    method: "POST",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ email: "door@example.com", password: "door-pass-8" }),
+  });
+  assert.equal(duplicateAdmin.status, 400);
+  const adminList = await fetch(`${base}/api/admin/admins`, { headers: { cookie } });
+  const adminListBody = await adminList.json();
+  assert.equal(adminList.status, 200);
+  assert.ok(adminListBody.some((row) => row.email === "audit@example.com" && row.role === "super"));
+  assert.ok(adminListBody.some((row) => row.email === "door@example.com" && row.role === "admin"));
   const renamed = await fetch(`${base}/api/admin/payment-channels`, {
     method: "PATCH",
     headers: { cookie, "Content-Type": "application/json" },
@@ -630,6 +662,14 @@ try {
     body: JSON.stringify({ setupToken: secondSetup.setupToken, code: currentTotp(secondSetup.secret) }),
   });
   const secondCookie = (secondConfirm.headers.get("set-cookie") || "").split(";")[0];
+  const secondMe = await fetch(`${base}/api/admin/me`, { headers: { cookie: secondCookie } });
+  const secondMeBody = await secondMe.json();
+  assert.equal(secondMe.status, 200);
+  assert.equal(secondMeBody.role, "admin");
+  const hiddenAdmins = await fetch(`${base}/api/admin/admins`, { headers: { cookie: secondCookie } });
+  assert.equal(hiddenAdmins.status, 403);
+  const staffDashboard = await fetch(`${base}/api/admin/dashboard`, { headers: { cookie: secondCookie } });
+  assert.equal(staffDashboard.status, 200);
   const requested = await fetch(`${base}/api/admin/registrations/${provedBody.reference}/comp`, {
     method: "POST",
     headers: { cookie },
@@ -658,6 +698,7 @@ try {
   const audit = check.prepare("SELECT action, target, amount_cents, admin_id FROM admin_audit ORDER BY id").all();
   assert.ok(audit.some((row) => row.action === "registration.payment" && row.target === body.reference && row.amount_cents === 1_200_000 && row.admin_id));
   assert.ok(audit.some((row) => row.action === "registration.list" && row.target === "registrations"));
+  assert.ok(audit.some((row) => row.action === "admin.create" && row.target === "door@example.com"));
   const payment = check.prepare("SELECT admin_user_id, method FROM payments WHERE registration_id = ?").get(registrationId);
   assert.equal(payment.method, "admin");
   assert.equal(payment.admin_user_id, audit.find((row) => row.action === "registration.payment").admin_id);
