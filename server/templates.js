@@ -2,6 +2,15 @@ import QRCode from "qrcode";
 import { daysLabel, formatLongDate, formatMoney } from "./time.js";
 
 const EVENT = "June 16–17, 2027 · Newport Performing Arts Theater, Pasay City";
+const AMPLIFY_LOGO = "https://ibmcph.com/assets/amplify-logo-white.png";
+
+function brandHeader() {
+  return `<tr><td style="background:#0E0E10;padding:22px 32px 18px;">
+          <div style="font-family:Arial,sans-serif;font-size:13px;font-weight:700;letter-spacing:0.16em;color:#FFFFFF;">IBMC 2027</div>
+          <img src="${AMPLIFY_LOGO}" width="240" height="35" alt="AMPLIFY" style="display:block;margin-top:10px;border:0;width:240px;max-width:100%;height:auto;">
+        </td></tr>
+        <tr><td style="height:4px;background:#D0202E;font-size:0;line-height:0;">&nbsp;</td></tr>`;
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -22,11 +31,7 @@ function shell({ headline, intro, body, action }) {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F6F4F1;">
     <tr><td align="center" style="padding:28px 16px;">
       <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;">
-        <tr><td style="background:#0E0E10;padding:28px 32px;">
-          <div style="font-family:Arial,sans-serif;font-size:22px;font-weight:800;letter-spacing:0.04em;color:#FFFFFF;">IBMC <span style="color:#FF4D5A;">2027</span></div>
-          <div style="margin-top:8px;font-family:Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.18em;color:#FF4D5A;">AMPLIFY</div>
-        </td></tr>
-        <tr><td style="height:4px;background:#D0202E;font-size:0;line-height:0;">&nbsp;</td></tr>
+        ${brandHeader()}
         <tr><td style="background:#FFFFFF;padding:36px 32px;font-family:Arial,sans-serif;color:#141416;">
           <h1 style="margin:0;font-size:30px;line-height:1.15;font-weight:800;">${headline}</h1>
           <p style="margin:16px 0 0;font-size:16px;line-height:1.55;color:#3A3A40;">${intro}</p>
@@ -74,12 +79,7 @@ export function renderOtpEmail({ code, purpose = "registration" }) {
   <tr>
     <td align="center" style="padding:32px 16px;">
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:520px;">
-        <tr>
-          <td style="background:#141416;padding:16px 28px;border-bottom:4px solid #D0202E;font-family:Arial,Helvetica,sans-serif;">
-            <span style="font-size:16px;font-weight:bold;color:#FFFFFF;letter-spacing:0.02em;">IBMC 2027</span>
-            <span style="font-size:16px;font-weight:bold;color:#FF4D5A;letter-spacing:0.08em;">&nbsp;AMPLIFY</span>
-          </td>
-        </tr>
+        ${brandHeader()}
         <tr>
           <td style="background:#FFFFFF;padding:32px 28px 28px;font-family:Arial,Helvetica,sans-serif;color:#141416;">
             <p style="margin:0 0 20px;font-size:16px;line-height:1.5;color:#2A2A2E;">${escapeHtml(lead)}</p>

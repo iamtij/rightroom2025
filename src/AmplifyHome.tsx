@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type TransitionEvent } from "react";
 import FaqList from "./FaqList.tsx";
 
 const FIRST_MOVER_OPENS = new Date("2026-11-11T00:00:00+08:00");
@@ -50,8 +50,8 @@ const STORIES = [
   },
 ];
 
-const ROW_A = ["Accountants", "Architects", "Caterers", "Insurance", "IT services", "Lawyers", "Logistics", "Printing"];
-const ROW_B = ["Real estate", "Events", "Dentists", "Interior design", "Photography", "Marketing", "Construction", "Travel"];
+const ROW_A = ["Accountants", "Architects", "Caterers", "Insurance", "IT services", "Lawyers", "Logistics", "Printing", "Retail", "Health", "Food", "Manufacturing", "Coaching", "Recruitment", "Consulting", "Security", "Personal care"];
+const ROW_B = ["Real estate", "Events", "Dentists", "Interior design", "Photography", "Marketing", "Construction", "Travel", "Automotive", "Transport", "Entertainment", "Nonprofits", "Agriculture", "Sports", "Veterinary", "Repair", "Telecom"];
 
 const PROBLEM_BARS = Array.from({ length: 42 }, (_, i) => {
   const t = i / 41;
@@ -219,14 +219,19 @@ function FirstMoverTimer({ now }: { now: Date }) {
 }
 
 function Marquee({ items, reverse = false, className = "" }: { items: string[]; reverse?: boolean; className?: string }) {
-  const line = [...items, ...items];
-  return (
-    <div className={`mq flex w-max ${reverse ? "mq-right" : ""} ${className}`}>
-      {line.map((item, i) => (
-        <span key={`${item}-${i}`} className="whitespace-nowrap pr-11">
+  const row = (copy: number) => (
+    <span className="flex shrink-0" aria-hidden={copy === 1}>
+      {items.map((item) => (
+        <span key={`${copy}-${item}`} className="whitespace-nowrap pr-11">
           {item}
         </span>
       ))}
+    </span>
+  );
+  return (
+    <div className={`mq flex w-max ${reverse ? "mq-right" : ""} ${className}`}>
+      {row(0)}
+      {row(1)}
     </div>
   );
 }
@@ -457,57 +462,68 @@ const AMPLIFY_LINES = ["Your Impact", "Relationships", "Your Business", "Your In
 
 function AmplifyCycle() {
   const measure = useRef<HTMLSpanElement>(null);
+  const resetting = useRef(false);
   const [index, setIndex] = useState(0);
   const [slot, setSlot] = useState(0);
-  const [slide, setSlide] = useState(true);
+  const [lineHeight, setLineHeight] = useState(0);
+  const [animate, setAnimate] = useState(true);
   const [reduce] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const lines = [...AMPLIFY_LINES, AMPLIFY_LINES[0]];
 
   useLayoutEffect(() => {
     const root = measure.current;
     if (!root) return;
-    const widths = [...root.querySelectorAll("span")].map((item) => item.getBoundingClientRect().width);
-    setSlot(Math.ceil(Math.max(...widths)));
+    const spans = [...root.querySelectorAll("span")];
+    setSlot(Math.ceil(Math.max(...spans.map((item) => item.getBoundingClientRect().width))));
+    setLineHeight(spans[0]?.getBoundingClientRect().height ?? 0);
   }, []);
 
   useEffect(() => {
     if (reduce) return;
     const id = window.setInterval(() => {
-      setSlide(true);
-      setIndex((value) => value + 1);
+      setAnimate(true);
+      setIndex((value) => (resetting.current || value >= AMPLIFY_LINES.length ? value : value + 1));
     }, 2200);
     return () => window.clearInterval(id);
   }, [reduce]);
 
-  useEffect(() => {
-    if (index !== AMPLIFY_LINES.length) return;
-    const id = window.setTimeout(() => {
-      setSlide(false);
-      setIndex(0);
-    }, 560);
-    return () => window.clearTimeout(id);
-  }, [index]);
+  useLayoutEffect(() => {
+    if (animate || index !== 0) return;
+    const id = window.requestAnimationFrame(() => {
+      resetting.current = false;
+      setAnimate(true);
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [animate, index]);
+
+  const finishLoop = (event: TransitionEvent<HTMLSpanElement>) => {
+    if (event.propertyName !== "transform" || index !== AMPLIFY_LINES.length) return;
+    resetting.current = true;
+    setAnimate(false);
+    setIndex(0);
+  };
 
   return (
     <p className="relative m-0 flex justify-center font-archivo text-[clamp(20px,2.04vw,29px)] font-bold leading-none text-[#CF2030]">
       <span ref={measure} aria-hidden="true" className="pointer-events-none absolute h-0 overflow-hidden opacity-0">
         {AMPLIFY_LINES.map((line) => (
-          <span key={line} className="block whitespace-nowrap">{line}</span>
+          <span key={line} className="block whitespace-nowrap leading-[1.2]">{line}</span>
         ))}
       </span>
       <span className="inline-flex items-center gap-[0.35em] whitespace-nowrap">
         <span>Amplify</span>
-        <span className="inline-block h-[1.2em] overflow-hidden text-left" style={{ width: slot || undefined }}>
+        <span className="inline-block overflow-hidden text-left" style={{ width: slot || undefined, height: lineHeight || "1.2em" }}>
           <span
             aria-hidden="true"
             className="block"
+            onTransitionEnd={finishLoop}
             style={{
-              transform: `translateY(calc(${index} * -1.2em))`,
-              transition: slide && !reduce ? "transform 0.55s cubic-bezier(0.22, 1, 0.36, 1)" : "none",
+              transform: lineHeight ? `translateY(${-index * lineHeight}px)` : undefined,
+              transition: animate && !reduce ? "transform 0.55s cubic-bezier(0.22, 1, 0.36, 1)" : "none",
             }}
           >
             {lines.map((line, i) => (
-              <span key={`${line}-${i}`} className="block h-[1.2em] leading-[1.2] whitespace-nowrap">{line}</span>
+              <span key={`${line}-${i}`} className="block whitespace-nowrap leading-[1.2]" style={{ height: lineHeight || "1.2em" }}>{line}</span>
             ))}
           </span>
         </span>
