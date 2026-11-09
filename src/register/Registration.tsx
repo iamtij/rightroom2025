@@ -407,52 +407,78 @@ function MoneyText({ text, className = "" }: { text: string; className?: string 
   );
 }
 
-function Brand() {
+function EventHeader() {
   return (
-    <a href="/" className="flex items-center gap-2 text-[#141416] no-underline">
-      <img src="/assets/bni-philippines-mark.png" alt="BNI Philippines" className="h-8 w-auto brightness-0" />
-      <span className="font-archivo text-base font-extrabold tracking-[0.04em]">
-        IBMC <span className="text-[#D0202E]">2027</span>
-      </span>
-    </a>
+    <header className="border-b border-[#C8C8C8] bg-white">
+      <div className="mx-auto flex w-full max-w-[480px] items-center gap-3 px-5 py-3.5">
+        <a href="/" aria-label="BNI" className="shrink-0">
+          <img src="/assets/bni-logo-white.png" alt="" className="h-8 w-auto brightness-0" />
+        </a>
+        <span aria-hidden="true" className="h-5 w-px shrink-0 bg-[#C8C8C8]" />
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-[16px] font-bold leading-none text-black">IBMC 2027</span>
+          <span className="text-[12px] leading-none whitespace-nowrap text-[#64666A]">June 16–17, 2027 · Newport, Pasay City</span>
+        </span>
+      </div>
+    </header>
+  );
+}
+
+function RegistrationFooter({ onManage }: { onManage?: () => void }) {
+  return (
+    <div className="border-t border-[#C8C8C8] pt-5 text-center text-[14px] leading-normal text-[#64666A]">
+      {onManage ? (
+        <p className="m-0">
+          Already registered?{" "}
+          <button type="button" className="font-semibold text-[#CF2030] no-underline" onClick={onManage}>
+            Manage my registration
+          </button>
+        </p>
+      ) : null}
+      <p className={`m-0 ${onManage ? "mt-1" : ""}`}>
+        Need help? Email{" "}
+        <a href="mailto:helpdesk@bni.ph" className="font-semibold text-[#CF2030] no-underline">helpdesk@bni.ph</a>
+        <br />
+        or visit{" "}
+        <a href="https://helpdesk.bni.ph" target="_blank" rel="noreferrer" className="font-semibold text-[#CF2030] no-underline">helpdesk.bni.ph</a>
+      </p>
+    </div>
   );
 }
 
 function Steps({ step }: { step: number }) {
   return (
-    <div aria-hidden="true" className="flex gap-1 px-5 pt-3">
+    <div aria-hidden="true" className="mb-5 flex gap-1">
       {[1, 2, 3, 4].map((item) => (
-        <span key={item} className={`h-1 flex-1 rounded-sm ${item <= step ? "bg-[#D0202E]" : "bg-[#E4E1DC]"}`} />
+        <span key={item} className={`h-1 flex-1 rounded-sm ${item <= step ? "bg-[#CF2030]" : "bg-[#C8C8C8]"}`} />
       ))}
     </div>
   );
 }
 
 function Frame({
-  label,
   step,
   children,
   footer,
+  onManage,
+  hideManage = false,
 }: {
-  label: string;
+  label?: string;
   step?: number;
   children: ReactNode;
   footer?: ReactNode;
+  onManage?: () => void;
+  hideManage?: boolean;
 }) {
   return (
-    <div className="scroll-wrapper bg-[#F6F4F1] font-sans text-[#141416]">
-      <div className="mx-auto flex min-h-full w-full max-w-[480px] flex-col">
-        <header className="flex items-center justify-between border-b border-[#E4E1DC] bg-[#FDFCFA] px-5 py-4">
-          <Brand />
-          <span className="text-[13px] text-[#5C5C63]">{label}</span>
-        </header>
+    <div className="scroll-wrapper min-h-svh bg-[#F2F2F2] font-sans text-black">
+      <EventHeader />
+      <div className="mx-auto w-full max-w-[480px] px-5 py-6">
         {step ? <Steps step={step} /> : null}
-        <main className="flex flex-1 flex-col gap-4 px-5 py-5">{children}</main>
-        <div className="mt-auto px-5 pt-2 pb-7">
-          {footer ? <div className="pb-4">{footer}</div> : null}
-          <p className="m-0 text-center text-sm leading-snug text-[#5C5C63]">
-            Need help? Email <a href="mailto:helpdesk@bni.ph" className="font-semibold text-[#A8131F]">helpdesk@bni.ph</a>, visit the <a href="https://helpdesk.bni.ph/" target="_blank" rel="noreferrer" className="font-semibold text-[#A8131F]">helpdesk</a>, or read the <a href="/faq" target="_blank" rel="noreferrer" className="font-semibold text-[#A8131F]">FAQ</a>.
-          </p>
+        <div className="flex flex-col gap-4">{children}</div>
+        {footer ? <div className="mt-6">{footer}</div> : null}
+        <div className="mt-6">
+          <RegistrationFooter onManage={hideManage ? undefined : onManage} />
         </div>
       </div>
     </div>
@@ -634,7 +660,9 @@ function membershipHoldNote(member: FoundMember, editing: boolean) {
 
 function RegistrationWizard() {
   const today = manilaDate();
-  const [step, setStep] = useState<Step>("start");
+  const [step, setStep] = useState<Step>(() => (
+    new URLSearchParams(window.location.search).get("manage") === "1" ? "manage" : "start"
+  ));
   const [attendee, setAttendee] = useState<Attendee | null>(null);
   const [lookup, setLookup] = useState("");
   const [searching, setSearching] = useState(false);
@@ -1200,6 +1228,12 @@ function RegistrationWizard() {
     }
   }
 
+  function openManage() {
+    setLookup("");
+    setManagedRecord(null);
+    setStep("manage");
+  }
+
   if (step === "start") {
     const localTier = tierFor(today, false);
     const internationalOnSale = today >= "2027-01-01" && today <= "2027-05-31";
@@ -1209,18 +1243,7 @@ function RegistrationWizard() {
     ].filter(Boolean);
     return (
       <div className="scroll-wrapper min-h-svh bg-[#F2F2F2] font-sans text-black">
-        <header className="border-b border-[#C8C8C8] bg-white">
-          <div className="mx-auto flex w-full max-w-[480px] items-center gap-3 px-5 py-3.5">
-            <a href="/" aria-label="BNI" className="shrink-0">
-              <img src="/assets/bni-logo-white.png" alt="" className="h-8 w-auto brightness-0" />
-            </a>
-            <span aria-hidden="true" className="h-5 w-px shrink-0 bg-[#C8C8C8]" />
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="text-[16px] font-bold leading-none text-black">IBMC 2027</span>
-              <span className="text-[12px] leading-none whitespace-nowrap text-[#64666A]">June 16–17, 2027 · Newport, Pasay City</span>
-            </span>
-          </div>
-        </header>
+        <EventHeader />
         <div className="mx-auto w-full max-w-[480px] px-5 py-6">
           {localTier ? <StartTierCard tier={localTier} /> : <p className="m-0 text-[15px]">Registration closed on May 31, 2027.</p>}
           <h1 className="m-0 mt-6 text-[22px] font-bold leading-tight">Who's registering?</h1>
@@ -1240,20 +1263,8 @@ function RegistrationWizard() {
               ))}
             </p>
           ) : null}
-          <div className="mt-6 border-t border-[#C8C8C8] pt-5 text-center text-[14px] leading-normal text-[#64666A]">
-            <p className="m-0">
-              Already registered?{" "}
-              <button type="button" className="font-semibold text-[#CF2030] no-underline" onClick={() => { setLookup(""); setManagedRecord(null); setStep("manage"); }}>
-                Manage my registration
-              </button>
-            </p>
-            <p className="m-0 mt-1">
-              Need help? Email{" "}
-              <a href="mailto:helpdesk@bni.ph" className="font-semibold text-[#CF2030] no-underline">helpdesk@bni.ph</a>
-              <br />
-              or visit{" "}
-              <a href="https://helpdesk.bni.ph" target="_blank" rel="noreferrer" className="font-semibold text-[#CF2030] no-underline">helpdesk.bni.ph</a>
-            </p>
+          <div className="mt-6">
+            <RegistrationFooter onManage={openManage} />
           </div>
           {(import.meta.env.DEV && testTicketOpen) || testsOpen ? (
             <div className="mt-6 flex flex-col gap-3">
@@ -1288,8 +1299,8 @@ function RegistrationWizard() {
               };
     return (
       <Frame
-        label="Step 1 of 4"
         step={1}
+        onManage={openManage}
         footer={member?.registered ? (
           <button type="button" className="block w-full text-center text-base font-bold text-[#A8131F]" onClick={() => setStep("manage")}>
             Manage my registration
@@ -1434,7 +1445,7 @@ function RegistrationWizard() {
             ? "Joining from outside the Philippines. Your ticket is priced in USD."
             : "New to BNI? You're welcome here.";
     return (
-      <Frame label="Step 1 of 4" step={1} footer={<PrimaryButton disabled={!detailsReady(attendee)} onClick={continueGuest}>Continue</PrimaryButton>}>
+      <Frame step={1} onManage={openManage} footer={<PrimaryButton disabled={!detailsReady(attendee)} onClick={continueGuest}>Continue</PrimaryButton>}>
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => { if (!memberPath) { setTestMode(false); setInstallmentTest(false); } setStep(memberPath ? "member" : "start"); }}>← Back</button>
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Your details</h1>
         <LevNote pose="smile" label="Lev smiling">{guestLine}</LevNote>
@@ -1494,8 +1505,8 @@ function RegistrationWizard() {
   if (step === "confirm" && attendee) {
     return (
       <Frame
-        label="Step 1 of 4"
         step={1}
+        onManage={openManage}
         footer={<PrimaryButton disabled={saving} onClick={saveConfirmedDetails}>{saving ? "Saving" : "Save and continue"}</PrimaryButton>}
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => { setGuestError(""); setStep("guest"); }}>← Back</button>
@@ -1523,8 +1534,8 @@ function RegistrationWizard() {
     const realTier = tier.code !== "test" && tier.code !== "test_50" && tier.code !== "test_100" && tier.code !== "test_200";
     return (
       <Frame
-        label="Step 2 of 4"
         step={2}
+        onManage={openManage}
         footer={<PrimaryButton onClick={continueTicket}>Continue to payment · {money(dueToday, charging?.currency || tier.currency)} today</PrimaryButton>}
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep(attendee.audience === "member" ? "member" : "guest")}>← Back</button>
@@ -1660,8 +1671,8 @@ function RegistrationWizard() {
     const laterCents = applied ? applied.laterCents : later.reduce((sum, row) => sum + row.amountCents, 0);
     return (
       <Frame
-        label="Step 3 of 4"
         step={3}
+        onManage={openManage}
         footer={
           <div className="flex flex-col gap-3">
             <PrimaryButton
@@ -1789,6 +1800,7 @@ function RegistrationWizard() {
           setPaynamicsSession(null);
           setStep("form");
         }}
+        onManage={openManage}
       />
     );
   }
@@ -1805,6 +1817,7 @@ function RegistrationWizard() {
         }}
         onLater={() => setStep("done")}
         onBack={() => setStep("pay")}
+        onManage={openManage}
       />
     );
   }
@@ -1821,6 +1834,7 @@ function RegistrationWizard() {
         }}
         onLater={() => setStep("done")}
         onBack={() => setStep("pay")}
+        onManage={openManage}
       />
     );
   }
@@ -2004,12 +2018,16 @@ function UpayPending({
   onUpdate,
   onLater,
   onBack,
+  onManage,
+  hideManage = false,
 }: {
   record: StoredRegistration;
   session: UpaySession;
   onUpdate: (registration: StoredRegistration, session: UpaySession) => void;
   onLater: () => void;
   onBack: () => void;
+  onManage?: () => void;
+  hideManage?: boolean;
 }) {
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
@@ -2048,8 +2066,9 @@ function UpayPending({
   const channel = UPAY_METHODS.find((item) => item.id === session.paymentMethod)?.label || "UnionBank";
   return (
     <Frame
-      label="Step 3 of 4"
       step={3}
+      onManage={onManage}
+      hideManage={hideManage}
       footer={
         <div className="flex flex-col gap-2.5">
           {session.paymentUrl ? (
@@ -2109,12 +2128,16 @@ function HitpayPending({
   onUpdate,
   onLater,
   onBack,
+  onManage,
+  hideManage = false,
 }: {
   record: StoredRegistration;
   session: HitpaySession;
   onUpdate: (registration: StoredRegistration, session: HitpaySession) => void;
   onLater: () => void;
   onBack: () => void;
+  onManage?: () => void;
+  hideManage?: boolean;
 }) {
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
@@ -2172,8 +2195,9 @@ function HitpayPending({
   const qrClosed = session.channel === "qr" && clock.expired && !showRefresh && session.status !== "paid";
   return (
     <Frame
-      label="Step 3 of 4"
       step={3}
+      onManage={onManage}
+      hideManage={hideManage}
       footer={
         <div className="flex flex-col gap-2.5">
           {session.channel === "online" && checkoutUrl && !clock.expired ? (
@@ -2240,12 +2264,16 @@ function PaynamicsPending({
   onUpdate,
   onLater,
   onBack,
+  onManage,
+  hideManage = false,
 }: {
   record: StoredRegistration;
   session: PaynamicsSession;
   onUpdate: (registration: StoredRegistration, session: PaynamicsSession) => void;
   onLater: () => void;
   onBack: () => void;
+  onManage?: () => void;
+  hideManage?: boolean;
 }) {
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState("");
@@ -2285,11 +2313,11 @@ function PaynamicsPending({
   }
 
   if (current.status === "paid") {
-    return <Confirmed record={record} onManage={onBack} />;
+    return <Confirmed record={record} onManage={onManage || onBack} hideManage={hideManage} />;
   }
 
   return (
-    <Frame label="Payment">
+    <Frame onManage={onManage} hideManage={hideManage}>
       <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Pay with Paynamics</h1>
       <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">
         {current.settlementDisabled
@@ -2353,7 +2381,7 @@ function PaynamicsReturn({ requestId }: { requestId: string }) {
   }, [requestId]);
 
   if (record && session?.status === "paid") {
-    return <Confirmed record={record} onManage={() => { window.location.href = "/register"; }} />;
+    return <Confirmed record={record} onManage={() => { window.location.assign("/register?manage=1"); }} />;
   }
   if (record && session) {
     return (
@@ -2366,11 +2394,12 @@ function PaynamicsReturn({ requestId }: { requestId: string }) {
         }}
         onLater={() => { window.location.href = "/register"; }}
         onBack={() => { window.location.href = "/register"; }}
+        onManage={() => { window.location.assign("/register?manage=1"); }}
       />
     );
   }
   return (
-    <Frame label="Payment">
+    <Frame onManage={() => { window.location.assign("/register?manage=1"); }}>
       <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Checking payment status</h1>
       <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">Your return from Paynamics does not confirm payment. This page waits for Paynamics&apos; signed server notification.</p>
       {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
@@ -2404,7 +2433,7 @@ function HitpayReturn({ sessionId }: { sessionId: string }) {
   }, [sessionId]);
 
   if (record && session?.status === "paid") {
-    return <Confirmed record={record} onManage={() => { window.location.href = "/register"; }} />;
+    return <Confirmed record={record} onManage={() => { window.location.assign("/register?manage=1"); }} />;
   }
   if (record && session) {
     return (
@@ -2417,11 +2446,12 @@ function HitpayReturn({ sessionId }: { sessionId: string }) {
         }}
         onLater={() => { window.location.href = "/register"; }}
         onBack={() => { window.location.href = "/register"; }}
+        onManage={() => { window.location.assign("/register?manage=1"); }}
       />
     );
   }
   return (
-    <Frame label="Payment">
+    <Frame onManage={() => { window.location.assign("/register?manage=1"); }}>
       <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Checking payment status</h1>
       <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">This page checks with HitPay. Opening the return link does not confirm the payment.</p>
       {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
@@ -2461,14 +2491,14 @@ function PayChoice({
   );
 }
 
-function Confirmed({ record, onManage }: { record: StoredRegistration; onManage: () => void }) {
+function Confirmed({ record, onManage, hideManage = false }: { record: StoredRegistration; onManage: () => void; hideManage?: boolean }) {
   const paid = record.payments.filter((item) => item.status === "paid").reduce((sum, item) => sum + item.amountCents, 0);
   const paidCount = record.payments.filter((item) => item.status === "paid").length;
   const next = record.payments.find((item) => item.status === "due");
   const first = record.attendee.fullName.trim().split(/\s+/)[0];
   const savedOnly = record.planStatus !== "fully_paid";
   return (
-    <Frame label="Step 4 of 4" step={4}>
+    <Frame step={4} onManage={onManage} hideManage={hideManage}>
       <div className="flex flex-col gap-2 rounded-2xl bg-[#D0202E] px-5 py-[22px] text-white">
         <span className="text-xs font-bold tracking-[0.14em] text-[#FFE3E5] uppercase">{savedOnly ? "Registration saved" : "Payment received"}</span>
         <h1 className="m-0 font-archivo text-[30px] leading-[1.05] font-black">{savedOnly ? `You're registered, ${first}.` : `You're in, ${first}.`}</h1>
@@ -2694,7 +2724,7 @@ function Manage({
 
   if (!record) {
     return (
-      <Frame label={payIntent ? "Pay installment" : "My registration"}>
+      <Frame hideManage>
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={onStart}>← Back</button>
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">{payIntent ? "Pay your installment" : "My registration"}</h1>
         <LevNote pose="smile" label="Lev smiling">
@@ -2874,6 +2904,7 @@ function Manage({
         }}
         onLater={() => setPaynamicsSession(null)}
         onBack={() => setPaynamicsSession(null)}
+        hideManage
       />
     );
   }
@@ -2893,6 +2924,7 @@ function Manage({
         }}
         onLater={() => setHitpaySession(null)}
         onBack={() => setHitpaySession(null)}
+        hideManage
       />
     );
   }
@@ -2912,6 +2944,7 @@ function Manage({
         }}
         onLater={() => setUpaySession(null)}
         onBack={() => setUpaySession(null)}
+        hideManage
       />
     );
   }
@@ -2925,7 +2958,7 @@ function Manage({
   const shownBadgeName = badgeName.trim() || "Your name";
   const shownBadgeCompany = badgeCompany.trim() || "Your company";
   return (
-    <Frame label="My registration">
+    <Frame hideManage>
       <div className="flex flex-col gap-1">
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Hi {first}</h1>
         <p className="m-0 text-[15px] text-[#5C5C63]">{record.tierName} · {record.plan === "installment" ? "installment plan" : "paid in full"}</p>
