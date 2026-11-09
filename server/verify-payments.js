@@ -248,6 +248,34 @@ try {
   assert.equal(unknownLookup.status, 200);
   assert.deepEqual(await knownLookup.json(), { ok: true });
   assert.deepEqual(await unknownLookup.json(), { ok: true });
+
+  const previewHit = await fetch(`${base}/api/members/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "member.one@example.com" }),
+  });
+  const previewBody = await previewHit.json();
+  assert.equal(previewHit.status, 200);
+  assert.equal(previewBody.found, true);
+  assert.equal(previewBody.firstName, "Member");
+  assert.equal(previewBody.chapter, "Makati");
+  assert.match(previewBody.maskedEmail, /^me\*+@example\.com$/);
+  assert.equal(previewBody.email, undefined);
+  assert.equal(previewBody.mobile, undefined);
+  assert.equal(previewBody.memberToken, undefined);
+  const previewMiss = await fetch(`${base}/api/members/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "missing.person@example.com" }),
+  });
+  assert.deepEqual(await previewMiss.json(), { ok: true, found: false });
+  const previewBad = await fetch(`${base}/api/members/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "not-a-contact" }),
+  });
+  assert.equal(previewBad.status, 400);
+
   const { issueMemberOtp } = await import("./otp.js");
   const otpDb = openDatabase(file);
   const issued = issueMemberOtp(otpDb, "member.one@example.com");
@@ -284,6 +312,55 @@ try {
   assert.equal(proved.status, 201);
   assert.equal(provedBody.attendee.email, "member.one@example.com");
   assert.equal(provedBody.attendee.mobile, "09181234567");
+
+  const incompleteDb = openDatabase(file);
+  incompleteDb.prepare(`
+    INSERT INTO members (
+      full_name, email, mobile, phone_key, chapter, category, business_name, reg_status, registered_at
+    ) VALUES (
+      'Incomplete Member', 'incomplete.member@example.com', '09179990000', '9179990000',
+      '', '', '', 'updated', '2026-11-01'
+    )
+  `).run();
+  const incompleteCode = issueMemberOtp(incompleteDb, "incomplete.member@example.com");
+  incompleteDb.close();
+  const incompletePreview = await fetch(`${base}/api/members/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "09179990000" }),
+  });
+  const incompletePreviewBody = await incompletePreview.json();
+  assert.equal(incompletePreviewBody.found, true);
+  assert.equal(incompletePreviewBody.firstName, "Incomplete");
+  assert.equal(incompletePreviewBody.chapter, "");
+  assert.equal(incompletePreviewBody.email, undefined);
+  const incompleteVerified = await fetch(`${base}/api/members/otp/verify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "incomplete.member@example.com", code: incompleteCode.code }),
+  });
+  const incompleteBody = await incompleteVerified.json();
+  assert.equal(incompleteVerified.status, 200);
+  assert.equal(incompleteBody.member.profileReady, false);
+  const incompletePay = await fetch(`${base}/api/registrations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      productCode: "first_mover",
+      paymentPlan: "full",
+      fullName: "Incomplete Member",
+      email: "incomplete.member@example.com",
+      mobile: "09179990000",
+      attendeeType: "member",
+      memberToken: incompleteBody.member.memberToken,
+      business: "Filled In",
+      industry: "Consulting",
+      chapter: "Makati",
+    }),
+  });
+  const incompletePayBody = await incompletePay.json();
+  assert.equal(incompletePay.status, 400);
+  assert.equal(incompletePayBody.error, "Add your name, business, industry, chapter, email, and mobile number.");
 
   const returnDb = openDatabase(file);
   const returnCode = issueMemberOtp(returnDb, "member.one@example.com");

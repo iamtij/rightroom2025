@@ -25,6 +25,19 @@ export function findMemberRow(db, query) {
   return db.prepare("SELECT * FROM members WHERE phone_key = ?").get(key) || null;
 }
 
+export function memberPreview(db, query) {
+  const row = findMemberRow(db, query);
+  if (!row) return null;
+  const email = String(row.email || "").trim().toLowerCase();
+  if (!email.includes("@")) return null;
+  const fullName = String(row.full_name || "").trim();
+  return {
+    firstName: fullName.split(/\s+/).filter(Boolean)[0] || "",
+    chapter: String(row.chapter || "").trim(),
+    email,
+  };
+}
+
 export function signMemberProof(memberId) {
   const payload = Buffer.from(JSON.stringify({ id: memberId, exp: Date.now() + PROOF_WINDOW })).toString("base64url");
   const signature = createHmac("sha256", proofSecret()).update(`member-lookup:${payload}`).digest("base64url");
