@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { formatFeePercentInput, formatFeePesoInput } from "../../server/convenience-fee.js";
 
 const field = "rounded-[10px] border border-[#D9D5CF] bg-white px-3 py-2.5 text-sm font-normal text-[#141416]";
 const labelClass = "flex flex-col gap-1 text-[13px] font-semibold text-[#3A3A40]";
@@ -558,13 +559,7 @@ export function AdminSections() {
       {section === "Templates" ? <Templates onError={setError} /> : null}
       {section === "Members" ? <Members onError={setError} /> : null}
       {section === "Chapters" ? <Chapters onError={setError} /> : null}
-      {section === "Settings" ? (
-        <div className="flex flex-col gap-6">
-          <h1 className="m-0 font-archivo text-[28px] font-extrabold">Settings</h1>
-          <TicketPaymentSettings onError={setError} />
-          <PaymentSettings onError={setError} />
-        </div>
-      ) : null}
+      {section === "Settings" ? <PaymentSettingsScreen role={role} onError={setError} /> : null}
       {section === "Admins" && role === "super" ? <Admins onError={setError} /> : null}
     </div>
   );
@@ -1336,6 +1331,8 @@ type PaymentChannelSetting = {
   note: string;
   customNote?: string;
   enabled: boolean;
+  feePercentBps?: number | null;
+  feeFixedCents?: number | null;
 };
 
 type PaynamicsMethodSetting = {
@@ -1345,6 +1342,8 @@ type PaynamicsMethodSetting = {
   detail: string;
   preset: "available" | "other" | string;
   enabled: boolean;
+  feePercentBps?: number | null;
+  feeFixedCents?: number | null;
 };
 
 type PaymentChannelPayload = {
@@ -1355,18 +1354,70 @@ type PaymentChannelPayload = {
   paynamics?: { liveRealChargeWarning?: boolean; checkoutMode?: string };
 };
 
+function FeePair({
+  percent,
+  pesos,
+  disabled,
+  percentLabel,
+  pesosLabel,
+  onPercent,
+  onPesos,
+}: {
+  percent: string;
+  pesos: string;
+  disabled?: boolean;
+  percentLabel: string;
+  pesosLabel: string;
+  onPercent: (value: string) => void;
+  onPesos: (value: string) => void;
+}) {
+  return (
+    <div className="ml-8 flex flex-wrap items-end gap-2">
+      <label className="flex w-24 flex-col gap-1 text-[12px] font-semibold text-[#5C5C63]">
+        %
+        <input
+          className={`${field} w-full text-right tabular-nums disabled:bg-[#F6F4F1]`}
+          inputMode="decimal"
+          aria-label={percentLabel}
+          value={percent}
+          disabled={disabled}
+          onChange={(event) => onPercent(event.target.value)}
+        />
+      </label>
+      <span className="pb-2 text-[13px] text-[#5C5C63]">or</span>
+      <label className="flex w-28 flex-col gap-1 text-[12px] font-semibold text-[#5C5C63]">
+        Pesos
+        <input
+          className={`${field} w-full text-right tabular-nums disabled:bg-[#F6F4F1]`}
+          inputMode="decimal"
+          aria-label={pesosLabel}
+          value={pesos}
+          disabled={disabled}
+          onChange={(event) => onPesos(event.target.value)}
+        />
+      </label>
+    </div>
+  );
+}
+
 function PaynamicsMethodChecks({
   methods,
-  saving,
   locked = false,
   grouped = false,
+  feePercents,
+  feePesos,
   onToggle,
+  onPercent,
+  onPesos,
 }: {
   methods: PaynamicsMethodSetting[];
-  saving: string;
   locked?: boolean;
   grouped?: boolean;
+  feePercents: Record<string, string>;
+  feePesos: Record<string, string>;
   onToggle: (code: string, enabled: boolean) => void;
+  onPercent: (code: string, value: string) => void;
+  onPesos: (code: string, value: string) => void;
 }) {
   if (!methods.length) return null;
   let group = "";
@@ -1376,20 +1427,31 @@ function PaynamicsMethodChecks({
         const showGroup = grouped && method.group !== group;
         if (grouped) group = method.group;
         return (
-          <label key={method.code} className={`flex items-start gap-3 border-t border-[#E4E1DC] px-4 py-3 first:border-t-0 ${method.enabled ? "bg-[#FBE9EA]" : ""}`}>
-            <input
-              type="checkbox"
-              className="mt-1 h-5 w-5 accent-[#D0202E]"
-              checked={method.enabled}
-              disabled={locked || saving === `pn:${method.code}`}
-              onChange={(event) => onToggle(method.code, event.target.checked)}
+          <div key={method.code} className={`flex flex-col gap-3 border-t border-[#E4E1DC] px-4 py-3 first:border-t-0 ${method.enabled ? "bg-[#FBE9EA]" : ""}`}>
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-5 w-5 accent-[#D0202E]"
+                checked={method.enabled}
+                disabled={locked}
+                onChange={(event) => onToggle(method.code, event.target.checked)}
+              />
+              <span className="flex flex-col gap-0.5">
+                {showGroup ? <span className="text-xs font-bold tracking-[0.12em] text-[#A8131F] uppercase">{method.group}</span> : null}
+                <span className="text-[15px] font-semibold">{method.label}</span>
+                <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{method.detail}</span>
+              </span>
+            </label>
+            <FeePair
+              percent={feePercents[method.code] ?? ""}
+              pesos={feePesos[method.code] ?? ""}
+              disabled={locked}
+              percentLabel={`${method.label} convenience fee percent`}
+              pesosLabel={`${method.label} convenience fee in pesos`}
+              onPercent={(value) => onPercent(method.code, value)}
+              onPesos={(value) => onPesos(method.code, value)}
             />
-            <span className="flex flex-col gap-0.5">
-              {showGroup ? <span className="text-xs font-bold tracking-[0.12em] text-[#A8131F] uppercase">{method.group}</span> : null}
-              <span className="text-[15px] font-semibold">{method.label}</span>
-              <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{method.detail}</span>
-            </span>
-          </label>
+          </div>
         );
       })}
     </div>
@@ -1404,6 +1466,7 @@ type TicketGate = {
   salesStart: string;
   salesEnd: string;
   paymentsOpen: boolean;
+  feeBearer: "pass" | "shoulder";
 };
 
 function saleDate(iso: string) {
@@ -1411,118 +1474,162 @@ function saleDate(iso: string) {
   return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }).format(new Date(Date.UTC(year, month - 1, day)));
 }
 
-function TicketPaymentSettings({ onError }: { onError: (message: string) => void }) {
+type SettingsHandle = {
+  changes: () => string[];
+  save: () => Promise<void>;
+  reset: () => void;
+};
+
+const TicketPaymentSettings = forwardRef<SettingsHandle, { onError: (message: string) => void; editing: boolean }>(function TicketPaymentSettings({ onError, editing }, ref) {
   const [tickets, setTickets] = useState<TicketGate[]>([]);
-  const [saving, setSaving] = useState("");
-  const saveQueue = useRef(Promise.resolve());
+  const savedRef = useRef<TicketGate[]>([]);
 
   async function load() {
-    setTickets(await api("/api/admin/tickets"));
+    const next = await api("/api/admin/tickets") as TicketGate[];
+    savedRef.current = next;
+    setTickets(next);
   }
 
   useEffect(() => {
     load().catch((error) => onError(error.message));
   }, []);
 
-  function toggle(code: string, paymentsOpen: boolean) {
-    setTickets((current) => current.map((ticket) => (ticket.code === code ? { ...ticket, paymentsOpen } : ticket)));
-    const run = saveQueue.current.then(async () => {
-      setSaving(code);
-      try {
-        setTickets(await api("/api/admin/tickets", {
-          method: "PATCH",
-          body: JSON.stringify({ code, paymentsOpen }),
-        }));
-      } catch (error) {
-        onError(error instanceof Error ? error.message : "Ticket was not saved");
-        await load().catch(() => {});
-      } finally {
-        setSaving("");
+  useImperativeHandle(ref, () => ({
+    changes() {
+      return tickets.flatMap((ticket) => {
+        const saved = savedRef.current.find((item) => item.code === ticket.code);
+        if (!saved) return [];
+        const lines = [];
+        if (saved.paymentsOpen !== ticket.paymentsOpen) lines.push(`${ticket.name}: ${ticket.paymentsOpen ? "open for payment" : "locked"}`);
+        if ((saved.feeBearer === "pass") !== (ticket.feeBearer === "pass")) {
+          lines.push(`${ticket.name}: convenience fee ${ticket.feeBearer === "pass" ? "passed on" : "shouldered"}`);
+        }
+        return lines;
+      });
+    },
+    async save() {
+      for (const ticket of tickets) {
+        const saved = savedRef.current.find((item) => item.code === ticket.code);
+        if (!saved) continue;
+        const body: { code: string; paymentsOpen?: boolean; feeBearer?: TicketGate["feeBearer"] } = { code: ticket.code };
+        if (saved.paymentsOpen !== ticket.paymentsOpen) body.paymentsOpen = ticket.paymentsOpen;
+        if ((saved.feeBearer === "pass") !== (ticket.feeBearer === "pass")) body.feeBearer = ticket.feeBearer === "pass" ? "pass" : "shoulder";
+        if (body.paymentsOpen === undefined && body.feeBearer === undefined) continue;
+        await api("/api/admin/tickets", { method: "PATCH", body: JSON.stringify(body) });
       }
-    });
-    saveQueue.current = run.then(() => undefined, () => undefined);
-  }
+      await load();
+    },
+    reset() {
+      setTickets(savedRef.current.map((ticket) => ({ ...ticket })));
+    },
+  }), [tickets]);
 
   return (
     <div className="flex max-w-[640px] flex-col gap-4 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
       <div className="flex flex-col gap-1">
         <h2 className="m-0 text-[17px] font-bold">Tickets</h2>
-        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Open means buyers can pay for that ticket now. Locked means payment stays closed. Sale dates on the registration page stay as a label. They do not open or close payment.</p>
+        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Open means buyers can pay for that ticket now. Locked means payment stays closed. Sale dates stay as a label. Pass on adds the channel’s convenience fee to the amount due. Shouldered means IBMC absorbs that fee.</p>
       </div>
       <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF]">
         {tickets.map((ticket) => (
-          <label key={ticket.code} className={`flex items-start gap-3 border-t border-[#E4E1DC] px-4 py-4 first:border-t-0 ${ticket.paymentsOpen ? "bg-[#FBE9EA]" : ""}`}>
-            <input
-              type="checkbox"
-              className="mt-1 h-5 w-5 accent-[#D0202E]"
-              checked={ticket.paymentsOpen}
-              disabled={saving === ticket.code}
-              onChange={(event) => toggle(ticket.code, event.target.checked)}
-            />
-            <span className="flex flex-col gap-0.5">
-              <span className="text-[15px] font-semibold">{ticket.name}</span>
-              <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">
-                {money(ticket.fullPriceCents, ticket.currency)} · {saleDate(ticket.salesStart)} – {saleDate(ticket.salesEnd)}
+          <div key={ticket.code} className={`flex flex-col gap-3 border-t border-[#E4E1DC] px-4 py-4 first:border-t-0 ${ticket.paymentsOpen ? "bg-[#FBE9EA]" : ""}`}>
+            <label className="flex items-start gap-3">
+              <input
+                type="checkbox"
+                className="mt-1 h-5 w-5 accent-[#D0202E]"
+                checked={ticket.paymentsOpen}
+                disabled={!editing}
+                onChange={(event) => setTickets((current) => current.map((item) => item.code === ticket.code ? { ...item, paymentsOpen: event.target.checked } : item))}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-[15px] font-semibold">{ticket.name}</span>
+                <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">
+                  {money(ticket.fullPriceCents, ticket.currency)} · {saleDate(ticket.salesStart)} – {saleDate(ticket.salesEnd)}
+                </span>
+                <span className="text-[13px] font-semibold leading-snug text-[#3A3A40]">{ticket.paymentsOpen ? "Open for payment" : "Locked"}</span>
               </span>
-              <span className="text-[13px] font-semibold leading-snug text-[#3A3A40]">{ticket.paymentsOpen ? "Open for payment" : "Locked"}</span>
-            </span>
-          </label>
+            </label>
+            <fieldset className="ml-8 border-0 p-0">
+              <legend className="mb-1 text-[12px] font-semibold text-[#5C5C63]">Convenience fee</legend>
+              <div className="flex flex-wrap gap-x-4 gap-y-2">
+                <label className="flex items-center gap-2 text-sm font-semibold">
+                  <input type="radio" className="h-5 w-5 accent-[#D0202E]" name={`fee-${ticket.code}`} checked={ticket.feeBearer === "pass"} disabled={!editing} onChange={() => setTickets((current) => current.map((item) => item.code === ticket.code ? { ...item, feeBearer: "pass" } : item))} />
+                  Pass on
+                </label>
+                <label className="flex items-center gap-2 text-sm font-semibold">
+                  <input type="radio" className="h-5 w-5 accent-[#D0202E]" name={`fee-${ticket.code}`} checked={ticket.feeBearer !== "pass"} disabled={!editing} onChange={() => setTickets((current) => current.map((item) => item.code === ticket.code ? { ...item, feeBearer: "shoulder" } : item))} />
+                  Shouldered
+                </label>
+              </div>
+            </fieldset>
+          </div>
         ))}
       </div>
     </div>
   );
+});
+
+function tidy(value: string) {
+  return value.replace(/\s+/g, " ").trim();
 }
 
-function PaymentSettings({ onError }: { onError: (message: string) => void }) {
+function feePhrase(percent: string, pesos: string) {
+  const parts = [];
+  if (percent.trim()) parts.push(`${percent.trim()}%`);
+  if (pesos.trim()) parts.push(`₱${pesos.trim()}`);
+  return parts.length ? parts.join(" or ") : "none";
+}
+
+const PaymentSettings = forwardRef<SettingsHandle, { onError: (message: string) => void; editing: boolean }>(function PaymentSettings({ onError, editing }, ref) {
   const [channels, setChannels] = useState<PaymentChannelSetting[]>([]);
   const [paynamicsMethods, setPaynamicsMethods] = useState<PaynamicsMethodSetting[]>([]);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [feePercents, setFeePercents] = useState<Record<string, string>>({});
+  const [feePesos, setFeePesos] = useState<Record<string, string>>({});
   const [hitpayConfigured, setHitpayConfigured] = useState(true);
   const [paynamicsConfigured, setPaynamicsConfigured] = useState(true);
   const [paynamicsLiveWarning, setPaynamicsLiveWarning] = useState(false);
   const [paynamicsCheckoutMode, setPaynamicsCheckoutMode] = useState<"sandbox" | "live" | "off">("off");
-  const [saving, setSaving] = useState("");
   const draftsRef = useRef<Record<string, string>>({});
   const noteDraftsRef = useRef<Record<string, string>>({});
+  const feePercentsRef = useRef<Record<string, string>>({});
+  const feePesosRef = useRef<Record<string, string>>({});
   const channelsRef = useRef<PaymentChannelSetting[]>([]);
+  const methodsRef = useRef<PaynamicsMethodSetting[]>([]);
   const availableAllRef = useRef<HTMLInputElement>(null);
-  const saveQueue = useRef(Promise.resolve());
 
-  function enqueue(task: () => Promise<void>) {
-    const run = saveQueue.current.then(task, task);
-    saveQueue.current = run.then(() => undefined, () => undefined);
-    return run;
+  function fillDrafts(nextChannels: PaymentChannelSetting[], nextMethods: PaynamicsMethodSetting[]) {
+    const labels: Record<string, string> = {};
+    const notes: Record<string, string> = {};
+    const percents: Record<string, string> = {};
+    const pesos: Record<string, string> = {};
+    for (const item of [...nextChannels, ...nextMethods]) {
+      percents[item.code] = formatFeePercentInput(item.feePercentBps);
+      pesos[item.code] = formatFeePesoInput(item.feeFixedCents);
+    }
+    for (const item of nextChannels) {
+      labels[item.code] = item.customLabel || "";
+      notes[item.code] = item.customNote || "";
+    }
+    draftsRef.current = labels;
+    noteDraftsRef.current = notes;
+    feePercentsRef.current = percents;
+    feePesosRef.current = pesos;
+    setDrafts(labels);
+    setNoteDrafts(notes);
+    setFeePercents(percents);
+    setFeePesos(pesos);
   }
 
   function applyPayload(payload: PaymentChannelPayload) {
     const next = payload.channels || [];
-    const previousChannels = channelsRef.current;
+    const nextMethods = Array.isArray(payload.paynamicsMethods) ? payload.paynamicsMethods : [];
     channelsRef.current = next;
+    methodsRef.current = nextMethods;
     setChannels(next);
-    setDrafts((current) => {
-      const merged = { ...current };
-      for (const item of next) {
-        const saved = item.customLabel || "";
-        const previous = (previousChannels.find((channel) => channel.code === item.code)?.customLabel || "").trim();
-        const draft = (current[item.code] ?? "").replace(/\s+/g, " ").trim();
-        if (current[item.code] === undefined || draft === previous || draft === saved) merged[item.code] = saved;
-      }
-      draftsRef.current = merged;
-      return merged;
-    });
-    setNoteDrafts((current) => {
-      const merged = { ...current };
-      for (const item of next) {
-        const saved = item.customNote || "";
-        const previous = (previousChannels.find((channel) => channel.code === item.code)?.customNote || "").trim();
-        const draft = (current[item.code] ?? "").replace(/\s+/g, " ").trim();
-        if (current[item.code] === undefined || draft === previous || draft === saved) merged[item.code] = saved;
-      }
-      noteDraftsRef.current = merged;
-      return merged;
-    });
-    setPaynamicsMethods(Array.isArray(payload.paynamicsMethods) ? payload.paynamicsMethods : []);
+    setPaynamicsMethods(nextMethods);
+    fillDrafts(next, nextMethods);
     setHitpayConfigured(Boolean(payload.hitpayConfigured));
     setPaynamicsConfigured(Boolean(payload.paynamicsConfigured));
     setPaynamicsLiveWarning(Boolean(payload.paynamics?.liveRealChargeWarning));
@@ -1547,109 +1654,113 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
 
   function toggle(code: string, enabled: boolean) {
     setChannels((current) => current.map((item) => (item.code === code ? { ...item, enabled } : item)));
-    return enqueue(async () => {
-      setSaving(code);
-      try {
-        applyPayload(await api("/api/admin/payment-channels", {
-          method: "PATCH",
-          body: JSON.stringify({ [code]: { enabled, label: draftsRef.current[code] ?? "" } }),
-        }));
-      } catch (error) {
-        onError(error instanceof Error ? error.message : "Payment channels were not saved");
-        await load().catch(() => {});
-      } finally {
-        setSaving("");
-      }
-    });
   }
 
-  function savePaynamicsMethods(patch: Record<string, boolean>, savingKey: string) {
+  function setMethodEnabled(patch: Record<string, boolean>) {
     setPaynamicsMethods((current) => current.map((item) => (
       Object.prototype.hasOwnProperty.call(patch, item.code) ? { ...item, enabled: patch[item.code] } : item
     )));
-    return enqueue(async () => {
-      setSaving(savingKey);
-      try {
-        applyPayload(await api("/api/admin/payment-channels", {
-          method: "PATCH",
-          body: JSON.stringify({ paynamicsMethods: patch }),
-        }));
-      } catch (error) {
-        onError(error instanceof Error ? error.message : "Paynamics channels were not saved");
-        await load().catch(() => {});
-      } finally {
-        setSaving("");
-      }
-    });
   }
 
   function togglePaynamicsMethod(code: string, enabled: boolean) {
-    return savePaynamicsMethods({ [code]: enabled }, `pn:${code}`);
+    setMethodEnabled({ [code]: enabled });
   }
 
   function toggleAvailablePaynamics(enabled: boolean) {
-    const patch = Object.fromEntries(availableMethods.map((item) => [item.code, enabled]));
-    return savePaynamicsMethods(patch, "pn:available");
+    setMethodEnabled(Object.fromEntries(availableMethods.map((item) => [item.code, enabled])));
   }
 
-  function saveLabel(code: string) {
-    return enqueue(async () => {
-      const label = (draftsRef.current[code] ?? "").replace(/\s+/g, " ").trim();
-      const current = (channelsRef.current.find((item) => item.code === code)?.customLabel || "").trim();
-      if (label === current) {
-        if ((draftsRef.current[code] ?? "") !== current) {
-          draftsRef.current = { ...draftsRef.current, [code]: current };
-          setDrafts(draftsRef.current);
+  function channelChanges() {
+    return channels.flatMap((channel) => {
+      const saved = channelsRef.current.find((item) => item.code === channel.code);
+      if (!saved) return [];
+      const lines = [];
+      if (saved.enabled !== channel.enabled) lines.push(`${channel.label}: ${channel.enabled ? "turned on" : "turned off"}`);
+      const label = tidy(drafts[channel.code] ?? "");
+      if (label !== (saved.customLabel || "")) lines.push(`${channel.label}: buyer label ${label ? `“${label}”` : "cleared"}`);
+      const note = tidy(noteDrafts[channel.code] ?? "");
+      if (note !== (saved.customNote || "")) lines.push(`${channel.label}: checkout note updated`);
+      if (channel.code !== "paynamics") {
+        const percent = (feePercents[channel.code] ?? "").trim();
+        const pesos = (feePesos[channel.code] ?? "").trim();
+        if (percent !== formatFeePercentInput(saved.feePercentBps) || pesos !== formatFeePesoInput(saved.feeFixedCents)) {
+          lines.push(`${channel.label}: convenience fee ${feePhrase(percent, pesos)}`);
         }
-        return;
       }
-      setSaving(code);
-      try {
-        applyPayload(await api("/api/admin/payment-channels", {
-          method: "PATCH",
-          body: JSON.stringify({ [code]: { label } }),
-        }));
-      } catch (error) {
-        onError(error instanceof Error ? error.message : "Buyer label was not saved");
-        await load().catch(() => {});
-      } finally {
-        setSaving("");
-      }
+      return lines;
     });
   }
 
-  function saveNote(code: string) {
-    return enqueue(async () => {
-      const note = (noteDraftsRef.current[code] ?? "").replace(/\s+/g, " ").trim();
-      const current = (channelsRef.current.find((item) => item.code === code)?.customNote || "").trim();
-      if (note === current) {
-        if ((noteDraftsRef.current[code] ?? "") !== current) {
-          noteDraftsRef.current = { ...noteDraftsRef.current, [code]: current };
-          setNoteDrafts(noteDraftsRef.current);
-        }
-        return;
+  function methodChanges() {
+    return paynamicsMethods.flatMap((method) => {
+      const saved = methodsRef.current.find((item) => item.code === method.code);
+      if (!saved) return [];
+      const lines = [];
+      if (saved.enabled !== method.enabled) lines.push(`${method.label}: ${method.enabled ? "turned on" : "turned off"}`);
+      const percent = (feePercents[method.code] ?? "").trim();
+      const pesos = (feePesos[method.code] ?? "").trim();
+      if (percent !== formatFeePercentInput(saved.feePercentBps) || pesos !== formatFeePesoInput(saved.feeFixedCents)) {
+        lines.push(`${method.label}: convenience fee ${feePhrase(percent, pesos)}`);
       }
-      setSaving(code);
-      try {
-        applyPayload(await api("/api/admin/payment-channels", {
-          method: "PATCH",
-          body: JSON.stringify({ [code]: { note } }),
-        }));
-      } catch (error) {
-        onError(error instanceof Error ? error.message : "Checkout note was not saved");
-        await load().catch(() => {});
-      } finally {
-        setSaving("");
-      }
+      return lines;
     });
   }
+
+  useImperativeHandle(ref, () => ({
+    changes: () => [...channelChanges(), ...methodChanges()],
+    async save() {
+      const body: Record<string, unknown> = {};
+      for (const channel of channels) {
+        const saved = channelsRef.current.find((item) => item.code === channel.code);
+        if (!saved) continue;
+        const patch: Record<string, unknown> = {};
+        if (saved.enabled !== channel.enabled) patch.enabled = channel.enabled;
+        const label = tidy(drafts[channel.code] ?? "");
+        if (label !== (saved.customLabel || "")) patch.label = label;
+        const note = tidy(noteDrafts[channel.code] ?? "");
+        if (note !== (saved.customNote || "")) patch.note = note;
+        if (channel.code !== "paynamics") {
+          const percent = (feePercents[channel.code] ?? "").trim();
+          const pesos = (feePesos[channel.code] ?? "").trim();
+          if (percent !== formatFeePercentInput(saved.feePercentBps) || pesos !== formatFeePesoInput(saved.feeFixedCents)) {
+            patch.feePercent = percent;
+            patch.feeFixed = pesos;
+          }
+        }
+        if (Object.keys(patch).length) body[channel.code] = patch;
+      }
+      const methods: Record<string, unknown> = {};
+      for (const method of paynamicsMethods) {
+        const saved = methodsRef.current.find((item) => item.code === method.code);
+        if (!saved) continue;
+        const patch: Record<string, unknown> = {};
+        if (saved.enabled !== method.enabled) patch.enabled = method.enabled;
+        const percent = (feePercents[method.code] ?? "").trim();
+        const pesos = (feePesos[method.code] ?? "").trim();
+        if (percent !== formatFeePercentInput(saved.feePercentBps) || pesos !== formatFeePesoInput(saved.feeFixedCents)) {
+          patch.feePercent = percent;
+          patch.feeFixed = pesos;
+        }
+        if (Object.keys(patch).length) methods[method.code] = patch;
+      }
+      if (Object.keys(methods).length) body.paynamicsMethods = methods;
+      if (Object.keys(body).length) {
+        applyPayload(await api("/api/admin/payment-channels", { method: "PATCH", body: JSON.stringify(body) }));
+      }
+    },
+    reset() {
+      setChannels(channelsRef.current.map((item) => ({ ...item })));
+      setPaynamicsMethods(methodsRef.current.map((item) => ({ ...item })));
+      fillDrafts(channelsRef.current, methodsRef.current);
+    },
+  }), [channels, paynamicsMethods, drafts, noteDrafts, feePercents, feePesos]);
 
   return (
     <section className="flex flex-col gap-3">
       <div className="flex max-w-[640px] flex-col gap-4 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
         <div className="flex flex-col gap-1">
           <h2 className="m-0 text-[17px] font-bold">Payment channels</h2>
-          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Checked channels are the ones a buyer can use when paying. Buyer label is the name on checkout. Leave it blank to keep the name above. Checkout note is the line shown after a buyer selects that channel. Leave it blank to keep the original note. Under Paynamics, the channels already available start on. Other Paynamics channels stay off until you check them.</p>
+          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Checked channels are the ones a buyer can use when paying. Convenience fee can be a percent, a peso amount, or both. HitPay can be 1% or ₱20. When both are filled in, the buyer pays the higher amount. Buyer label is the name on checkout. Leave it blank to keep the name above. Checkout note is the line shown after a buyer selects that channel. Leave it blank to keep the original note. Under Paynamics, set the fee on each option.</p>
         </div>
         <div className="overflow-hidden rounded-[14px] border border-[#D9D5CF]">
           {channels.map((channel) => (
@@ -1659,7 +1770,7 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
                   type="checkbox"
                   className="mt-1 h-5 w-5 accent-[#D0202E]"
                   checked={channel.enabled}
-                  disabled={saving === channel.code}
+                  disabled={!editing}
                   onChange={(event) => toggle(channel.code, event.target.checked)}
                 />
                 <span className="flex flex-col gap-0.5">
@@ -1667,6 +1778,25 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
                   <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{channel.detail}</span>
                 </span>
               </label>
+              {channel.code === "paynamics" ? (
+                <p className="m-0 ml-8 text-[13px] leading-snug text-[#5C5C63]">Set the convenience fee on each Paynamics option below.</p>
+              ) : (
+                <FeePair
+                  percent={feePercents[channel.code] ?? ""}
+                  pesos={feePesos[channel.code] ?? ""}
+                  disabled={!editing}
+                  percentLabel={`${channel.label} convenience fee percent`}
+                  pesosLabel={`${channel.label} convenience fee in pesos`}
+                  onPercent={(value) => {
+                    feePercentsRef.current = { ...feePercentsRef.current, [channel.code]: value };
+                    setFeePercents(feePercentsRef.current);
+                  }}
+                  onPesos={(value) => {
+                    feePesosRef.current = { ...feePesosRef.current, [channel.code]: value };
+                    setFeePesos(feePesosRef.current);
+                  }}
+                />
+              )}
               <label className="ml-8 flex flex-col gap-1 text-[12px] font-semibold text-[#5C5C63]">
                 Buyer label
                 <input
@@ -1675,17 +1805,10 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
                   placeholder={channel.label}
                   maxLength={80}
                   autoComplete="off"
-                  disabled={saving === channel.code}
+                  disabled={!editing}
                   onChange={(event) => {
                     draftsRef.current = { ...draftsRef.current, [channel.code]: event.target.value };
                     setDrafts(draftsRef.current);
-                  }}
-                  onBlur={() => saveLabel(channel.code)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      event.currentTarget.blur();
-                    }
                   }}
                 />
               </label>
@@ -1697,12 +1820,11 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
                   placeholder={channel.note}
                   maxLength={400}
                   rows={3}
-                  disabled={saving === channel.code}
+                  disabled={!editing}
                   onChange={(event) => {
                     noteDraftsRef.current = { ...noteDraftsRef.current, [channel.code]: event.target.value };
                     setNoteDrafts(noteDraftsRef.current);
                   }}
-                  onBlur={() => saveNote(channel.code)}
                 />
                 <span className="font-normal leading-snug">Buyers see: {(noteDrafts[channel.code] || "").replace(/\s+/g, " ").trim() || channel.note}</span>
               </label>
@@ -1718,7 +1840,7 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
                       type="checkbox"
                       className="mt-1 h-5 w-5 accent-[#D0202E]"
                       checked={availableAllOn}
-                      disabled={saving === "pn:available" || availableMethods.length === 0}
+                      disabled={!editing || availableMethods.length === 0}
                       onChange={(event) => toggleAvailablePaynamics(event.target.checked)}
                     />
                     <span className="flex flex-col gap-0.5">
@@ -1726,9 +1848,38 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
                       <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">Turns Maya, GrabPay, BPI, UnionBank Online, and Landbank on or off together.</span>
                     </span>
                   </label>
-                  <PaynamicsMethodChecks methods={availableMethods} saving={saving} locked={saving === "pn:available"} onToggle={togglePaynamicsMethod} />
+                  <PaynamicsMethodChecks
+                    methods={availableMethods}
+                    locked={!editing}
+                    feePercents={feePercents}
+                    feePesos={feePesos}
+                    onToggle={togglePaynamicsMethod}
+                    onPercent={(code, value) => {
+                      feePercentsRef.current = { ...feePercentsRef.current, [code]: value };
+                      setFeePercents(feePercentsRef.current);
+                    }}
+                    onPesos={(code, value) => {
+                      feePesosRef.current = { ...feePesosRef.current, [code]: value };
+                      setFeePesos(feePesosRef.current);
+                    }}
+                  />
                   <span className="text-[12px] font-semibold text-[#5C5C63]">Other channels</span>
-                  <PaynamicsMethodChecks methods={otherMethods} saving={saving} grouped onToggle={togglePaynamicsMethod} />
+                  <PaynamicsMethodChecks
+                    methods={otherMethods}
+                    locked={!editing}
+                    grouped
+                    feePercents={feePercents}
+                    feePesos={feePesos}
+                    onToggle={togglePaynamicsMethod}
+                    onPercent={(code, value) => {
+                      feePercentsRef.current = { ...feePercentsRef.current, [code]: value };
+                      setFeePercents(feePercentsRef.current);
+                    }}
+                    onPesos={(code, value) => {
+                      feePesosRef.current = { ...feePesosRef.current, [code]: value };
+                      setFeePesos(feePesosRef.current);
+                    }}
+                  />
                 </div>
               ) : null}
             </div>
@@ -1751,6 +1902,76 @@ function PaymentSettings({ onError }: { onError: (message: string) => void }) {
         )}
       </div>
     </section>
+  );
+});
+
+function PaymentSettingsScreen({ role, onError }: { role: "super" | "admin" | ""; onError: (message: string) => void }) {
+  const ticketsRef = useRef<SettingsHandle>(null);
+  const channelsRef = useRef<SettingsHandle>(null);
+  const [editing, setEditing] = useState(false);
+  const [confirming, setConfirming] = useState<string[] | null>(null);
+  const [saving, setSaving] = useState(false);
+  const canEdit = role === "super";
+  const locked = !editing || Boolean(confirming) || saving;
+
+  function askSave() {
+    const changes = [...(ticketsRef.current?.changes() || []), ...(channelsRef.current?.changes() || [])];
+    if (!changes.length) {
+      setEditing(false);
+      return;
+    }
+    setConfirming(changes);
+  }
+
+  async function confirmSave() {
+    setSaving(true);
+    try {
+      await ticketsRef.current?.save();
+      await channelsRef.current?.save();
+      setConfirming(null);
+      setEditing(false);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Settings were not saved");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function cancel() {
+    ticketsRef.current?.reset();
+    channelsRef.current?.reset();
+    setConfirming(null);
+    setEditing(false);
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <div className="flex max-w-[640px] flex-wrap items-center justify-between gap-3">
+        <h1 className="m-0 font-archivo text-[28px] font-extrabold">Settings</h1>
+        {canEdit && !editing ? <button type="button" className={buttonClass} onClick={() => setEditing(true)}>Edit settings</button> : null}
+        {canEdit && editing && !confirming ? (
+          <div className="flex gap-2">
+            <button type="button" className={buttonClass} onClick={askSave}>Save</button>
+            <button type="button" className={ghostButton} onClick={cancel}>Cancel</button>
+          </div>
+        ) : null}
+      </div>
+      {canEdit ? null : <p className="m-0 max-w-[640px] text-sm text-[#5C5C63]">Only a super admin can change payment settings.</p>}
+      {confirming ? (
+        <div className="flex max-w-[640px] flex-col gap-3 rounded-[14px] border border-[#E8B4B8] bg-[#FBE9EA] p-4">
+          <h2 className="m-0 text-[17px] font-bold">Save these changes?</h2>
+          <ul className="m-0 flex list-disc flex-col gap-1 pl-5 text-sm">
+            {confirming.map((line) => <li key={line}>{line}</li>)}
+          </ul>
+          <div className="flex gap-2">
+            <button type="button" className={buttonClass} disabled={saving} onClick={confirmSave}>{saving ? "Saving" : "Confirm save"}</button>
+            <button type="button" className={ghostButton} disabled={saving} onClick={() => setConfirming(null)}>Back</button>
+          </div>
+        </div>
+      ) : null}
+      <TicketPaymentSettings ref={ticketsRef} onError={onError} editing={!locked} />
+      <PaymentSettings ref={channelsRef} onError={onError} editing={!locked} />
+    </div>
   );
 }
 

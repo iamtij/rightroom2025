@@ -2,6 +2,7 @@ import crypto from "crypto";
 import QRCode from "qrcode";
 import { getRegistration, recordPayment } from "./registrations.js";
 import { isChannelEnabled } from "./payment-channels.js";
+import { paymentCharge, settlementBaseCents } from "./convenience-fee.js";
 
 const METHODS = new Set(["instapay", "paygate", "UB Online"]);
 let cachedToken = null;
@@ -334,7 +335,7 @@ function settle(db, row) {
   return recordPayment(db, {
     registrationId: registration.id,
     installmentId: target.id,
-    amountCents: row.amount_cents,
+    amountCents: settlementBaseCents(row),
     method: `upay:${row.payment_method}`,
     externalReference: row.sender_ref_id,
   });
@@ -368,8 +369,9 @@ export async function startUpayPayment(db, registration, paymentMethod) {
     return { error: "UnionBank Upay collects peso payments.", status: 400, registration };
   }
   const due = dueInstallment(registration);
-  const amountCents = due ? due.amount_cents - due.amount_paid_cents : 0;
-  if (!due || amountCents <= 0) {
+  const baseCents = due ? due.amount_cents - due.amount_paid_cents : 0;
+  const quote = paymentCharge(db, registration, baseCents, { channel: "upay" });
+  if (!due || quote.baseCents <= 0) {
     return { registration, upay: null };
   }
   const open = db.prepare(`
@@ -378,7 +380,7 @@ export async function startUpayPayment(db, registration, paymentMethod) {
     ORDER BY id DESC
     LIMIT 1
   `).get(due.id, paymentMethod);
-  if (open) {
+  if (open && open.amount_cents === quote.totalCents && (open.fee_cents || 0) === quote.feeCents) {
     const refreshed = await refreshUpayPayment(db, open.sender_ref_id);
     if (refreshed.upay?.status === "pending" || refreshed.upay?.status === "paid") return refreshed;
   }
@@ -391,7 +393,7 @@ export async function startUpayPayment(db, registration, paymentMethod) {
     email: registration.email,
     mobile,
     reference: registration.reference,
-    amountCents,
+    amountCents: quote.totalCents,
   };
   if (upayPartnerApiConfigured()) {
     try {
@@ -406,7 +408,7 @@ export async function startUpayPayment(db, registration, paymentMethod) {
           billerUuid: billerUuid(),
           emailAddress: registration.email,
           mobileNumber: mobile,
-          amount: pesosFromCents(amountCents),
+          amount: pesosFromCents(quote.totalCents),
           paymentMethod,
           callbackUrl: callbackUrl(),
           references,
@@ -416,21 +418,22 @@ export async function startUpayPayment(db, registration, paymentMethod) {
         return { error: unionbankMessage(created.body, created.status), status: created.status === 400 ? 400 : 502, registration };
       }
       const outcome = upayOutcome(created.body);
-      const settlement = upaySettlement(created.body, amountCents);
+      const settlement = upaySettlement(created.body, quote.totalCents);
       if (outcome === "paid" && settlement !== "paid") {
         console.error(`UPay amount was not confirmed for ${sender}`);
       }
       const link = paymentLink(created.body) || productionPageUrl();
       const result = db.prepare(`
         INSERT INTO upay_payments (
-          registration_id, installment_id, sender_ref_id, amount_cents, currency, payment_method,
+          registration_id, installment_id, sender_ref_id, amount_cents, fee_cents, currency, payment_method,
           status, unionbank_code, unionbank_state, transaction_id, transaction_uuid, qr, payment_url
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         registration.id,
         due.id,
         sender,
-        amountCents,
+        quote.totalCents,
+        quote.feeCents,
         registration.currency,
         paymentMethod,
         settlement === "failed" ? "failed" : "pending",
@@ -461,14 +464,15 @@ export async function startUpayPayment(db, registration, paymentMethod) {
     const page = productionPageUrl();
     const result = db.prepare(`
       INSERT INTO upay_payments (
-        registration_id, installment_id, sender_ref_id, amount_cents, currency, payment_method,
+        registration_id, installment_id, sender_ref_id, amount_cents, fee_cents, currency, payment_method,
         status, unionbank_code, unionbank_state, transaction_id, transaction_uuid, qr, payment_url
-      ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL, NULL, NULL, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL, NULL, NULL, ?)
     `).run(
       registration.id,
       due.id,
       sender,
-      amountCents,
+      quote.totalCents,
+      quote.feeCents,
       registration.currency,
       paymentMethod,
       page,

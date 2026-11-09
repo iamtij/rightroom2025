@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { parseLookupContact } from "../../server/contact.js";
+import { convenienceFeeCents, feeRuleLabel, hasFeeRate } from "../../server/convenience-fee.js";
 import { LevNote, type LevPose } from "./Lev";
 import {
   INDUSTRIES,
@@ -151,7 +152,19 @@ type PaynamicsMethodOption = {
   group: string;
   label: string;
   detail: string;
+  feePercentBps?: number | null;
+  feeFixedCents?: number | null;
 };
+
+function readOptionalCents(value: unknown) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(number) : null;
+}
+
+function moneyExact(cents: number) {
+  return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents / 100);
+}
 
 function readPaynamicsMethods(value: unknown): PaynamicsMethodOption[] {
   if (!Array.isArray(value)) return [];
@@ -163,7 +176,14 @@ function readPaynamicsMethods(value: unknown): PaynamicsMethodOption[] {
     const group = String(row.group || "").trim();
     const detail = String(row.detail || "").trim();
     if (!code || !label) return [];
-    return [{ code, group: group || "Paynamics", label, detail }];
+    return [{
+      code,
+      group: group || "Paynamics",
+      label,
+      detail,
+      feePercentBps: readOptionalCents(row.feePercentBps),
+      feeFixedCents: readOptionalCents(row.feeFixedCents),
+    }];
   });
 }
 
@@ -174,7 +194,11 @@ type PayChannel = {
   label: string;
   detail: string;
   note?: string;
+  feePercentBps?: number | null;
+  feeFixedCents?: number | null;
 };
+
+type FeeBearer = "pass" | "shoulder";
 
 type HitpaySession = {
   sessionId: string;
@@ -262,7 +286,17 @@ function usePaymentChannels() {
       .then((response) => response.json())
       .then((payload) => {
         if (stop) return;
-        const list = (Array.isArray(payload.channels) ? payload.channels : []).filter((item: PayChannel) => item && isPayChannel(String(item.code)));
+        const list = (Array.isArray(payload.channels) ? payload.channels : []).flatMap((item: PayChannel) => {
+          if (!item || !isPayChannel(String(item.code))) return [];
+          return [{
+            code: item.code,
+            label: String(item.label || ""),
+            detail: String(item.detail || ""),
+            note: String(item.note || ""),
+            feePercentBps: readOptionalCents(item.feePercentBps),
+            feeFixedCents: readOptionalCents(item.feeFixedCents),
+          }];
+        });
         setChannels(list);
         setChannel((current) => (current && list.some((item: PayChannel) => item.code === current) ? current : list[0]?.code || ""));
         const paynamics = payload.paynamics && typeof payload.paynamics === "object" ? payload.paynamics : {};
@@ -323,6 +357,7 @@ type StoredPayment = {
   label: string;
   dueOn: string;
   amountCents: number;
+  amountPaidCents?: number;
   status: "paid" | "due" | "upcoming";
 };
 
@@ -344,6 +379,8 @@ type StoredRegistration = {
   resumeToken?: string;
   attendee: Attendee;
   tierName: string;
+  productCode?: string;
+  feeBearer?: FeeBearer;
   plan: PayPlan;
   currency: Currency;
   totalCents: number;
@@ -742,6 +779,7 @@ function RegistrationWizard() {
   const [testsOpen, setTestsOpen] = useState(false);
   const [testTicketOpen, setTestTicketOpen] = useState(false);
   const [ticketGates, setTicketGates] = useState<Record<string, boolean> | null>(null);
+  const [feeBearers, setFeeBearers] = useState<Record<string, FeeBearer>>({});
   const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
   const [turnstileToken, setTurnstileToken] = useState("");
   const [turnstileBlocked, setTurnstileBlocked] = useState(false);
@@ -772,10 +810,14 @@ function RegistrationWizard() {
           setTurnstileSiteKey(payload.turnstileSiteKey || "");
           if (Array.isArray(payload.tickets)) {
             const next: Record<string, boolean> = {};
+            const bearers: Record<string, FeeBearer> = {};
             for (const ticket of payload.tickets) {
-              if (ticket?.code) next[String(ticket.code)] = Boolean(ticket.paymentsOpen);
+              if (!ticket?.code) continue;
+              next[String(ticket.code)] = Boolean(ticket.paymentsOpen);
+              bearers[String(ticket.code)] = ticket.feeBearer === "pass" ? "pass" : "shoulder";
             }
             setTicketGates(next);
+            setFeeBearers(bearers);
           }
         }
       })
@@ -1712,12 +1754,26 @@ function RegistrationWizard() {
     const laterCount = applied ? applied.laterCount : later.length;
     const laterEach = applied ? applied.laterEachCents : later[0]?.amountCents ?? null;
     const laterCents = applied ? applied.laterCents : later.reduce((sum, row) => sum + row.amountCents, 0);
+    const bearer = feeBearers[charging.code] || "shoulder";
+    const rate = selectedFeeRate(channel, channels, paynamicsChannel, paynamicsMethods);
+    const fee = charging.currency === "PHP"
+      ? buyerCharge(dueToday, bearer, rate.percentBps, rate.fixedCents)
+      : { listed: 0, total: dueToday, shown: false };
+    const payAmount = fee.shown ? moneyExact(fee.total) : money(dueToday, charging.currency);
     return (
       <Frame
         step={3}
         onManage={openManage}
         footer={
           <div className="flex flex-col gap-3">
+            {turnstileSiteKey ? (
+              <Turnstile
+                key={turnstileMountKey}
+                siteKey={turnstileSiteKey}
+                onToken={applyTurnstileToken}
+                onBlocked={setTurnstileBlocked}
+              />
+            ) : null}
             <PrimaryButton
               disabled={
                 !charging.onSale
@@ -1730,20 +1786,10 @@ function RegistrationWizard() {
             >
               {charging.onSale
                 ? charging.currency === "PHP"
-                  ? payActionLabel(channel, money(dueToday, charging.currency), saving, paynamicsMethods.find((item) => item.code === paynamicsChannel)?.label || "")
+                  ? payActionLabel(channel, payAmount, saving, paynamicsMethods.find((item) => item.code === paynamicsChannel)?.label || "")
                   : `Submit registration · ${money(dueToday, charging.currency)} due`
                 : "Payment is locked"}
             </PrimaryButton>
-            {turnstileSiteKey ? (
-              <div className="pt-1">
-                <Turnstile
-                  key={turnstileMountKey}
-                  siteKey={turnstileSiteKey}
-                  onToken={applyTurnstileToken}
-                  onBlocked={setTurnstileBlocked}
-                />
-              </div>
-            ) : null}
             {payError ? <p className="m-0 text-center text-sm leading-normal text-[#A8131F]">{payError}</p> : null}
           </div>
         }
@@ -1752,16 +1798,31 @@ function RegistrationWizard() {
         <input className="absolute -left-[9999px] h-0 w-0" tabIndex={-1} autoComplete="off" aria-hidden="true" value={companyWebsite} onChange={(event) => setCompanyWebsite(event.target.value)} />
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Payment</h1>
         <LevNote pose="focus" label="Lev holding a card">Secure payment. I've got this.</LevNote>
-        <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-2">
-          <Row label="Attendee" value={attendee.fullName} />
-          <Row label={`${charging.name} · ${plan === "installment" ? "installment" : "paid in full"}`} value={`${money(listTotal, charging.currency)} total`} />
-          {laterCount > 0 ? <Row label={`Then, ${laterCount} payments`} value={laterEach ? `${laterCount} × ${money(laterEach, tier.currency)}` : money(laterCents, tier.currency)} /> : null}
-          {applied ? <Row label={`Coupon ${applied.code}`} value={`${applied.label} · −${money(applied.discountCents, charging.currency)}`} /> : null}
-          <div className="flex items-center justify-between gap-3 border-t-2 border-[#141416] py-3">
-            <span className="text-[15px] font-bold">{plan === "installment" ? "Due today · secure your seat" : "Due today"}</span>
-            <MoneyText text={money(dueToday, charging.currency)} className="font-archivo text-2xl font-extrabold text-[#A8131F]" />
-          </div>
-        </div>
+        <h2 className="m-0 text-[17px] font-bold">Pay with</h2>
+        {charging.currency === "PHP" ? (
+          <>
+            <PaymentChoices
+              channels={channels}
+              channel={channel}
+              onChannel={setChannel}
+              method={method}
+              onMethod={setMethod}
+              paynamicsMethods={paynamicsMethods}
+              paynamicsChannel={paynamicsChannel}
+              onPaynamicsChannel={setPaynamicsChannel}
+              paynamicsCheckout={paynamicsCheckout}
+              feeBaseCents={dueToday}
+              feeBearer={bearer}
+            />
+            <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
+              Receipt · {attendee.email} · {attendee.mobile}
+            </p>
+          </>
+        ) : (
+          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
+            UnionBank UPay collects peso payments. This ticket is in US dollars, so the seat is held and IBMC records the payment separately. Receipt goes to {attendee.email} and {attendee.mobile}.
+          </p>
+        )}
         {plan === "full" ? (
           <div className="flex flex-col gap-1.5">
             <label className="text-[13px] font-semibold text-[#3A3A40]" htmlFor="coupon-code">Coupon code</label>
@@ -1798,29 +1859,27 @@ function RegistrationWizard() {
             {couponError ? <p className="m-0 text-sm text-[#A8131F]">{couponError}</p> : null}
           </div>
         ) : null}
-        <h2 className="m-0 mt-1 text-[17px] font-bold">Pay with</h2>
-        {charging.currency === "PHP" ? (
-          <>
-            <PaymentChoices
-              channels={channels}
-              channel={channel}
-              onChannel={setChannel}
-              method={method}
-              onMethod={setMethod}
-              paynamicsMethods={paynamicsMethods}
-              paynamicsChannel={paynamicsChannel}
-              onPaynamicsChannel={setPaynamicsChannel}
-              paynamicsCheckout={paynamicsCheckout}
+        <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-2">
+          <Row label="Attendee" value={attendee.fullName} />
+          <Row label={`${charging.name} · ${plan === "installment" ? "installment" : "paid in full"}`} value={`${money(listTotal, charging.currency)} total`} />
+          {laterCount > 0 ? <Row label={`Then, ${laterCount} payments`} value={laterEach ? `${laterCount} × ${money(laterEach, tier.currency)}` : money(laterCents, tier.currency)} /> : null}
+          {applied ? <Row label={`Coupon ${applied.code}`} value={`${applied.label} · −${money(applied.discountCents, charging.currency)}`} /> : null}
+          {fee.shown ? (
+            <ChargeLines
+              label={plan === "installment" ? "Due today · secure your seat" : "Due today"}
+              baseCents={dueToday}
+              listedCents={fee.listed}
+              totalCents={fee.total}
+              bearer={bearer}
+              rule={feeRuleLabel(rate.percentBps, rate.fixedCents)}
             />
-            <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
-              Receipt · {attendee.email} · {attendee.mobile}
-            </p>
-          </>
-        ) : (
-          <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
-            UnionBank UPay collects peso payments. This ticket is in US dollars, so the seat is held and IBMC records the payment separately. Receipt goes to {attendee.email} and {attendee.mobile}.
-          </p>
-        )}
+          ) : (
+            <div className="flex items-center justify-between gap-3 border-t-2 border-[#141416] py-3">
+              <span className="text-[15px] font-bold">{plan === "installment" ? "Due today · secure your seat" : "Due today"}</span>
+              <MoneyText text={money(dueToday, charging.currency)} className="font-archivo text-2xl font-extrabold text-[#A8131F]" />
+            </div>
+          )}
+        </div>
       </Frame>
     );
   }
@@ -1968,6 +2027,108 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
+function selectedFeeRate(
+  channel: PayChannelCode | "",
+  channels: PayChannel[] | null,
+  paynamicsChannel: string,
+  paynamicsMethods: PaynamicsMethodOption[],
+) {
+  if (channel === "paynamics") {
+    const method = paynamicsMethods.find((item) => item.code === paynamicsChannel);
+    return { percentBps: method?.feePercentBps ?? null, fixedCents: method?.feeFixedCents ?? null };
+  }
+  const item = channels?.find((row) => row.code === channel);
+  return { percentBps: item?.feePercentBps ?? null, fixedCents: item?.feeFixedCents ?? null };
+}
+
+function buyerCharge(baseCents: number, bearer: FeeBearer, percentBps: number | null, fixedCents: number | null) {
+  if (!hasFeeRate(percentBps, fixedCents)) return { listed: 0, total: baseCents, shown: false };
+  const listed = convenienceFeeCents(baseCents, percentBps, fixedCents);
+  const charged = bearer === "pass" ? listed : 0;
+  return { listed, total: baseCents + charged, shown: true };
+}
+
+function ChargeLines({
+  label,
+  baseCents,
+  listedCents,
+  totalCents,
+  bearer,
+  rule,
+}: {
+  label: string;
+  baseCents: number;
+  listedCents: number;
+  totalCents: number;
+  bearer: FeeBearer;
+  rule: string;
+}) {
+  return (
+    <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-baseline gap-x-3 gap-y-2 border-t-2 border-[#141416] py-3 text-[15px]">
+      <span className="text-[12px] font-semibold text-[#5C5C63]">Item</span>
+      <span className="text-right text-[12px] font-semibold text-[#5C5C63]">Fee</span>
+      <span className="text-right text-[12px] font-semibold text-[#5C5C63]">Actual amount</span>
+      <span>{label}</span>
+      <span className="text-right text-[#5C5C63]" aria-hidden="true">—</span>
+      <span className="text-right font-semibold tabular-nums">{moneyExact(baseCents)}</span>
+      <span>Convenience fee</span>
+      <span className="text-right font-semibold tabular-nums">{rule}</span>
+      <span className="text-right font-semibold tabular-nums">{bearer === "pass" ? moneyExact(listedCents) : "Shouldered"}</span>
+      <span className="col-span-3 flex items-baseline justify-between gap-3 border-t-2 border-[#141416] pt-2">
+        <span className="font-bold">Total</span>
+        <MoneyText text={moneyExact(totalCents)} className="font-archivo text-2xl font-extrabold text-[#A8131F]" />
+      </span>
+      {bearer === "pass" ? null : (
+        <span className="col-span-3 text-[13px] font-normal text-[#5C5C63]">IBMC shoulders this fee. It is not included in the total.</span>
+      )}
+    </div>
+  );
+}
+
+function feeQuoteParts(baseCents: number, bearer: FeeBearer, percentBps: number | null, fixedCents: number | null) {
+  if (!hasFeeRate(percentBps, fixedCents)) return null;
+  const listed = convenienceFeeCents(baseCents, percentBps, fixedCents);
+  return {
+    rate: feeRuleLabel(percentBps, fixedCents),
+    amount: bearer === "pass" ? moneyExact(listed) : "Shouldered",
+  };
+}
+
+function methodNote(detail: string) {
+  const text = detail.trim();
+  if (/^pay with\b/i.test(text)) return "";
+  return text;
+}
+
+function MethodChoice({
+  label,
+  detail,
+  baseCents,
+  bearer,
+  percentBps,
+  fixedCents,
+}: {
+  label: string;
+  detail: string;
+  baseCents: number;
+  bearer: FeeBearer;
+  percentBps: number | null;
+  fixedCents: number | null;
+}) {
+  const fee = feeQuoteParts(baseCents, bearer, percentBps, fixedCents);
+  const note = methodNote(detail);
+  return (
+    <span className="flex min-w-0 flex-1 items-start justify-between gap-3">
+      <span className="flex min-w-0 flex-col gap-0.5">
+        <span className="text-[15px] font-semibold">{label}</span>
+        {fee ? <span className="text-[13px] font-semibold text-[#3A3A40]">{fee.rate}</span> : null}
+        {note ? <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{note}</span> : null}
+      </span>
+      {fee ? <span className="shrink-0 text-right text-[15px] font-semibold tabular-nums">{fee.amount}</span> : null}
+    </span>
+  );
+}
+
 function PaymentChoices({
   channels,
   channel,
@@ -1978,6 +2139,8 @@ function PaymentChoices({
   paynamicsChannel,
   onPaynamicsChannel,
   paynamicsCheckout,
+  feeBaseCents = 0,
+  feeBearer = "shoulder",
 }: {
   channels: PayChannel[] | null;
   channel: PayChannelCode | "";
@@ -1988,6 +2151,8 @@ function PaymentChoices({
   paynamicsChannel: string;
   onPaynamicsChannel: (channel: string) => void;
   paynamicsCheckout?: PaynamicsCheckoutPublic;
+  feeBaseCents?: number;
+  feeBearer?: FeeBearer;
 }) {
   if (channels === null) return <p className="m-0 text-sm text-[#5C5C63]">Loading payment options.</p>;
   if (channels.length === 0) return <p className="m-0 text-sm text-[#5C5C63]">Payment isn't open right now.</p>;
@@ -2000,10 +2165,14 @@ function PaymentChoices({
           {channels.map((item) => (
             <label key={item.code} className={`flex items-start gap-3 border-t border-[#E4E1DC] px-4 py-4 first:border-t-0 ${channel === item.code ? "bg-[#FBE9EA]" : ""}`}>
               <input type="radio" name="channel" className="mt-1 h-5 w-5 accent-[#D0202E]" checked={channel === item.code} onChange={() => onChannel(item.code)} />
-              <span className="flex flex-col gap-0.5">
-                <span className="text-[15px] font-semibold">{item.label}</span>
-                <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{item.detail}</span>
-              </span>
+              <MethodChoice
+                label={item.label}
+                detail={item.detail}
+                baseCents={feeBaseCents}
+                bearer={feeBearer}
+                percentBps={item.feePercentBps ?? null}
+                fixedCents={item.feeFixedCents ?? null}
+              />
             </label>
           ))}
         </div>
@@ -2013,7 +2182,7 @@ function PaymentChoices({
       {channel === "upay" ? <UpayMethods method={method} onChange={onMethod} /> : null}
       {channel === "paynamics" ? (
         <>
-          <PaynamicsMethods methods={paynamicsMethods} channel={paynamicsChannel} onChange={onPaynamicsChannel} />
+          <PaynamicsMethods methods={paynamicsMethods} channel={paynamicsChannel} onChange={onPaynamicsChannel} feeBaseCents={feeBaseCents} feeBearer={feeBearer} />
           {paynamicsCheckout?.checkoutMode === "off" ? (
             <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] leading-normal text-[#A8131F]">
               Paynamics checkout is not enabled on this server
@@ -2031,7 +2200,19 @@ function PaymentChoices({
   );
 }
 
-function PaynamicsMethods({ methods, channel, onChange }: { methods: PaynamicsMethodOption[]; channel: string; onChange: (channel: string) => void }) {
+function PaynamicsMethods({
+  methods,
+  channel,
+  onChange,
+  feeBaseCents = 0,
+  feeBearer = "shoulder",
+}: {
+  methods: PaynamicsMethodOption[];
+  channel: string;
+  onChange: (channel: string) => void;
+  feeBaseCents?: number;
+  feeBearer?: FeeBearer;
+}) {
   if (!methods.length) {
     return <p className="m-0 rounded-[10px] border border-[#E8B4B8] bg-[#FBE9EA] px-3 py-2 text-[13px] leading-normal text-[#A8131F]">No Paynamics options are turned on.</p>;
   }
@@ -2046,10 +2227,14 @@ function PaynamicsMethods({ methods, channel, onChange }: { methods: PaynamicsMe
             {heading ? <p className="m-0 border-t border-[#E4E1DC] px-4 pt-3 text-xs font-bold tracking-[0.12em] text-[#A8131F] uppercase first:border-t-0">{item.group}</p> : null}
             <label className={`flex items-start gap-3 px-4 py-3 ${channel === item.code ? "bg-[#FBE9EA]" : ""}`}>
               <input type="radio" name="paynamics-channel" className="mt-1 h-5 w-5 accent-[#D0202E]" checked={channel === item.code} onChange={() => onChange(item.code)} />
-              <span className="flex flex-col gap-0.5">
-                <span className="text-[15px] font-semibold">{item.label}</span>
-                <span className="text-[13px] font-normal leading-snug text-[#5C5C63]">{item.detail}</span>
-              </span>
+              <MethodChoice
+                label={item.label}
+                detail={item.detail}
+                baseCents={feeBaseCents}
+                bearer={feeBearer}
+                percentBps={item.feePercentBps ?? null}
+                fixedCents={item.feeFixedCents ?? null}
+              />
             </label>
           </div>
         );
@@ -3018,6 +3203,12 @@ function Manage({
   const paid = record.payments.filter((item) => item.status === "paid");
   const paidCents = paid.reduce((sum, item) => sum + item.amountCents, 0);
   const due = record.payments.find((item) => item.status === "due");
+  const dueBase = due ? due.amountCents - (due.amountPaidCents || 0) : 0;
+  const manageBearer: FeeBearer = record.feeBearer === "pass" ? "pass" : "shoulder";
+  const manageRate = selectedFeeRate(channel, channels, paynamicsChannel, paynamicsMethods);
+  const manageFee = due && record.currency === "PHP"
+    ? buyerCharge(dueBase, manageBearer, manageRate.percentBps, manageRate.fixedCents)
+    : { listed: 0, total: dueBase, shown: false };
   const remaining = record.totalCents - paidCents;
   const first = record.attendee.fullName.trim().split(/\s+/)[0];
   const keepUntil = due && due.dueOn !== "on-registration" ? addDays(due.dueOn, 15) : null;
@@ -3080,14 +3271,26 @@ function Manage({
                   paynamicsChannel={paynamicsChannel}
                   onPaynamicsChannel={setPaynamicsChannel}
                   paynamicsCheckout={paynamicsCheckout}
+                  feeBaseCents={dueBase}
+                  feeBearer={manageBearer}
                 />
+                {manageFee.shown ? (
+                  <ChargeLines
+                    label="Due now"
+                    baseCents={dueBase}
+                    listedCents={manageFee.listed}
+                    totalCents={manageFee.total}
+                    bearer={manageBearer}
+                    rule={feeRuleLabel(manageRate.percentBps, manageRate.fixedCents)}
+                  />
+                ) : null}
                 <button
                   type="button"
                   disabled={busy || !channel || (channel === "paynamics" && !paynamicsChannel)}
                   onClick={startPayment}
                   className="rounded-full bg-[#D0202E] px-4 py-3.5 text-base font-bold text-white disabled:bg-[#E4A0A6]"
                 >
-                  {payActionLabel(channel, money(due.amountCents, record.currency), busy, paynamicsMethods.find((item) => item.code === paynamicsChannel)?.label || "")}
+                  {payActionLabel(channel, manageFee.shown ? moneyExact(manageFee.total) : money(due.amountCents, record.currency), busy, paynamicsMethods.find((item) => item.code === paynamicsChannel)?.label || "")}
                 </button>
                 <button
                   type="button"

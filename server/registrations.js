@@ -82,7 +82,7 @@ export function findRegistrationByContact(db, query) {
 
 export function getRegistration(db, id) {
   const registration = db.prepare(`
-    SELECT r.*, p.name AS product_name, p.code AS product_code
+    SELECT r.*, p.name AS product_name, p.code AS product_code, p.fee_bearer AS fee_bearer
     FROM registrations r
     JOIN ticket_products p ON p.id = r.product_id
     WHERE r.id = ?

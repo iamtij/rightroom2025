@@ -17,6 +17,7 @@ export {
 import { reportError } from "./report-error.js";
 import { getRegistration, recordPayment } from "./registrations.js";
 import { isChannelEnabled, isPaynamicsMethodEnabled, paynamicsMethodByCode } from "./payment-channels.js";
+import { paymentCharge, settlementBaseCents } from "./convenience-fee.js";
 
 const locks = new Set();
 const DEFAULT_CHECKOUT_TTL_MINUTES = 30;
@@ -656,7 +657,7 @@ function settlePaynamics(db, row) {
       recordPayment(db, {
         registrationId: current.registration_id,
         installmentId: current.installment_id,
-        amountCents: current.amount_cents,
+        amountCents: settlementBaseCents(current),
         method: "paynamics",
         externalReference: current.request_id,
       });
@@ -897,8 +898,9 @@ export async function startPaynamicsPayment(db, registration, pchannel) {
     };
   }
   const due = dueInstallment(registration);
-  const amountCents = due ? due.amount_cents - due.amount_paid_cents : 0;
-  if (!due || amountCents <= 0) return { registration, paynamics: null };
+  const baseCents = due ? due.amount_cents - due.amount_paid_cents : 0;
+  const quote = paymentCharge(db, registration, baseCents, { channel: "paynamics", method: selection.code });
+  if (!due || quote.baseCents <= 0) return { registration, paynamics: null };
   const lock = `paynamics:${due.id}`;
   if (!hold(lock)) return { error: "Payment is already starting.", status: 409, registration };
   try {
@@ -911,7 +913,8 @@ export async function startPaynamicsPayment(db, registration, pchannel) {
     if (open) {
       const expires = Date.parse(open.expires_at || "");
       const sameMethod = String(open.payment_channel || "") === selection.code;
-      if (sameMethod && (!Number.isFinite(expires) || Date.now() < expires)) {
+      const sameCharge = open.amount_cents === quote.totalCents && (open.fee_cents || 0) === quote.feeCents;
+      if (sameMethod && sameCharge && (!Number.isFinite(expires) || Date.now() < expires)) {
         return view(db, registration, open);
       }
       db.prepare(`
@@ -927,7 +930,7 @@ export async function startPaynamicsPayment(db, registration, pchannel) {
       merchantKey,
       requestId,
       registration,
-      amountCents,
+      amountCents: quote.totalCents,
       pmethod: selection.pmethod,
       pchannel: selection.pchannel,
       trxType: paynamicsMethodByCode(selection.code)?.trxType || "",
@@ -945,16 +948,17 @@ export async function startPaynamicsPayment(db, registration, pchannel) {
     const failed = !created.ok || !signed || !paymentUrl;
     const insert = db.prepare(`
       INSERT INTO paynamics_payments (
-        registration_id, installment_id, request_id, gateway_response_id, amount_cents, currency, status,
+        registration_id, installment_id, request_id, gateway_response_id, amount_cents, fee_cents, currency, status,
         gateway_response_code, gateway_message, payment_channel, payment_url, expires_at
-      ) VALUES (?, ?, ?, ?, ?, 'PHP', ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, 'PHP', ?, ?, ?, ?, ?, ?)
     `);
     const result = insert.run(
       registration.id,
       due.id,
       requestId,
       response.response_id || null,
-      amountCents,
+      quote.totalCents,
+      quote.feeCents,
       failed ? "failed" : "pending",
       response.response_code || (failed ? "create_failed" : null),
       response.response_message || (failed ? "unsigned/invalid hosted link" : null),

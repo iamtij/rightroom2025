@@ -7,7 +7,8 @@ import { openDatabase } from "./db.js";
 import { currentTotp } from "./auth.js";
 import { createRegistration, getEntryPass, recordPayment, resumeTokenMatches } from "./registrations.js";
 import { upayPublicCheckoutInfo, upaySettlement } from "./upay.js";
-import { buyerPaymentChannels, listPaymentChannels, savePaymentChannels } from "./payment-channels.js";
+import { buyerPaymentChannels, listPaymentChannels, savePaymentChannels, savePaynamicsMethods } from "./payment-channels.js";
+import { convenienceFeeCents, paymentCharge, settlementBaseCents } from "./convenience-fee.js";
 
 delete process.env.ALLOW_TEST_TICKET;
 
@@ -56,6 +57,34 @@ assert.equal(qrChannel().customNote, "");
 assert.throws(() => savePaymentChannels(db, { hitpay_qr: { note: "x".repeat(401) } }), /400 characters/);
 savePaymentChannels(db, { hitpay_qr: { label: "" } });
 assert.equal(qrChannel().customLabel, "");
+assert.equal(qrChannel().feePercentBps, null);
+assert.equal(qrChannel().feeFixedCents, null);
+assert.equal(convenienceFeeCents(1_500_000, 100, 2000), 15_000);
+assert.equal(convenienceFeeCents(100_000, 100, 2000), 2_000);
+assert.equal(convenienceFeeCents(1_500_000, null, 2000), 2_000);
+assert.equal(convenienceFeeCents(1_500_000, null, null), 0);
+assert.equal(settlementBaseCents({ amount_cents: 1_515_000, fee_cents: 15_000 }), 1_500_000);
+assert.equal(settlementBaseCents({ amount_cents: 1_500_000 }), 1_500_000);
+savePaymentChannels(db, { hitpay_qr: { feePercent: "1", feeFixed: "20", enabled: true } });
+assert.equal(qrChannel().feePercentBps, 100);
+assert.equal(qrChannel().feeFixedCents, 2000);
+assert.equal(buyerPaymentChannels(db).find((item) => item.code === "hitpay_qr").feeFixedCents, 2000);
+assert.throws(() => savePaymentChannels(db, { hitpay_qr: { feePercent: "101" } }), /percent/);
+savePaynamicsMethods(db, { paymaya_ph: { feePercent: "2.5", feeFixed: "" } });
+assert.equal(db.prepare("SELECT fee_percent_bps FROM paynamics_methods WHERE code = 'paymaya_ph'").get().fee_percent_bps, 250);
+db.prepare("UPDATE ticket_products SET fee_bearer = 'pass' WHERE code = 'early_bird'").run();
+const passedOn = paymentCharge(db, { currency: "PHP", product_code: "early_bird" }, 1_500_000, { channel: "hitpay_qr" });
+assert.equal(passedOn.feeCents, 15_000);
+assert.equal(passedOn.totalCents, 1_515_000);
+const small = paymentCharge(db, { currency: "PHP", fee_bearer: "pass" }, 100_000, { channel: "hitpay_qr" });
+assert.equal(small.feeCents, 2_000);
+const absorbed = paymentCharge(db, { currency: "PHP", fee_bearer: "shoulder" }, 1_500_000, { channel: "hitpay_qr" });
+assert.equal(absorbed.feeCents, 0);
+assert.equal(absorbed.totalCents, 1_500_000);
+db.prepare("UPDATE ticket_products SET fee_bearer = 'shoulder' WHERE code = 'early_bird'").run();
+savePaymentChannels(db, { hitpay_qr: { feePercent: "", feeFixed: "", enabled: false } });
+assert.equal(qrChannel().feePercentBps, null);
+assert.equal(qrChannel().enabled, false);
 
 const legacyFile = path.join(os.tmpdir(), `ibmc-channel-label-${process.pid}.sqlite`);
 fs.rmSync(legacyFile, { force: true });
@@ -188,6 +217,8 @@ process.env.ADMIN_PASSWORD = "correct-horse-battery";
 process.env.ADMIN_SESSION_SECRET = "security-audit-test-secret-32ch";
 process.env.TURNSTILE_SITE_KEY = "";
 process.env.TURNSTILE_SECRET_KEY = "";
+process.env.ALLOW_TEST_REGISTRATION = "false";
+process.env.IBMC_STAGING_EARLY_PAYMENTS = "false";
 const { createApi } = await import("./api.js");
 const seeded = openDatabase(file);
 seeded.prepare("UPDATE ticket_products SET sales_start = '2020-01-01', payments_open = 1").run();
@@ -697,6 +728,18 @@ try {
   assert.equal(hiddenAdmins.status, 403);
   const staffDashboard = await fetch(`${base}/api/admin/dashboard`, { headers: { cookie: secondCookie } });
   assert.equal(staffDashboard.status, 200);
+  const staffTickets = await fetch(`${base}/api/admin/tickets`, {
+    method: "PATCH",
+    headers: { cookie: secondCookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ code: "first_mover", paymentsOpen: false }),
+  });
+  assert.equal(staffTickets.status, 403);
+  const staffChannels = await fetch(`${base}/api/admin/payment-channels`, {
+    method: "PATCH",
+    headers: { cookie: secondCookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ hitpay_qr: { enabled: false } }),
+  });
+  assert.equal(staffChannels.status, 403);
   const requested = await fetch(`${base}/api/admin/registrations/${provedBody.reference}/comp`, {
     method: "POST",
     headers: { cookie },
@@ -721,6 +764,42 @@ try {
   const ticketListBody = await ticketList.json();
   assert.equal(ticketList.status, 200);
   assert.equal(ticketListBody.find((row) => row.code === "first_mover").paymentsOpen, true);
+  assert.equal(ticketListBody.find((row) => row.code === "early_bird").feeBearer, "shoulder");
+  const passed = await fetch(`${base}/api/admin/tickets`, {
+    method: "PATCH",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ code: "early_bird", feeBearer: "pass" }),
+  });
+  const passedBody = await passed.json();
+  assert.equal(passed.status, 200);
+  assert.equal(passedBody.find((row) => row.code === "early_bird").feeBearer, "pass");
+  const feeOptions = await fetch(`${base}/api/registration-options`);
+  const feeOptionsBody = await feeOptions.json();
+  assert.equal(feeOptionsBody.tickets.find((row) => row.code === "early_bird").feeBearer, "pass");
+  const badBearer = await fetch(`${base}/api/admin/tickets`, {
+    method: "PATCH",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ code: "early_bird", feeBearer: "buyer" }),
+  });
+  assert.equal(badBearer.status, 400);
+  const shouldered = await fetch(`${base}/api/admin/tickets`, {
+    method: "PATCH",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ code: "early_bird", feeBearer: "shoulder" }),
+  });
+  assert.equal(shouldered.status, 200);
+  const savedFee = await fetch(`${base}/api/admin/payment-channels`, {
+    method: "PATCH",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ hitpay_qr: { feePercent: "1", feeFixed: "20", enabled: true } }),
+  });
+  const savedFeeBody = await savedFee.json();
+  assert.equal(savedFee.status, 200);
+  assert.equal(savedFeeBody.channels.find((row) => row.code === "hitpay_qr").feePercentBps, 100);
+  assert.equal(savedFeeBody.channels.find((row) => row.code === "hitpay_qr").feeFixedCents, 2000);
+  const publicFees = await fetch(`${base}/api/payment-channels`);
+  const publicFeesBody = await publicFees.json();
+  assert.equal(publicFeesBody.channels.find((row) => row.code === "hitpay_qr").feeFixedCents, 2000);
   const locked = await fetch(`${base}/api/admin/tickets`, {
     method: "PATCH",
     headers: { cookie, "Content-Type": "application/json" },

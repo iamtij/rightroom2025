@@ -1,3 +1,5 @@
+import { normalizeFeePercent, normalizeFeePesos } from "./convenience-fee.js";
+
 export const PAYMENT_CHANNELS = [
   {
     code: "upay",
@@ -54,6 +56,35 @@ const paynamicsMethodCatalog = new Map(PAYNAMICS_METHODS.map((method) => [method
 const CUSTOM_LABEL_MAX = 80;
 const CUSTOM_NOTE_MAX = 400;
 
+function feeFields(row) {
+  return {
+    feePercentBps: row?.fee_percent_bps ?? null,
+    feeFixedCents: row?.fee_fixed_cents ?? null,
+  };
+}
+
+function readFeePatch(value, patch) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  if (Object.prototype.hasOwnProperty.call(value, "feePercent")) {
+    const normalized = normalizeFeePercent(value.feePercent);
+    if (!normalized.ok) {
+      const error = new Error(normalized.error);
+      error.status = 400;
+      throw error;
+    }
+    if (!normalized.skip) patch.feePercentBps = normalized.value;
+  }
+  if (Object.prototype.hasOwnProperty.call(value, "feeFixed")) {
+    const normalized = normalizeFeePesos(value.feeFixed);
+    if (!normalized.ok) {
+      const error = new Error(normalized.error);
+      error.status = 400;
+      throw error;
+    }
+    if (!normalized.skip) patch.feeFixedCents = normalized.value;
+  }
+}
+
 export function seedPaymentChannels(db) {
   const insert = db.prepare("INSERT OR IGNORE INTO payment_channels (code, enabled) VALUES (?, ?)");
   for (const channel of PAYMENT_CHANNELS) insert.run(channel.code, DEFAULTS[channel.code]);
@@ -88,7 +119,7 @@ export function normalizeCustomNote(value) {
 }
 
 export function listPaymentChannels(db, { enabledOnly = false } = {}) {
-  const rows = db.prepare("SELECT code, enabled, custom_label, custom_note FROM payment_channels").all();
+  const rows = db.prepare("SELECT code, enabled, custom_label, custom_note, fee_percent_bps, fee_fixed_cents FROM payment_channels").all();
   const saved = new Map(rows.map((row) => [row.code, row]));
   return PAYMENT_CHANNELS.filter((channel) => !enabledOnly || saved.get(channel.code)?.enabled === 1).map((channel) => {
     const row = saved.get(channel.code);
@@ -100,6 +131,7 @@ export function listPaymentChannels(db, { enabledOnly = false } = {}) {
       note: channel.note,
       customNote: String(row?.custom_note || "").trim(),
       enabled: row?.enabled === 1,
+      ...feeFields(row),
     };
   });
 }
@@ -110,6 +142,8 @@ export function buyerPaymentChannels(db) {
     label: channel.customLabel || channel.label,
     detail: channel.detail,
     note: channel.customNote || channel.note,
+    feePercentBps: channel.feePercentBps,
+    feeFixedCents: channel.feeFixedCents,
   }));
 }
 
@@ -119,7 +153,7 @@ export function isChannelEnabled(db, code) {
 }
 
 export function listPaynamicsMethods(db) {
-  const rows = db.prepare("SELECT code, enabled FROM paynamics_methods").all();
+  const rows = db.prepare("SELECT code, enabled, fee_percent_bps, fee_fixed_cents FROM paynamics_methods").all();
   const saved = new Map(rows.map((row) => [row.code, row]));
   return PAYNAMICS_METHODS.map((method) => {
     const row = saved.get(method.code);
@@ -130,6 +164,7 @@ export function listPaynamicsMethods(db) {
       detail: method.detail,
       preset: method.preset,
       enabled: row ? row.enabled === 1 : method.preset === "available",
+      ...feeFields(row),
     };
   });
 }
@@ -137,7 +172,7 @@ export function listPaynamicsMethods(db) {
 export function buyerPaynamicsMethods(db) {
   return listPaynamicsMethods(db)
     .filter((method) => method.enabled)
-    .map(({ code, label, group, detail }) => ({ code, label, group, detail }));
+    .map(({ code, label, group, detail, feePercentBps, feeFixedCents }) => ({ code, label, group, detail, feePercentBps, feeFixedCents }));
 }
 
 export function isPaynamicsMethodEnabled(db, code) {
@@ -154,16 +189,28 @@ export function savePaynamicsMethods(db, input) {
     error.status = 400;
     throw error;
   }
-  const update = db.prepare("UPDATE paynamics_methods SET enabled = ? WHERE code = ?");
+  const updateEnabled = db.prepare("UPDATE paynamics_methods SET enabled = ? WHERE code = ?");
+  const updatePercent = db.prepare("UPDATE paynamics_methods SET fee_percent_bps = ? WHERE code = ?");
+  const updateFixed = db.prepare("UPDATE paynamics_methods SET fee_fixed_cents = ? WHERE code = ?");
   const patches = [];
   for (const method of PAYNAMICS_METHODS) {
     if (!Object.prototype.hasOwnProperty.call(input, method.code)) continue;
     const value = input[method.code];
-    const enabled = value && typeof value === "object" ? Boolean(value.enabled) : Boolean(value);
-    patches.push({ code: method.code, enabled: enabled ? 1 : 0 });
+    const patch = { code: method.code };
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      if (Object.prototype.hasOwnProperty.call(value, "enabled")) patch.enabled = value.enabled ? 1 : 0;
+      readFeePatch(value, patch);
+    } else {
+      patch.enabled = value ? 1 : 0;
+    }
+    patches.push(patch);
   }
   db.transaction(() => {
-    for (const patch of patches) update.run(patch.enabled, patch.code);
+    for (const patch of patches) {
+      if (patch.enabled !== undefined) updateEnabled.run(patch.enabled, patch.code);
+      if (patch.feePercentBps !== undefined) updatePercent.run(patch.feePercentBps, patch.code);
+      if (patch.feeFixedCents !== undefined) updateFixed.run(patch.feeFixedCents, patch.code);
+    }
   })();
   return listPaynamicsMethods(db);
 }
@@ -195,6 +242,7 @@ export function savePaymentChannels(db, input) {
         }
         patch.note = normalized.value === channel.note ? null : normalized.value;
       }
+      readFeePatch(value, patch);
     } else {
       patch.enabled = value ? 1 : 0;
     }
@@ -203,11 +251,15 @@ export function savePaymentChannels(db, input) {
   const updateEnabled = db.prepare("UPDATE payment_channels SET enabled = ? WHERE code = ?");
   const updateLabel = db.prepare("UPDATE payment_channels SET custom_label = ? WHERE code = ?");
   const updateNote = db.prepare("UPDATE payment_channels SET custom_note = ? WHERE code = ?");
+  const updatePercent = db.prepare("UPDATE payment_channels SET fee_percent_bps = ? WHERE code = ?");
+  const updateFixed = db.prepare("UPDATE payment_channels SET fee_fixed_cents = ? WHERE code = ?");
   db.transaction(() => {
     for (const patch of patches) {
       if (patch.enabled !== undefined) updateEnabled.run(patch.enabled, patch.code);
       if (patch.label !== undefined) updateLabel.run(patch.label, patch.code);
       if (patch.note !== undefined) updateNote.run(patch.note, patch.code);
+      if (patch.feePercentBps !== undefined) updatePercent.run(patch.feePercentBps, patch.code);
+      if (patch.feeFixedCents !== undefined) updateFixed.run(patch.feeFixedCents, patch.code);
     }
   })();
   return listPaymentChannels(db);

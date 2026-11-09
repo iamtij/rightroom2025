@@ -24,6 +24,24 @@ import { handlePaynamicsNotification, paynamicsCheckoutChannel, paynamicsPublicC
 import { buyerPaymentChannels, buyerPaynamicsMethods, hitpayConfigured, listPaymentChannels, listPaynamicsMethods, paynamicsConfigured, paynamicsMethodByCode, savePaymentChannels, savePaynamicsMethods } from "./payment-channels.js";
 import { entryQrPng } from "./templates.js";
 import { recordSecurityEvent } from "./alerts.js";
+import { railwaySignalsPresent } from "./deployment-identity.js";
+
+// Cloudflare's published test widget. It loads on any hostname, including localhost.
+// The configured sitekey is for the public site and shows "Invalid sitekey" on local dev.
+const LOCAL_TURNSTILE_SITE_KEY = "1x00000000000000000000AA";
+const LOCAL_TURNSTILE_SECRET_KEY = "1x0000000000000000000000000000000AA";
+
+function turnstileCredentials(req) {
+  const siteKey = String(process.env.TURNSTILE_SITE_KEY || "").trim();
+  const secret = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
+  if (!siteKey || !secret) return { siteKey: "", secret: "" };
+  const host = String(req.hostname || "").toLowerCase();
+  const local = host === "localhost" || host === "127.0.0.1" || host === "::1";
+  if (local && !railwaySignalsPresent()) {
+    return { siteKey: LOCAL_TURNSTILE_SITE_KEY, secret: LOCAL_TURNSTILE_SECRET_KEY };
+  }
+  return { siteKey, secret };
+}
 
 let database;
 
@@ -162,6 +180,8 @@ function present(registration, options = {}) {
       type: registration.attendee_type,
     },
     tierName: registration.product_name,
+    productCode: registration.product_code,
+    feeBearer: registration.fee_bearer === "pass" ? "pass" : "shoulder",
     plan: registration.payment_plan,
     currency: registration.currency,
     totalCents: registration.amount_due_cents,
@@ -272,15 +292,23 @@ function requireAdmin(req, res, next) {
   next();
 }
 
-function requireSuperAdmin(req, res, next) {
-  requireAdmin(req, res, () => {
-    if (req.admin.role !== "super") {
-      res.status(403).json({ error: "Only a super admin can manage admins." });
-      return;
-    }
-    next();
-  });
+function requireSuperAdminMessage(message) {
+  return (req, res, next) => {
+    requireAdmin(req, res, () => {
+      if (req.admin.role !== "super") {
+        res.status(403).json({ error: message });
+        return;
+      }
+      next();
+    });
+  };
 }
+
+function requireSuperAdmin(req, res, next) {
+  requireSuperAdminMessage("Only a super admin can manage admins.")(req, res, next);
+}
+
+const requirePaymentSettings = requireSuperAdminMessage("Only a super admin can change payment settings.");
 
 function writeAudit(database, adminId, action, target, amountCents = null) {
   database.prepare(`
@@ -306,7 +334,7 @@ const PUBLIC_TICKETS = ["first_mover", "early_bird", "regular", "intl_early_bird
 
 function publicTicketGates(database) {
   const rows = database.prepare(`
-    SELECT code, name, currency, full_price_cents, sales_start, sales_end, payments_open
+    SELECT code, name, currency, full_price_cents, sales_start, sales_end, payments_open, fee_bearer
     FROM ticket_products
     WHERE code IN (${PUBLIC_TICKETS.map(() => "?").join(", ")})
     ORDER BY sales_start, id
@@ -319,6 +347,7 @@ function publicTicketGates(database) {
     salesStart: row.sales_start,
     salesEnd: row.sales_end,
     paymentsOpen: row.payments_open === 1,
+    feeBearer: row.fee_bearer === "pass" ? "pass" : "shoulder",
   }));
 }
 
@@ -329,16 +358,35 @@ function saveTicketPayment(database, body) {
     error.status = 400;
     throw error;
   }
-  if (typeof body.paymentsOpen !== "boolean") {
+  const hasOpen = Object.prototype.hasOwnProperty.call(body, "paymentsOpen");
+  const hasBearer = Object.prototype.hasOwnProperty.call(body, "feeBearer");
+  if (!hasOpen && !hasBearer) {
     const error = new Error("Choose open or locked");
     error.status = 400;
     throw error;
   }
-  const result = database.prepare("UPDATE ticket_products SET payments_open = ? WHERE code = ?").run(body.paymentsOpen ? 1 : 0, code);
-  if (!result.changes) {
+  if (hasOpen && typeof body.paymentsOpen !== "boolean") {
+    const error = new Error("Choose open or locked");
+    error.status = 400;
+    throw error;
+  }
+  if (hasBearer && body.feeBearer !== "pass" && body.feeBearer !== "shoulder") {
+    const error = new Error("Choose pass on or shouldered");
+    error.status = 400;
+    throw error;
+  }
+  const existing = database.prepare("SELECT code FROM ticket_products WHERE code = ?").get(code);
+  if (!existing) {
     const error = new Error("Unknown ticket");
     error.status = 400;
     throw error;
+  }
+  if (hasOpen && hasBearer) {
+    database.prepare("UPDATE ticket_products SET payments_open = ?, fee_bearer = ? WHERE code = ?").run(body.paymentsOpen ? 1 : 0, body.feeBearer, code);
+  } else if (hasOpen) {
+    database.prepare("UPDATE ticket_products SET payments_open = ? WHERE code = ?").run(body.paymentsOpen ? 1 : 0, code);
+  } else {
+    database.prepare("UPDATE ticket_products SET fee_bearer = ? WHERE code = ?").run(body.feeBearer, code);
   }
 }
 
@@ -385,9 +433,8 @@ export function createApi() {
     });
   });
 
-  router.get("/registration-options", (_req, res) => {
-    const siteKey = String(process.env.TURNSTILE_SITE_KEY || "").trim();
-    const secret = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
+  router.get("/registration-options", (req, res) => {
+    const { siteKey, secret } = turnstileCredentials(req);
     const stagingEarly = assessStagingEarlyPayments();
     const skipTurnstileCheckout = stagingTurnstileBypassed();
     res.json({
@@ -397,7 +444,17 @@ export function createApi() {
       turnstileConfigured: Boolean(siteKey && secret),
       turnstileSiteKey: siteKey && secret && !skipTurnstileCheckout ? siteKey : "",
       turnstileRequiredForCheckout: Boolean(siteKey && secret && !skipTurnstileCheckout),
-      tickets: publicTicketGates(db()).map((ticket) => ({ code: ticket.code, paymentsOpen: ticket.paymentsOpen })),
+      tickets: [
+        ...publicTicketGates(db()).map((ticket) => ({ code: ticket.code, paymentsOpen: ticket.paymentsOpen, feeBearer: ticket.feeBearer })),
+        ...db().prepare(`
+          SELECT code, fee_bearer FROM ticket_products
+          WHERE code NOT IN (${PUBLIC_TICKETS.map(() => "?").join(", ")})
+        `).all(...PUBLIC_TICKETS).map((ticket) => ({
+          code: ticket.code,
+          paymentsOpen: false,
+          feeBearer: ticket.fee_bearer === "pass" ? "pass" : "shoulder",
+        })),
+      ],
     });
   });
 
@@ -419,7 +476,7 @@ export function createApi() {
       return true;
     }
     db().prepare("DELETE FROM form_challenges WHERE token = ?").run(token);
-    const secret = String(process.env.TURNSTILE_SECRET_KEY || "").trim();
+    const { secret } = turnstileCredentials(req);
     if (secret && !stagingTurnstileBypassed()) {
       const response = await fetch("https://challenges.cloudflare.com/turnstile/v0/siteverify", {
         method: "POST",
@@ -1042,7 +1099,7 @@ export function createApi() {
     res.json(adminPaymentSettings(db()));
   });
 
-  router.patch("/admin/payment-channels", requireAdmin, (req, res) => {
+  router.patch("/admin/payment-channels", requirePaymentSettings, (req, res) => {
     const body = req.body || {};
     try {
       savePaymentChannels(db(), body);
@@ -1210,7 +1267,7 @@ export function createApi() {
     res.json(publicTicketGates(db()));
   });
 
-  router.patch("/admin/tickets", requireAdmin, (req, res) => {
+  router.patch("/admin/tickets", requirePaymentSettings, (req, res) => {
     const body = req.body || {};
     try {
       saveTicketPayment(db(), body);
@@ -1219,7 +1276,8 @@ export function createApi() {
       res.status(status).json({ error: status === 400 ? error.message : "Ticket was not saved" });
       return;
     }
-    writeAudit(db(), req.admin.id, "ticket.payments_open", `${body.code}:${body.paymentsOpen ? "open" : "locked"}`);
+    if (typeof body.paymentsOpen === "boolean") writeAudit(db(), req.admin.id, "ticket.payments_open", `${body.code}:${body.paymentsOpen ? "open" : "locked"}`);
+    if (body.feeBearer === "pass" || body.feeBearer === "shoulder") writeAudit(db(), req.admin.id, "ticket.fee_bearer", `${body.code}:${body.feeBearer}`);
     res.json(publicTicketGates(db()));
   });
 

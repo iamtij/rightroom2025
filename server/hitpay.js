@@ -2,6 +2,7 @@ import crypto from "crypto";
 import QRCode from "qrcode";
 import { getRegistration, recordPayment } from "./registrations.js";
 import { isChannelEnabled } from "./payment-channels.js";
+import { paymentCharge, settlementBaseCents } from "./convenience-fee.js";
 
 const QR_CAP = 3;
 const QR_GRACE_MS = 2 * 60 * 1000;
@@ -211,7 +212,7 @@ function settleHitpay(db, row) {
       recordPayment(db, {
         registrationId: current.registration_id,
         installmentId: current.installment_id,
-        amountCents: current.amount_cents,
+        amountCents: settlementBaseCents(current),
         method: `hitpay:${current.channel}`,
         externalReference: current.session_id,
       });
@@ -299,7 +300,7 @@ async function retirePreviousHitpay(db, previousId) {
   };
 }
 
-async function createHitpaySession(db, registration, due, amountCents, channel, previousId) {
+async function createHitpaySession(db, registration, due, amountCents, channel, previousId, feeCents = 0) {
   const retired = await retirePreviousHitpay(db, previousId);
   if (retired) return retired;
   const sessionId = crypto.randomUUID();
@@ -332,15 +333,16 @@ async function createHitpaySession(db, registration, due, amountCents, channel, 
     }
     const result = db.prepare(`
       INSERT INTO hitpay_payments (
-        registration_id, installment_id, session_id, gateway_ref, amount_cents, currency, channel,
+        registration_id, installment_id, session_id, gateway_ref, amount_cents, fee_cents, currency, channel,
         status, gateway_status, qr_code, payment_url, expires_at
-      ) VALUES (?, ?, ?, ?, ?, 'PHP', ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, 'PHP', ?, ?, ?, ?, ?, ?)
     `).run(
       registration.id,
       due.id,
       sessionId,
       gatewayRef,
       amountCents,
+      feeCents,
       channel,
       failed ? "failed" : "pending",
       failed ? "missing_checkout" : String(created.body.status || "pending"),
@@ -364,8 +366,9 @@ export async function startHitpayPayment(db, registration, channel) {
   if (!isChannelEnabled(db, setting)) return { error: "That payment option is turned off.", status: 400, registration };
   if (registration.currency !== "PHP") return { error: "HitPay collects peso payments.", status: 400, registration };
   const due = dueInstallment(registration);
-  const amountCents = due ? due.amount_cents - due.amount_paid_cents : 0;
-  if (!due || amountCents <= 0) return { registration, hitpay: null };
+  const baseCents = due ? due.amount_cents - due.amount_paid_cents : 0;
+  const quote = paymentCharge(db, registration, baseCents, { channel: setting });
+  if (!due || quote.baseCents <= 0) return { registration, hitpay: null };
   const lock = `hitpay:${due.id}`;
   if (!hold(lock)) return { error: "Payment is already starting.", status: 409, registration };
   try {
@@ -377,12 +380,13 @@ export async function startHitpayPayment(db, registration, channel) {
     `).get(due.id, channel);
     if (open) {
       const state = windowState(open);
-      if (state === "open" || (channel === "qr" && state === "refresh")) return await view(db, registration, open);
+      const sameCharge = open.amount_cents === quote.totalCents && (open.fee_cents || 0) === quote.feeCents;
+      if (sameCharge && (state === "open" || (channel === "qr" && state === "refresh"))) return await view(db, registration, open);
     }
     if (channel === "qr" && refreshesLeft(db, due.id) <= 0) {
       return { error: "This payment already used its QR codes. Nothing was charged.", status: 400, registration };
     }
-    return await createHitpaySession(db, registration, due, amountCents, channel, open?.id);
+    return await createHitpaySession(db, registration, due, quote.totalCents, channel, open?.id, quote.feeCents);
   } finally {
     release(lock);
   }
@@ -453,8 +457,10 @@ export async function refreshHitpayQr(db, sessionId) {
     if (!due || due.status !== "due") {
       return { error: "Nothing is due.", status: 400, registration: getRegistration(db, row.registration_id), hitpay: shown };
     }
-    const amountCents = due.amount_cents - due.amount_paid_cents;
-    return await createHitpaySession(db, getRegistration(db, row.registration_id), due, amountCents, "qr", current.id);
+    const latestRegistration = getRegistration(db, row.registration_id);
+    const baseCents = due.amount_cents - due.amount_paid_cents;
+    const quote = paymentCharge(db, latestRegistration, baseCents, { channel: "hitpay_qr" });
+    return await createHitpaySession(db, latestRegistration, due, quote.totalCents, "qr", current.id, quote.feeCents);
   } catch (error) {
     const message = error instanceof Error ? error.message : "HitPay could not refresh the QR.";
     return { error: message, status: 502, registration: getRegistration(db, row.registration_id) };

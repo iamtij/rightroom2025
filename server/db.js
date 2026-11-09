@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS ticket_products (
   sales_end TEXT NOT NULL,
   allows_installment INTEGER NOT NULL DEFAULT 0 CHECK (allows_installment IN (0, 1)),
   active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-  payments_open INTEGER NOT NULL DEFAULT 0 CHECK (payments_open IN (0, 1))
+  payments_open INTEGER NOT NULL DEFAULT 0 CHECK (payments_open IN (0, 1)),
+  fee_bearer TEXT NOT NULL DEFAULT 'shoulder' CHECK (fee_bearer IN ('pass', 'shoulder'))
 );
 
 CREATE TABLE IF NOT EXISTS installment_plan_items (
@@ -115,6 +116,7 @@ CREATE TABLE IF NOT EXISTS upay_payments (
   currency TEXT NOT NULL,
   payment_method TEXT NOT NULL,
   status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed')),
+  fee_cents INTEGER NOT NULL DEFAULT 0,
   unionbank_code TEXT,
   unionbank_state TEXT,
   transaction_id TEXT,
@@ -259,12 +261,16 @@ CREATE TABLE IF NOT EXISTS payment_channels (
   code TEXT PRIMARY KEY,
   enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
   custom_label TEXT,
-  custom_note TEXT
+  custom_note TEXT,
+  fee_percent_bps INTEGER,
+  fee_fixed_cents INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS paynamics_methods (
   code TEXT PRIMARY KEY,
-  enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1))
+  enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+  fee_percent_bps INTEGER,
+  fee_fixed_cents INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS hitpay_payments (
@@ -275,6 +281,7 @@ CREATE TABLE IF NOT EXISTS hitpay_payments (
   gateway_ref TEXT,
   amount_cents INTEGER NOT NULL,
   currency TEXT NOT NULL,
+  fee_cents INTEGER NOT NULL DEFAULT 0,
   channel TEXT NOT NULL CHECK (channel IN ('qr', 'online')),
   status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed', 'expired')),
   gateway_status TEXT,
@@ -295,6 +302,7 @@ CREATE TABLE IF NOT EXISTS paynamics_payments (
   gateway_response_id TEXT,
   amount_cents INTEGER NOT NULL,
   currency TEXT NOT NULL,
+  fee_cents INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed', 'expired', 'cancelled')),
   gateway_response_code TEXT,
   gateway_message TEXT,
@@ -553,6 +561,9 @@ function migrate(db) {
   if (!ticketColumns.has("payments_open")) {
     db.exec("ALTER TABLE ticket_products ADD COLUMN payments_open INTEGER NOT NULL DEFAULT 0");
   }
+  if (!ticketColumns.has("fee_bearer")) {
+    db.exec("ALTER TABLE ticket_products ADD COLUMN fee_bearer TEXT NOT NULL DEFAULT 'shoulder' CHECK (fee_bearer IN ('pass', 'shoulder'))");
+  }
   const names = new Set(db.prepare("PRAGMA table_info(registrations)").all().map((column) => column.name));
   const columns = [
     ["attendee_type", "TEXT NOT NULL DEFAULT 'guest'"],
@@ -571,6 +582,15 @@ function migrate(db) {
   const paymentChannelColumns = new Set(db.prepare("PRAGMA table_info(payment_channels)").all().map((column) => column.name));
   if (!paymentChannelColumns.has("custom_label")) db.exec("ALTER TABLE payment_channels ADD COLUMN custom_label TEXT");
   if (!paymentChannelColumns.has("custom_note")) db.exec("ALTER TABLE payment_channels ADD COLUMN custom_note TEXT");
+  if (!paymentChannelColumns.has("fee_percent_bps")) db.exec("ALTER TABLE payment_channels ADD COLUMN fee_percent_bps INTEGER");
+  if (!paymentChannelColumns.has("fee_fixed_cents")) db.exec("ALTER TABLE payment_channels ADD COLUMN fee_fixed_cents INTEGER");
+  const paynamicsMethodColumns = new Set(db.prepare("PRAGMA table_info(paynamics_methods)").all().map((column) => column.name));
+  if (!paynamicsMethodColumns.has("fee_percent_bps")) db.exec("ALTER TABLE paynamics_methods ADD COLUMN fee_percent_bps INTEGER");
+  if (!paynamicsMethodColumns.has("fee_fixed_cents")) db.exec("ALTER TABLE paynamics_methods ADD COLUMN fee_fixed_cents INTEGER");
+  for (const table of ["upay_payments", "hitpay_payments", "paynamics_payments"]) {
+    const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
+    if (columns.size && !columns.has("fee_cents")) db.exec(`ALTER TABLE ${table} ADD COLUMN fee_cents INTEGER NOT NULL DEFAULT 0`);
+  }
   const paynamicsColumns = new Set(
     db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'paynamics_payments'").get()
       ? db.prepare("PRAGMA table_info(paynamics_payments)").all().map((column) => column.name)
