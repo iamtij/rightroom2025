@@ -3,6 +3,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { reportError } from "./report-error.js";
 import { automaticBackupsSuppressed } from "./staging-safe.js";
 
 const MAGIC = Buffer.from("IBMCBAK1");
@@ -131,7 +132,10 @@ export function startBackupLoop(db) {
     if (running) return;
     running = true;
     createEncryptedBackup(db)
-      .catch((error) => console.error("Database backup failed:", error.message))
+      .catch((error) => {
+        console.error("Database backup failed:", error.message);
+        reportError(error);
+      })
       .finally(() => {
         running = false;
       });

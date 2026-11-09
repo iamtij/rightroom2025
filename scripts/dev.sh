@@ -9,4 +9,7 @@ for pid in $(lsof -ti ":$PORT" 2>/dev/null || true); do
 done
 sleep 1
 echo "Starting Vite on http://localhost:$PORT/ (first load may take 10–15s)..."
+if [[ "${NODE_OPTIONS:-}" != *"--import ./instrument.js"* ]]; then
+  export NODE_OPTIONS="${NODE_OPTIONS:+$NODE_OPTIONS }--import ./instrument.js"
+fi
 exec ./node_modules/.bin/vite --port="$PORT" --host=0.0.0.0

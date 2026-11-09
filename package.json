@@ -7,7 +7,7 @@
     "dev": "bash scripts/dev.sh",
     "restart": "bash scripts/restart.sh",
     "build": "vite build",
-    "start": "node server.js",
+    "start": "node --import ./instrument.js server.js",
     "reminders": "node server/reminders.js",
     "verify:reminders": "node server/verify-reminders.js",
     "verify:paynamics": "node server/verify-paynamics.js",
@@ -25,6 +25,8 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1162.0",
     "@google/genai": "^1.29.0",
+    "@sentry/node": "^11.11.0",
+    "@sentry/react": "^11.11.0",
     "@tailwindcss/postcss": "^4.2.2",
     "@vitejs/plugin-react": "^5.0.4",
     "better-sqlite3": "^12.4.1",
@@ -42,6 +44,7 @@
     "qs": "6.16.2"
   },
   "devDependencies": {
+    "@sentry/bundler-plugins": "^11.11.0",
     "@types/express": "^4.17.21",
     "@types/node": "^22.14.0",
     "autoprefixer": "^10.4.21",

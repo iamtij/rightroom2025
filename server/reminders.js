@@ -3,6 +3,7 @@ import { openDatabase, registrationBalance } from "./db.js";
 import { createRegistration, getRegistration, recordPayment } from "./registrations.js";
 import { sendEmail, sendSms } from "./providers.js";
 import { renderEntryPass, renderInstallmentReminder } from "./templates.js";
+import { reportError } from "./report-error.js";
 import { addDays, formatLongDate, manilaParts } from "./time.js";
 
 export { createRegistration, getRegistration, recordPayment };
@@ -138,6 +139,7 @@ export async function sendEntryPassForRegistration(db, registrationId, { force =
 export function queueEntryPassAfterPayment(db, registrationId) {
   void sendEntryPassForRegistration(db, registrationId).catch((error) => {
     console.error("Entry pass email failed:", error.message);
+    reportError(error);
   });
 }
 
@@ -342,6 +344,7 @@ export function startReminderLoop(db) {
   const tick = () => {
     runReminders(db).catch((error) => {
       console.error("Reminders failed:", error.message);
+      reportError(error);
     });
   };
   tick();

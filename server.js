@@ -26,7 +26,7 @@ const contentSecurityPolicy = [
   "font-src 'self' https://fonts.gstatic.com data:",
   "img-src 'self' data: https://www.facebook.com",
   "frame-src https://challenges.cloudflare.com",
-  "connect-src 'self' https://www.facebook.com https://connect.facebook.net https://challenges.cloudflare.com",
+  "connect-src 'self' https://www.facebook.com https://connect.facebook.net https://challenges.cloudflare.com https://*.ingest.us.sentry.io",
   "frame-ancestors 'none'",
   "base-uri 'self'",
   "form-action 'self'",
@@ -47,6 +47,13 @@ app.use((req, res, next) => {
   api(req, res, next);
 });
 
+app.use((req, res, next) => {
+  if (req.path.endsWith(".map")) {
+    res.status(404).end();
+    return;
+  }
+  next();
+});
 app.use(express.static(path.join(__dirname, 'dist')));
 
 app.get('*', (req, res) => {
@@ -83,4 +90,6 @@ try {
   }
 } catch (error) {
   console.error('Reminder database was not started:', error.message);
+  const { reportError } = await import('./server/report-error.js');
+  reportError(error);
 }

@@ -14,6 +14,7 @@ export {
   railwayDeploymentClass,
   railwaySignalsPresent,
 };
+import { reportError } from "./report-error.js";
 import { getRegistration, recordPayment } from "./registrations.js";
 import { isChannelEnabled } from "./payment-channels.js";
 
@@ -1024,6 +1025,7 @@ export async function handlePaynamicsNotification(db, body) {
       return { status: 200, body: "OK" };
     }
     console.error(message || error);
+    reportError(error);
     return { status: 500, body: "error" };
   }
   return { status: 200, body: "OK" };
