@@ -2,7 +2,7 @@ import { pathToFileURL } from "url";
 import { openDatabase, registrationBalance } from "./db.js";
 import { createRegistration, getRegistration, recordPayment } from "./registrations.js";
 import { sendEmail, sendSms } from "./providers.js";
-import { renderEntryPass, renderInstallmentReminder } from "./templates.js";
+import { renderEntryPass, renderInstallmentReminder, renderPlainEmail, templateUses } from "./templates.js";
 import { reportError } from "./report-error.js";
 import { addDays, formatLongDate, manilaParts } from "./time.js";
 
@@ -122,7 +122,7 @@ export async function sendEntryPassForRegistration(db, registrationId, { force =
   const dispatchKey = `reg:${registration.id}:rule:${rule.id}`;
   if (force) db.prepare("DELETE FROM reminder_dispatches WHERE dispatch_key = ?").run(dispatchKey);
   const passUrl = `${siteUrl()}/pass/${registration.qr_token}`;
-  const rendered = await renderEntryPass({ registration, passUrl });
+  const rendered = await renderEntryPass({ registration, passUrl, template: builtinCopy(db, rule) });
   const queued = await queue(db, {
     dispatchKey,
     registrationId: registration.id,
@@ -170,6 +170,7 @@ export async function runReminders(db, now = new Date()) {
           installment,
           daysBefore: rule.days_before,
           payUrl: `${siteUrl()}/pay/${registration.reference}`,
+          template: builtinCopy(db, rule),
         });
         const queued = await queue(db, {
           dispatchKey: `inst:${installment.id}:rule:${rule.id}`,
@@ -193,7 +194,7 @@ export async function runReminders(db, now = new Date()) {
         const registration = getRegistration(db, row.id);
         if (registration.balance_cents !== 0) continue;
         const passUrl = `${siteUrl()}/pass/${registration.qr_token}`;
-        const rendered = await renderEntryPass({ registration, passUrl });
+        const rendered = await renderEntryPass({ registration, passUrl, template: builtinCopy(db, rule) });
         const queued = await queue(db, {
           dispatchKey: `reg:${registration.id}:rule:${rule.id}`,
           registrationId: registration.id,
@@ -217,7 +218,7 @@ async function runCustomSchedules(db, clock) {
     SELECT s.*, t.channel, t.subject, t.body
     FROM message_schedules s
     JOIN message_templates t ON t.id = s.template_id
-    WHERE s.enabled = 1
+    WHERE s.enabled = 1 AND s.system_key IS NULL
   `).all();
   let created = 0;
   for (const schedule of schedules) {
@@ -337,7 +338,73 @@ function fillScheduleTemplate(schedule, target) {
   if (schedule.channel === "email" && target.installmentLabel && !subject.includes(target.installmentLabel)) {
     subject = `${subject} · ${target.installmentLabel}`;
   }
-  return { subject, body, html: `<p>${escapeHtml(body).replaceAll("\n", "<br>")}</p>` };
+  const html = schedule.channel === "email"
+    ? renderPlainEmail({
+      subject,
+      text: body,
+      payUrl: templateUses(schedule.body, "pay_url") ? values.pay_url : "",
+      passUrl: templateUses(schedule.body, "pass_url") ? values.pass_url : "",
+    })
+    : "";
+  return { subject, body, html };
+}
+
+function builtinSystemKey(rule) {
+  return rule.trigger === "fully_paid"
+    ? `fully_paid_${rule.channel}`
+    : `before_due_${rule.channel}_${rule.days_before}`;
+}
+
+function builtinCopy(db, rule) {
+  return db.prepare(`
+    SELECT t.subject, t.body
+    FROM message_schedules s
+    JOIN message_templates t ON t.id = s.template_id
+    WHERE s.system_key = ?
+  `).get(builtinSystemKey(rule)) || null;
+}
+
+function ruleForSystemKey(db, systemKey) {
+  if (String(systemKey).startsWith("fully_paid_")) {
+    return db.prepare("SELECT * FROM reminder_rules WHERE trigger = 'fully_paid' AND channel = ?").get(systemKey.slice("fully_paid_".length));
+  }
+  const match = String(systemKey).match(/^before_due_(email|sms)_(\d+)$/);
+  if (!match) return null;
+  return db.prepare("SELECT * FROM reminder_rules WHERE trigger = 'before_due' AND channel = ? AND days_before = ?").get(match[1], Number(match[2]));
+}
+
+export function syncBuiltinSchedule(db, existing, input) {
+  const rule = ruleForSystemKey(db, existing.system_key);
+  if (!rule) return { error: "That reminder is no longer in the system" };
+  const template = db.prepare("SELECT id, channel FROM message_templates WHERE id = ?").get(Number(input.templateId));
+  if (!template) return { error: "Choose a template" };
+  if (template.channel !== rule.channel) return { error: "Choose a template for the same channel" };
+  const name = String(input.name || "").trim();
+  if (!name) return { error: "Add a schedule name" };
+  const beforeDue = rule.trigger === "before_due";
+  const days = Number(input.daysOffset);
+  const daysOffset = beforeDue && Number.isFinite(days) && days >= 0 ? Math.round(days) : 0;
+  const sendTime = beforeDue && /^\d{2}:\d{2}$/.test(String(input.sendTime || "").slice(0, 5))
+    ? String(input.sendTime).slice(0, 5)
+    : rule.send_time;
+  const systemKey = beforeDue ? `before_due_${rule.channel}_${daysOffset}` : existing.system_key;
+  if (beforeDue && systemKey !== existing.system_key) {
+    const clash = db.prepare("SELECT id FROM message_schedules WHERE system_key = ? AND id != ?").get(systemKey, existing.id)
+      || db.prepare("SELECT id FROM reminder_rules WHERE trigger = 'before_due' AND channel = ? AND days_before = ? AND id != ?").get(rule.channel, daysOffset, rule.id);
+    if (clash) return { error: "A reminder already sends that many days before the due date" };
+  }
+  const save = db.transaction(() => {
+    if (beforeDue) db.prepare("UPDATE reminder_rules SET days_before = ?, send_time = ? WHERE id = ?").run(daysOffset, sendTime, rule.id);
+    db.prepare("UPDATE message_schedules SET name = ?, template_id = ?, days_offset = ?, send_time = ?, system_key = ? WHERE id = ?")
+      .run(name, template.id, beforeDue ? daysOffset : existing.days_offset, beforeDue ? sendTime : existing.send_time, systemKey, existing.id);
+  });
+  try {
+    save();
+  } catch (error) {
+    if (String(error.message).includes("UNIQUE")) return { error: "A reminder already sends that many days before the due date" };
+    throw error;
+  }
+  return { id: existing.id };
 }
 
 export function startReminderLoop(db) {

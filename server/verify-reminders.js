@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { openDatabase } from "./db.js";
 import { createRegistration, recordPayment } from "./registrations.js";
-import { runReminders } from "./reminders.js";
+import { runReminders, syncBuiltinSchedule } from "./reminders.js";
 import { philippineMobile } from "./providers.js";
 import { addDays, manilaParts } from "./time.js";
+import { ENTRY_PASS_BODY, ENTRY_PASS_SUBJECT, INSTALLMENT_REMINDER_BODY, INSTALLMENT_REMINDER_SUBJECT, previewTemplate, renderInstallmentReminder, smsCreditCount } from "./templates.js";
 
 delete process.env.RESEND_API_KEY;
 delete process.env.SEMAPHORE_API_KEY;
@@ -213,5 +214,92 @@ assert.equal(restarted.installments[2].due_on, addDays(today, 3));
 await runReminders(db, manilaClock(addDays(today, 1)));
 const shiftedMail = db.prepare("SELECT subject FROM reminder_dispatches WHERE registration_id = ?").all(shifted.id);
 assert.deepEqual(shiftedMail.map((row) => row.subject), ["IBMC 2027 · ₱50 due tomorrow · 2 of 3"]);
+
+const builtinSchedules = db.prepare(`
+  SELECT s.system_key, s.trigger, t.name AS template_name
+  FROM message_schedules s
+  JOIN message_templates t ON t.id = s.template_id
+  WHERE s.system_key IS NOT NULL
+  ORDER BY s.system_key
+`).all();
+assert.equal(builtinSchedules.length, 9);
+assert.ok(builtinSchedules.some((row) => row.system_key === "fully_paid_email" && row.trigger === "fully_paid" && row.template_name === "QR ticket email"));
+assert.ok(builtinSchedules.some((row) => row.system_key === "before_due_sms_0" && row.template_name === "Payment reminder SMS"));
+
+const editedRegistration = createRegistration(db, {
+  productCode: "first_mover",
+  paymentPlan: "installment",
+  fullName: "Edit Reminder",
+  email: "edit-reminder@example.com",
+  mobile: "09170000009",
+  registeredOn: "2026-11-12",
+});
+recordPayment(db, { registrationId: editedRegistration.id, amountCents: 100_000, method: "manual" });
+const editedInstallment = db.prepare("SELECT id FROM registration_installments WHERE registration_id = ? AND status = 'due' ORDER BY sequence").get(editedRegistration.id);
+db.prepare("UPDATE registration_installments SET due_on = ? WHERE id = ?").run(addDays(today, 1), editedInstallment.id);
+db.prepare("UPDATE message_templates SET subject = 'Edited {{amount}} {{when}}' WHERE system_key = 'installment_reminder_email'").run();
+await runReminders(db, new Date());
+const editedMails = db.prepare("SELECT channel, subject FROM reminder_dispatches WHERE installment_id = ? ORDER BY channel").all(editedInstallment.id);
+assert.deepEqual(editedMails, [
+  { channel: "email", subject: "Edited ₱2,000 due tomorrow · 2 of 7" },
+  { channel: "sms", subject: "IBMC 2027 · ₱2,000 due tomorrow · 2 of 7" },
+]);
+
+const week = db.prepare("SELECT * FROM message_schedules WHERE system_key = 'before_due_email_7'").get();
+const moved = syncBuiltinSchedule(db, week, { name: "One week before", templateId: week.template_id, daysOffset: 6, sendTime: "08:15" });
+assert.equal(moved.error, undefined);
+assert.equal(db.prepare("SELECT days_before, send_time FROM reminder_rules WHERE id = (SELECT id FROM reminder_rules WHERE channel = 'email' AND trigger = 'before_due' AND days_before = 6)").get().send_time, "08:15");
+const movedRow = db.prepare("SELECT * FROM message_schedules WHERE id = ?").get(week.id);
+assert.equal(movedRow.system_key, "before_due_email_6");
+assert.equal(movedRow.days_offset, 6);
+const smsTemplate = db.prepare("SELECT id FROM message_templates WHERE system_key = 'installment_reminder_sms'").get();
+assert.equal(syncBuiltinSchedule(db, movedRow, { name: "One week before", templateId: smsTemplate.id, daysOffset: 6, sendTime: "08:15" }).error, "Choose a template for the same channel");
+assert.equal(syncBuiltinSchedule(db, movedRow, { name: "One week before", templateId: week.template_id, daysOffset: 3, sendTime: "08:15" }).error, "A reminder already sends that many days before the due date");
+assert.equal(db.prepare("SELECT COUNT(*) AS count FROM schedule_sends").get().count, 0);
+
+const reminderPreview = previewTemplate({ channel: "email", subject: INSTALLMENT_REMINDER_SUBJECT, body: INSTALLMENT_REMINDER_BODY, systemKey: "installment_reminder_email" });
+assert.match(reminderPreview.subject, /₱2,000 due in 3 days · 2 of 7/);
+assert.match(reminderPreview.html, /Pay this installment/);
+assert.equal(reminderPreview.html.includes("/pass/"), false);
+const passPreview = previewTemplate({ channel: "email", subject: ENTRY_PASS_SUBJECT, body: ENTRY_PASS_BODY, systemKey: "entry_pass_email" });
+assert.match(passPreview.html, /data:image\/svg\+xml/);
+assert.match(passPreview.body, /Maria/);
+const customPreview = previewTemplate({ channel: "sms", subject: "", body: "Hi {{first_name}}, {{amount}} is {{when}}.", systemKey: "" });
+assert.equal(customPreview.body, "Hi Maria, ₱2,000 is due in 3 days.");
+const customEmail = previewTemplate({
+  channel: "email",
+  subject: "IBMC 2027 payment reminder",
+  body: "Hi {{first_name}}, {{amount}} is due {{due_date}}. Pay: {{pay_url}}",
+  systemKey: "",
+});
+assert.match(customEmail.html, /amplify-logo-white\.png/);
+assert.match(customEmail.html, /IBMC 2027 payment reminder/);
+assert.match(customEmail.html, /Hi Maria, ₱2,000 is due Mar 15, 2027\. Pay: https:\/\/ibmcph\.com\/pay\/IBMC-2048/);
+assert.match(customEmail.html, /Pay this installment/);
+assert.match(customEmail.html, /Amplify others\. Get amplified\./);
+assert.equal(customEmail.html.includes("Open my QR ticket"), false);
+const plainEmail = previewTemplate({ channel: "email", subject: "Hello", body: "Hi {{first_name}}", systemKey: "" });
+assert.match(plainEmail.html, /amplify-logo-white\.png/);
+assert.equal(plainEmail.html.includes("Pay this installment"), false);
+const firstMoverReminder = renderInstallmentReminder({
+  registration: { full_name: "Maria Santos", product_name: "First Mover", product_code: "first_mover", currency: "PHP", reference: "IBMC-2048", payment_plan: "installment", installment_count: 7 },
+  installment: { amount_cents: 200_000, amount_paid_cents: 0, due_on: "2027-03-15", sequence: 2 },
+  daysBefore: 3,
+  payUrl: "https://ibmcph.com/pay/IBMC-2048",
+  template: { subject: INSTALLMENT_REMINDER_SUBJECT, body: "{{plan_note}}\nHi {{first_name}}" },
+});
+assert.equal(firstMoverReminder.body, "Hi Maria");
+const planNotePreview = previewTemplate({
+  channel: "sms",
+  subject: "",
+  body: "{{plan_note}}\nHi {{first_name}}, {{amount}} for your {{product}} seat is {{when}}.",
+  systemKey: "installment_reminder_sms",
+});
+assert.match(planNotePreview.body, /^Counted from the day you paid: Day 0 ₱100/);
+assert.match(planNotePreview.body, /Hi Maria, ₱2,000 for your First Mover seat is due in 3 days\.$/);
+assert.deepEqual(smsCreditCount("x".repeat(161)), { characters: 161, credits: 1 });
+assert.equal(smsCreditCount("x".repeat(162)).credits, 2);
+assert.equal(smsCreditCount("").credits, 0);
+assert.equal(smsCreditCount(planNotePreview.body).characters, Array.from(planNotePreview.body).length);
 
 console.log("Reminder checks passed.");

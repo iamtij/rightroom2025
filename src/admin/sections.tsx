@@ -1,12 +1,13 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { formatFeePercentInput, formatFeePesoInput } from "../../server/convenience-fee.js";
+import { previewTemplate, smsCreditCount } from "../../server/templates.js";
 
 const field = "rounded-[10px] border border-[#D9D5CF] bg-white px-3 py-2.5 text-sm font-normal text-[#141416]";
 const labelClass = "flex flex-col gap-1 text-[13px] font-semibold text-[#3A3A40]";
 const buttonClass = "rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]";
 
 type Product = { code: string; name: string; allows_installment: number; currency: string };
-type Template = { id: number; name: string; channel: "email" | "sms"; subject: string | null; body: string };
+type Template = { id: number; name: string; channel: "email" | "sms"; subject: string | null; body: string; system_key: string | null };
 type Schedule = {
   id: number;
   name: string;
@@ -22,6 +23,7 @@ type Schedule = {
   ends_after: number | null;
   audience: string;
   enabled: number;
+  system_key: string | null;
 };
 type Coupon = {
   id: number;
@@ -949,10 +951,36 @@ function Coupons({ onError }: { onError: (message: string) => void }) {
 
 const emptyTemplate = { name: "", channel: "email", subject: "", body: "" };
 
+function TemplatePreview({ channel, subject, body, systemKey }: { channel: string; subject: string; body: string; systemKey: string }) {
+  const preview = previewTemplate({ channel, subject, body, systemKey });
+  const email = channel === "email";
+  const sms = email ? null : smsCreditCount(preview.body);
+  const creditLabel = sms && sms.credits === 1 ? "credit" : "credits";
+  return (
+    <div className="flex flex-col gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="m-0 text-sm font-bold">Preview</h2>
+        <p className="m-0 text-[13px] text-[#5C5C63]">Maria Santos · First Mover · payment 2 of 7</p>
+      </div>
+      {email ? <p className="m-0 text-sm"><span className="font-semibold">Subject </span>{preview.subject || "—"}</p> : null}
+      {email ? (
+        <iframe title="Email preview" sandbox="" srcDoc={preview.html} className="h-[640px] w-full rounded-[10px] border border-[#E4E1DC] bg-[#F6F4F1]" />
+      ) : (
+        <div className="rounded-[18px] bg-[#F6F4F1] px-4 py-6">
+          <p className="m-0 max-w-[320px] whitespace-pre-wrap rounded-[18px] bg-white px-4 py-3 text-sm leading-relaxed">{preview.body || "The message shows here."}</p>
+          <p className="m-0 mt-3 text-[13px] font-semibold text-[#141416]">{sms?.characters.toLocaleString()} characters · {sms?.credits} {creditLabel}</p>
+          <p className="m-0 text-[13px] text-[#5C5C63]">Semaphore charges 161 characters per credit.</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Templates({ onError }: { onError: (message: string) => void }) {
   const [rows, setRows] = useState<Template[]>([]);
   const [form, setForm] = useState(emptyTemplate);
   const [editor, setEditor] = useState<null | "add" | number>(null);
+  const editing = typeof editor === "number" ? rows.find((row) => row.id === editor) : null;
   async function load() { setRows(await api("/api/admin/templates")); }
   useEffect(() => { load().catch((error) => onError(error.message)); }, []);
   async function save(event: FormEvent) {
@@ -974,11 +1002,12 @@ function Templates({ onError }: { onError: (message: string) => void }) {
         <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setForm(emptyTemplate); }}>Add</button>
       </div>
       {editor !== null ? (
+        <div className="grid items-start gap-3 lg:grid-cols-2">
         <form className="flex flex-col gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4" onSubmit={save}>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Name"><input className={field} required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></Field>
             <Field label="Channel">
-              <select className={field} value={form.channel} onChange={(event) => setForm({ ...form, channel: event.target.value })}>
+              <select className={field} value={form.channel} disabled={Boolean(editing?.system_key)} onChange={(event) => setForm({ ...form, channel: event.target.value })}>
                 <option value="email">Email</option>
                 <option value="sms">SMS</option>
               </select>
@@ -992,18 +1021,28 @@ function Templates({ onError }: { onError: (message: string) => void }) {
           <Field label="Message">
             <textarea className={`${field} min-h-28`} required value={form.body} onChange={(event) => setForm({ ...form, body: event.target.value })} />
           </Field>
-          <p className="m-0 text-[13px] text-[#5C5C63]">Placeholders: {"{{first_name}}"} {"{{amount}}"} {"{{due_date}}"} {"{{pay_url}}"} {"{{reference}}"} {"{{pass_url}}"} {"{{installment}}"}</p>
-          <p className="m-0 text-[13px] text-[#5C5C63]">Sample subject, installment: IBMC 2027 · ₱2,000 due in 3 days · 2 of 7. {"{{installment}}"} is the payment number, and only installment plans get it. A paid-in-full subject stays IBMC 2027 · ₱18,000 due today.</p>
+          <p className="m-0 text-[13px] text-[#5C5C63]">Placeholders: {"{{first_name}}"} {"{{amount}}"} {"{{due_date}}"} {"{{when}}"} {"{{pay_url}}"} {"{{reference}}"} {"{{pass_url}}"} {"{{installment}}"} {"{{product}}"} {"{{plan_note}}"}</p>
+          <p className="m-0 text-[13px] text-[#5C5C63]">{"{{when}}"} is due today, due tomorrow, or due in 7 days. {"{{installment}}"} is the payment number, such as 2 of 7. {"{{pass_url}}"} fills in after the seat is fully paid.</p>
+          <p className="m-0 text-[13px] text-[#5C5C63]">{"{{plan_note}}"} is the ₱200 test schedule. The preview includes it. Other tickets leave it blank.</p>
+          {editing?.system_key ? (
+            <p className="m-0 text-[13px] text-[#5C5C63]">
+              {editing.system_key.startsWith("entry_pass")
+                ? "Built-in QR ticket. The next send uses this message. The email still includes the QR code."
+                : "Built-in payment reminder. The next send uses this message. The email still includes the amount and the pay button."}
+            </p>
+          ) : null}
           <div className="flex gap-2">
             <button type="submit" className={buttonClass}>{editor === "add" ? "Create template" : "Save template"}</button>
             <button type="button" className={ghostButton} onClick={() => setEditor(null)}>Back</button>
           </div>
         </form>
+        <TemplatePreview channel={form.channel} subject={form.subject} body={form.body} systemKey={editing?.system_key || ""} />
+        </div>
       ) : null}
       <DataTable columns={["Name", "Channel", "Subject", "Message", ""]} empty={rows.length === 0 ? "No templates yet." : ""}>
         {rows.map((row) => (
           <tr key={row.id}>
-            <td className={`${tdClass} font-semibold`}>{row.name}</td>
+            <td className={`${tdClass} font-semibold`}>{row.name}{row.system_key ? <span className="ml-2 text-[12px] font-bold uppercase tracking-wide text-[#A8131F]">Built-in</span> : null}</td>
             <td className={tdClass}>{row.channel === "email" ? "Email" : "SMS"}</td>
             <td className={tdClass}>{row.subject || "—"}</td>
             <td className={`${tdClass} max-w-[360px] truncate`}>{row.body}</td>
@@ -1039,7 +1078,9 @@ function schedulePayload(form: typeof emptySchedule) {
 }
 
 function whenLabel(row: Schedule) {
+  if (row.trigger === "fully_paid") return "When fully paid";
   if (row.trigger === "on_date") return row.start_on || "On a date";
+  if (row.trigger === "before_due" && row.days_offset === 0) return "Due today";
   const days = `${row.days_offset} day${row.days_offset === 1 ? "" : "s"}`;
   return row.trigger === "after_registration" ? `${days} after registration` : `${days} before due`;
 }
@@ -1049,6 +1090,9 @@ function Schedules({ onError }: { onError: (message: string) => void }) {
   const [templates, setTemplates] = useState<Template[]>([]);
   const [form, setForm] = useState(emptySchedule);
   const [editor, setEditor] = useState<null | "add" | number>(null);
+  const editing = typeof editor === "number" ? rows.find((row) => row.id === editor) : null;
+  const systemSchedule = editing?.system_key ? editing : null;
+  const templateChoices = systemSchedule ? templates.filter((template) => template.channel === systemSchedule.channel) : templates;
   async function load() {
     const [schedules, messageTemplates] = await Promise.all([api("/api/admin/schedules"), api("/api/admin/templates")]);
     setRows(schedules);
@@ -1071,7 +1115,7 @@ function Schedules({ onError }: { onError: (message: string) => void }) {
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="m-0 font-archivo text-[28px] font-extrabold">Schedule</h1>
-        <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setForm({ ...emptySchedule, templateId: templates[0] ? String(templates[0].id) : "" }); }}>Add</button>
+        <button type="button" className={buttonClass} onClick={() => { const first = templates.find((template) => !template.system_key) || templates[0]; setEditor("add"); setForm({ ...emptySchedule, templateId: first ? String(first.id) : "" }); }}>Add</button>
       </div>
       {editor !== null ? (
         <form className="grid gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4 sm:grid-cols-2" onSubmit={save}>
@@ -1079,36 +1123,48 @@ function Schedules({ onError }: { onError: (message: string) => void }) {
           <Field label="Template">
             <select className={field} required value={form.templateId} onChange={(event) => setForm({ ...form, templateId: event.target.value })}>
               <option value="">Choose a template</option>
-              {templates.map((template) => <option key={template.id} value={template.id}>{template.name} · {template.channel}</option>)}
+              {templateChoices.map((template) => <option key={template.id} value={template.id}>{template.name} · {template.channel}</option>)}
             </select>
           </Field>
           <Field label="When to send">
-            <select className={field} value={form.trigger} onChange={(event) => setForm({ ...form, trigger: event.target.value })}>
+            <select className={field} value={form.trigger} disabled={Boolean(systemSchedule)} onChange={(event) => setForm({ ...form, trigger: event.target.value })}>
+              {form.trigger === "fully_paid" ? <option value="fully_paid">When fully paid</option> : null}
               <option value="before_due">Before a due date</option>
               <option value="after_registration">After registration</option>
               <option value="on_date">On a date</option>
             </select>
           </Field>
-          {form.trigger === "on_date"
-            ? <Field label="Date"><input className={field} type="date" required value={form.startOn} onChange={(event) => setForm({ ...form, startOn: event.target.value })} /></Field>
-            : <Field label="Days"><input className={field} type="number" min="0" value={form.daysOffset} onChange={(event) => setForm({ ...form, daysOffset: event.target.value })} /></Field>}
-          <Field label="Send time"><input className={field} type="time" value={form.sendTime} onChange={(event) => setForm({ ...form, sendTime: event.target.value })} /></Field>
+          {form.trigger === "fully_paid" ? (
+            <p className="m-0 self-end pb-3 text-[13px] text-[#5C5C63]">Sends when the seat is fully paid.</p>
+          ) : form.trigger === "on_date" ? (
+            <Field label="Date"><input className={field} type="date" required value={form.startOn} onChange={(event) => setForm({ ...form, startOn: event.target.value })} /></Field>
+          ) : (
+            <Field label="Days"><input className={field} type="number" min="0" value={form.daysOffset} onChange={(event) => setForm({ ...form, daysOffset: event.target.value })} /></Field>
+          )}
+          {form.trigger === "fully_paid" ? null : <Field label="Send time"><input className={field} type="time" value={form.sendTime} onChange={(event) => setForm({ ...form, sendTime: event.target.value })} /></Field>}
           <Field label="Frequency">
-            <select className={field} value={form.frequency} onChange={(event) => setForm({ ...form, frequency: event.target.value })}>
+            <select className={field} value={form.frequency} disabled={Boolean(systemSchedule)} onChange={(event) => setForm({ ...form, frequency: event.target.value })}>
               <option value="once">Once</option>
               <option value="daily">Daily</option>
               <option value="weekly">Weekly</option>
             </select>
           </Field>
           <Field label="Who">
-            <select className={field} value={form.audience} onChange={(event) => setForm({ ...form, audience: event.target.value })}>
+            <select className={field} value={form.audience} disabled={Boolean(systemSchedule)} onChange={(event) => setForm({ ...form, audience: event.target.value })}>
               <option value="unpaid">Unpaid balances</option>
               <option value="fully_paid">Fully paid</option>
               <option value="all">Everyone confirmed</option>
             </select>
           </Field>
-          <Field label="End date"><input className={field} type="date" value={form.endsOn} onChange={(event) => setForm({ ...form, endsOn: event.target.value })} /></Field>
-          <Field label="Stop after"><input className={field} type="number" min="1" placeholder="Number of sends" value={form.endsAfter} onChange={(event) => setForm({ ...form, endsAfter: event.target.value })} /></Field>
+          <Field label="End date"><input className={field} type="date" disabled={Boolean(systemSchedule)} value={form.endsOn} onChange={(event) => setForm({ ...form, endsOn: event.target.value })} /></Field>
+          <Field label="Stop after"><input className={field} type="number" min="1" disabled={Boolean(systemSchedule)} placeholder="Number of sends" value={form.endsAfter} onChange={(event) => setForm({ ...form, endsAfter: event.target.value })} /></Field>
+          {systemSchedule ? (
+            <p className="m-0 text-[13px] text-[#5C5C63] sm:col-span-2">
+              {systemSchedule.trigger === "fully_paid"
+                ? "Built-in QR ticket. You can change the message. It sends when the seat is fully paid."
+                : "Built-in payment reminder. You can change the message, how many days before the due date it sends, and the send time."}
+            </p>
+          ) : null}
           <div className="flex gap-2 sm:col-span-2">
             <button type="submit" className={buttonClass}>{editor === "add" ? "Create schedule" : "Save schedule"}</button>
             <button type="button" className={ghostButton} onClick={() => setEditor(null)}>Back</button>
@@ -1118,9 +1174,9 @@ function Schedules({ onError }: { onError: (message: string) => void }) {
       <DataTable columns={["Name", "Template", "When", "Frequency", "Who", "Ends", ""]} empty={rows.length === 0 ? "No schedules yet." : ""}>
         {rows.map((row) => (
           <tr key={row.id}>
-            <td className={`${tdClass} font-semibold`}>{row.name}</td>
+            <td className={`${tdClass} font-semibold`}>{row.name}{row.system_key ? <span className="ml-2 text-[12px] font-bold uppercase tracking-wide text-[#A8131F]">Built-in</span> : null}</td>
             <td className={tdClass}>{row.template_name} · {row.channel === "email" ? "Email" : "SMS"}</td>
-            <td className={tdClass}>{whenLabel(row)} · {String(row.send_time).slice(0, 5)}</td>
+            <td className={tdClass}>{row.trigger === "fully_paid" ? whenLabel(row) : `${whenLabel(row)} · ${String(row.send_time).slice(0, 5)}`}</td>
             <td className={tdClass}>{titleCase(row.frequency)}</td>
             <td className={tdClass}>{titleCase(row.audience)}</td>
             <td className={tdClass}>{[row.ends_on, row.ends_after ? `after ${row.ends_after}` : ""].filter(Boolean).join(" · ") || "—"}</td>

@@ -3,6 +3,7 @@ import path from "path";
 import Database from "better-sqlite3";
 import { fileURLToPath } from "url";
 import { seedPaymentChannels } from "./payment-channels.js";
+import { ENTRY_PASS_BODY, ENTRY_PASS_SUBJECT, INSTALLMENT_REMINDER_BODY, INSTALLMENT_REMINDER_SUBJECT } from "./templates.js";
 import { stagingTestRegistrationAllowed } from "./staging-early-payments.js";
 import { ibmcDeploymentEnv, railwayDeploymentClass } from "./deployment-identity.js";
 
@@ -182,14 +183,15 @@ CREATE TABLE IF NOT EXISTS message_templates (
   channel TEXT NOT NULL CHECK (channel IN ('email', 'sms')),
   subject TEXT,
   body TEXT NOT NULL,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  system_key TEXT
 );
 
 CREATE TABLE IF NOT EXISTS message_schedules (
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL,
   template_id INTEGER NOT NULL REFERENCES message_templates(id),
-  trigger TEXT NOT NULL CHECK (trigger IN ('before_due', 'on_date', 'after_registration')),
+  trigger TEXT NOT NULL CHECK (trigger IN ('before_due', 'on_date', 'after_registration', 'fully_paid')),
   days_offset INTEGER NOT NULL DEFAULT 0,
   start_on TEXT,
   send_time TEXT NOT NULL DEFAULT '09:00',
@@ -198,7 +200,8 @@ CREATE TABLE IF NOT EXISTS message_schedules (
   ends_after INTEGER,
   audience TEXT NOT NULL DEFAULT 'unpaid' CHECK (audience IN ('unpaid', 'all', 'fully_paid')),
   enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  system_key TEXT
 );
 
 CREATE TABLE IF NOT EXISTS schedule_sends (
@@ -453,6 +456,7 @@ export function openDatabase(file = process.env.IBMC_DB_PATH) {
   db.exec(SCHEMA);
   migrate(db);
   seed(db);
+  ensureBuiltinMessages(db);
   if (stagingTestRegistrationAllowed()) {
     ensureTestPayment(db);
     ensureTestInstallment(db);
@@ -603,6 +607,117 @@ function migrate(db) {
     db.exec("ALTER TABLE paynamics_payments ADD COLUMN untrusted_inbound_json TEXT");
   }
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_registrations_resume ON registrations(resume_token) WHERE resume_token IS NOT NULL");
+  migrateBuiltinMessages(db);
+}
+
+function migrateBuiltinMessages(db) {
+  const templateColumns = new Set(db.prepare("PRAGMA table_info(message_templates)").all().map((column) => column.name));
+  if (!templateColumns.has("system_key")) db.exec("ALTER TABLE message_templates ADD COLUMN system_key TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_message_templates_system_key ON message_templates(system_key) WHERE system_key IS NOT NULL");
+
+  const scheduleSql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'message_schedules'").get()?.sql || "";
+  if (scheduleSql.includes("'fully_paid'") && scheduleSql.includes("system_key")) {
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_message_schedules_system_key ON message_schedules(system_key) WHERE system_key IS NOT NULL");
+    return;
+  }
+  const scheduleColumns = new Set(db.prepare("PRAGMA table_info(message_schedules)").all().map((column) => column.name));
+  const systemKeySelect = scheduleColumns.has("system_key") ? "system_key" : "NULL";
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec(`
+      DROP TABLE IF EXISTS message_schedules_next;
+      CREATE TABLE message_schedules_next (
+        id INTEGER PRIMARY KEY,
+        name TEXT NOT NULL,
+        template_id INTEGER NOT NULL REFERENCES message_templates(id),
+        trigger TEXT NOT NULL CHECK (trigger IN ('before_due', 'on_date', 'after_registration', 'fully_paid')),
+        days_offset INTEGER NOT NULL DEFAULT 0,
+        start_on TEXT,
+        send_time TEXT NOT NULL DEFAULT '09:00',
+        frequency TEXT NOT NULL CHECK (frequency IN ('once', 'daily', 'weekly')),
+        ends_on TEXT,
+        ends_after INTEGER,
+        audience TEXT NOT NULL DEFAULT 'unpaid' CHECK (audience IN ('unpaid', 'all', 'fully_paid')),
+        enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        system_key TEXT
+      );
+      INSERT INTO message_schedules_next (
+        id, name, template_id, trigger, days_offset, start_on, send_time, frequency, ends_on, ends_after, audience, enabled, created_at, system_key
+      )
+      SELECT id, name, template_id, trigger, days_offset, start_on, send_time, frequency, ends_on, ends_after, audience, enabled, created_at, ${systemKeySelect}
+      FROM message_schedules;
+      DROP TABLE message_schedules;
+      ALTER TABLE message_schedules_next RENAME TO message_schedules;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_message_schedules_system_key ON message_schedules(system_key) WHERE system_key IS NOT NULL;
+    `);
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
+
+function builtinScheduleName(rule) {
+  const channel = rule.channel === "email" ? "email" : "SMS";
+  if (rule.trigger === "fully_paid") return `QR ticket ${channel}`;
+  if (rule.days_before === 0) return `Payment reminder ${channel} · due today`;
+  const unit = rule.days_before === 1 ? "day" : "days";
+  return `Payment reminder ${channel} · ${rule.days_before} ${unit} before`;
+}
+
+function ensureReminderRules(db) {
+  const insert = db.prepare(`
+    INSERT INTO reminder_rules (trigger, channel, days_before, send_time, template_key, enabled)
+    SELECT ?, ?, ?, '09:00', ?, 1
+    WHERE NOT EXISTS (
+      SELECT 1 FROM reminder_rules
+      WHERE trigger = ? AND channel = ? AND ifnull(days_before, -1) = ifnull(?, -1)
+    )
+  `);
+  for (const days of EMAIL_BEFORE) insert.run("before_due", "email", days, "installment_reminder", "before_due", "email", days);
+  for (const days of SMS_BEFORE) insert.run("before_due", "sms", days, "installment_reminder", "before_due", "sms", days);
+  insert.run("fully_paid", "email", null, "entry_pass", "fully_paid", "email", null);
+  insert.run("fully_paid", "sms", null, "entry_pass", "fully_paid", "sms", null);
+}
+
+function ensureBuiltinMessages(db) {
+  ensureReminderRules(db);
+  const templates = [
+    ["installment_reminder_email", "Payment reminder email", "email", INSTALLMENT_REMINDER_SUBJECT, INSTALLMENT_REMINDER_BODY],
+    ["installment_reminder_sms", "Payment reminder SMS", "sms", null, INSTALLMENT_REMINDER_BODY],
+    ["entry_pass_email", "QR ticket email", "email", ENTRY_PASS_SUBJECT, ENTRY_PASS_BODY],
+    ["entry_pass_sms", "QR ticket SMS", "sms", null, ENTRY_PASS_BODY],
+  ];
+  const insertTemplate = db.prepare(`
+    INSERT INTO message_templates (name, channel, subject, body, system_key)
+    SELECT ?, ?, ?, ?, ?
+    WHERE NOT EXISTS (SELECT 1 FROM message_templates WHERE system_key = ?)
+  `);
+  for (const [systemKey, name, channel, subject, body] of templates) {
+    insertTemplate.run(name, channel, subject, body, systemKey, systemKey);
+  }
+  const insertSchedule = db.prepare(`
+    INSERT INTO message_schedules (
+      name, template_id, trigger, days_offset, send_time, frequency, audience, enabled, system_key
+    )
+    SELECT ?, ?, ?, ?, ?, 'once', ?, ?, ?
+    WHERE NOT EXISTS (SELECT 1 FROM message_schedules WHERE system_key = ?)
+  `);
+  for (const rule of db.prepare("SELECT * FROM reminder_rules").all()) {
+    const template = db.prepare("SELECT id FROM message_templates WHERE system_key = ?").get(`${rule.template_key}_${rule.channel}`);
+    if (!template) continue;
+    const systemKey = rule.trigger === "fully_paid" ? `fully_paid_${rule.channel}` : `before_due_${rule.channel}_${rule.days_before}`;
+    insertSchedule.run(
+      builtinScheduleName(rule),
+      template.id,
+      rule.trigger,
+      rule.days_before ?? 0,
+      rule.send_time || "09:00",
+      rule.trigger === "fully_paid" ? "fully_paid" : "unpaid",
+      rule.enabled ? 1 : 0,
+      systemKey,
+      systemKey,
+    );
+  }
 }
 
 function ensureTestTicket(db) {

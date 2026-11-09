@@ -9,7 +9,7 @@ import {
 } from "./staging-early-payments.js";
 import { beginMfaSetup, clearSessionCookie, cookieValue, createAdmin, listAdmins, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
 import { admitPass, cancelRegistration, compRegistration, createRegistration, discardUnopenedRegistration, ensureResumeToken, entryPassEligible, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
-import { sendEntryPassForRegistration } from "./reminders.js";
+import { sendEntryPassForRegistration, syncBuiltinSchedule } from "./reminders.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
 import { listMembers, lookupMember, memberContactClash, memberFromProof, memberPreview, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
@@ -1328,7 +1328,7 @@ export function createApi() {
   });
 
   router.get("/admin/templates", requireAdmin, (_req, res) => {
-    res.json(db().prepare("SELECT * FROM message_templates ORDER BY id DESC").all());
+    res.json(db().prepare("SELECT * FROM message_templates ORDER BY system_key IS NULL, id").all());
   });
 
   router.post("/admin/templates", requireAdmin, (req, res) => {
@@ -1344,7 +1344,7 @@ export function createApi() {
   });
 
   router.patch("/admin/templates/:id", requireAdmin, (req, res) => {
-    const existing = db().prepare("SELECT id FROM message_templates WHERE id = ?").get(req.params.id);
+    const existing = db().prepare("SELECT id, channel, system_key FROM message_templates WHERE id = ?").get(req.params.id);
     if (!existing) {
       res.status(404).json({ error: "Template not found" });
       return;
@@ -1354,6 +1354,10 @@ export function createApi() {
       res.status(400).json({ error: template.error });
       return;
     }
+    if (existing.system_key) {
+      template.channel = existing.channel;
+      template.subject = existing.channel === "email" ? template.subject : null;
+    }
     db().prepare(`
       UPDATE message_templates SET name = ?, channel = ?, subject = ?, body = ? WHERE id = ?
     `).run(template.name, template.channel, template.subject, template.body, existing.id);
@@ -1361,7 +1365,7 @@ export function createApi() {
   });
 
   router.get("/admin/schedules", requireAdmin, (_req, res) => {
-    res.json(db().prepare(`${scheduleQuery} ORDER BY s.id DESC`).all());
+    res.json(db().prepare(`${scheduleQuery} ORDER BY s.system_key IS NULL, s.id`).all());
   });
 
   router.post("/admin/schedules", requireAdmin, (req, res) => {
@@ -1379,9 +1383,18 @@ export function createApi() {
   });
 
   router.patch("/admin/schedules/:id", requireAdmin, (req, res) => {
-    const existing = db().prepare("SELECT id FROM message_schedules WHERE id = ?").get(req.params.id);
+    const existing = db().prepare("SELECT * FROM message_schedules WHERE id = ?").get(req.params.id);
     if (!existing) {
       res.status(404).json({ error: "Schedule not found" });
+      return;
+    }
+    if (existing.system_key) {
+      const saved = syncBuiltinSchedule(db(), existing, req.body || {});
+      if (saved.error) {
+        res.status(400).json({ error: saved.error });
+        return;
+      }
+      res.json(db().prepare(`${scheduleQuery} WHERE s.id = ?`).get(existing.id));
       return;
     }
     const schedule = readSchedule(db(), req.body || {});

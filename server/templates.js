@@ -109,32 +109,101 @@ function button(href, label) {
   </p>`;
 }
 
-export function renderInstallmentReminder({ registration, installment, daysBefore, payUrl }) {
+export function templateUses(text, key) {
+  return new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`).test(String(text ?? ""));
+}
+
+export function renderPlainEmail({ subject, text, payUrl = "", passUrl = "" }) {
+  const actions = [
+    payUrl ? button(payUrl, "Pay this installment") : "",
+    passUrl ? button(passUrl, "Open my QR ticket") : "",
+  ].join("");
+  return shell({
+    headline: escapeHtml(String(subject || "").trim() || "IBMC 2027"),
+    intro: escapeHtml(text).replaceAll("\n", "<br>"),
+    body: "",
+    action: actions,
+  });
+}
+
+export const TEST_PLAN_NOTE = "Counted from the day you paid: Day 0 ₱100, Day 2 ₱50, Day 3 ₱50. Paying ₱200 at once covers the seat.";
+export const SMS_CHARACTERS_PER_CREDIT = 161;
+
+export function smsCreditCount(text) {
+  const characters = Array.from(String(text ?? "")).length;
+  const credits = characters === 0 ? 0 : Math.ceil(characters / SMS_CHARACTERS_PER_CREDIT);
+  return { characters, credits };
+}
+
+export const INSTALLMENT_REMINDER_SUBJECT = "IBMC 2027 · {{amount}} {{when}}";
+export const INSTALLMENT_REMINDER_BODY = [
+  "IBMC 2027",
+  "Hi {{first_name}}, {{amount}} for your {{product}} seat is {{when}} ({{due_date}}).",
+  "Payment {{installment}}.",
+  "{{plan_note}}",
+  "Ref {{reference}}",
+  "{{pay_url}}",
+].join("\n");
+export const ENTRY_PASS_SUBJECT = "IBMC 2027 · Your QR ticket";
+export const ENTRY_PASS_BODY = [
+  "IBMC 2027",
+  "{{first_name}}, your seat is fully paid.",
+  "QR ticket: {{pass_url}}",
+  EVENT,
+  "Ref {{reference}}",
+].join("\n");
+
+function fillTemplate(text, values) {
+  return String(text ?? "").replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (_, key) => values[key] ?? "");
+}
+
+function plainBody(text) {
+  return String(text).split("\n").filter((line) => line.trim()).join("\n");
+}
+
+function sameCopy(left, right) {
+  return String(left || "").trim() === String(right || "").trim();
+}
+
+export function renderInstallmentReminder({ registration, installment, daysBefore, payUrl, template, preview = false }) {
   const amount = formatMoney(installment.amount_cents - installment.amount_paid_cents, registration.currency);
   const due = formatLongDate(installment.due_on);
   const when = daysLabel(daysBefore);
   const name = firstName(registration.full_name);
   const headline = daysBefore === 0 ? "Your payment is due today." : `Your payment is ${when}.`;
-  const installmentLabel = registration.payment_plan === "installment"
-    ? `${installment.sequence} of ${registration.installment_count}`
-    : "";
-  const subject = installmentLabel
-    ? `IBMC 2027 · ${amount} ${when} · ${installmentLabel}`
-    : `IBMC 2027 · ${amount} ${when}`;
-  const planNote = registration.product_code === "test_200"
-    ? "Counted from the day you paid: Day 0 ₱100, Day 2 ₱50, Day 3 ₱50. Paying ₱200 at once covers the seat."
-    : "";
-  const text = [
-    `IBMC 2027`,
+  const paymentNumber = `${installment.sequence} of ${registration.installment_count}`;
+  const installmentLabel = registration.payment_plan === "installment" ? paymentNumber : "";
+  const planNote = registration.product_code === "test_200" ? TEST_PLAN_NOTE : "";
+  const placeholderNote = planNote || (preview ? TEST_PLAN_NOTE : "");
+  const values = {
+    first_name: name,
+    amount,
+    due_date: due,
+    when,
+    pay_url: payUrl,
+    reference: registration.reference,
+    pass_url: "",
+    installment: paymentNumber,
+    product: registration.product_name,
+    plan_note: placeholderNote,
+  };
+  const fallback = [
+    "IBMC 2027",
     `Hi ${name}, ${amount} for your ${registration.product_name} seat is ${when} (${due}).`,
-    `Payment ${installment.sequence} of ${registration.installment_count}.`,
+    `Payment ${paymentNumber}.`,
     planNote,
     `Ref ${registration.reference}`,
     payUrl,
   ].filter(Boolean).join("\n");
+  let subject = template?.subject ? fillTemplate(template.subject, values) : (installmentLabel ? `IBMC 2027 · ${amount} ${when} · ${installmentLabel}` : `IBMC 2027 · ${amount} ${when}`);
+  if (template?.subject && installmentLabel && !subject.includes(installmentLabel)) subject = `${subject} · ${installmentLabel}`;
+  const text = template?.body ? plainBody(fillTemplate(template.body, values)) : fallback;
+  const intro = template?.body && !sameCopy(template.body, INSTALLMENT_REMINDER_BODY)
+    ? escapeHtml(text).replaceAll("\n", "<br>")
+    : `Hi ${escapeHtml(name)}, this is a reminder for your IBMC 2027 seat. Your QR ticket is sent only after the seat is fully paid.`;
   const html = shell({
     headline: escapeHtml(headline),
-    intro: `Hi ${escapeHtml(name)}, this is a reminder for your IBMC 2027 seat. Your QR ticket is sent only after the seat is fully paid.`,
+    intro,
     body: `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;background:#F6F4F1;border-radius:16px;">
         <tr><td style="padding:20px 22px;">
@@ -165,29 +234,125 @@ function qrImageUrl(passUrl) {
   return `${url.origin}/api/passes/${encodeURIComponent(token)}/qr`;
 }
 
-export async function renderEntryPass({ registration, passUrl }) {
+function sampleQrSrc(value) {
+  const qr = QRCode.create(value, { errorCorrectionLevel: "M" });
+  const size = qr.modules.size;
+  let path = "";
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      if (qr.modules.get(y, x)) path += `M${x} ${y}h1v1H${x}z`;
+    }
+  }
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges"><rect width="${size}" height="${size}" fill="#FFFFFF"/><path fill="#0E0E10" d="${path}"/></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
+const PREVIEW_PASS_URL = "https://ibmcph.com/pass/preview";
+const PREVIEW_PAY_URL = "https://ibmcph.com/pay/IBMC-2048";
+
+function previewRegistration() {
+  return {
+    full_name: "Maria Santos",
+    product_name: "First Mover",
+    product_code: "first_mover",
+    currency: "PHP",
+    reference: "IBMC-2048",
+    payment_plan: "installment",
+    installment_count: 7,
+    balance_cents: 0,
+    qr_token: "preview",
+  };
+}
+
+function fitPreview(html) {
+  return String(html)
+    .replaceAll('width="560"', 'width="100%"')
+    .replace("<body", `<head><meta name="viewport" content="width=device-width,initial-scale=1"><style>img{max-width:100%!important;height:auto!important;}table{max-width:100%!important;}</style></head><body`);
+}
+
+export function previewTemplate({ channel, subject, body, systemKey = "" }) {
+  const key = String(systemKey || "");
+  const template = { subject: channel === "email" ? subject : null, body };
+  if (key.startsWith("installment_reminder")) {
+    const rendered = renderInstallmentReminder({
+      registration: previewRegistration(),
+      installment: { amount_cents: 200_000, amount_paid_cents: 0, due_on: "2027-03-15", sequence: 2 },
+      daysBefore: 3,
+      payUrl: PREVIEW_PAY_URL,
+      template,
+      preview: true,
+    });
+    return { ...rendered, html: fitPreview(rendered.html) };
+  }
+  if (key.startsWith("entry_pass")) {
+    const rendered = renderEntryPass({
+      registration: previewRegistration(),
+      passUrl: PREVIEW_PASS_URL,
+      template,
+      qrSrc: sampleQrSrc(PREVIEW_PASS_URL),
+    });
+    return { ...rendered, html: fitPreview(rendered.html) };
+  }
+  const values = {
+    first_name: "Maria",
+    amount: "₱2,000",
+    due_date: "Mar 15, 2027",
+    when: "due in 3 days",
+    pay_url: PREVIEW_PAY_URL,
+    reference: "IBMC-2048",
+    pass_url: PREVIEW_PASS_URL,
+    installment: "2 of 7",
+    product: "First Mover",
+    plan_note: TEST_PLAN_NOTE,
+  };
+  const text = plainBody(fillTemplate(body, values));
+  const filledSubject = fillTemplate(subject, values).trim();
+  const html = channel === "email"
+    ? fitPreview(renderPlainEmail({
+      subject: filledSubject,
+      text,
+      payUrl: templateUses(body, "pay_url") ? values.pay_url : "",
+      passUrl: templateUses(body, "pass_url") ? values.pass_url : "",
+    }))
+    : fitPreview(`<!DOCTYPE html><html lang="en"><body style="margin:0;background:#FFFFFF;"><div style="padding:28px 24px;font-family:Arial,sans-serif;font-size:16px;line-height:1.55;color:#141416;">${escapeHtml(text).replaceAll("\n", "<br>")}</div></body></html>`);
+  return { subject: filledSubject, body: text, html, includesQr: false };
+}
+
+export function renderEntryPass({ registration, passUrl, template, qrSrc }) {
   if (registration.balance_cents !== 0 || !registration.qr_token) {
     throw new Error("A QR ticket is only created for a fully paid seat");
   }
   const name = firstName(registration.full_name);
-  const subject = "IBMC 2027 · Your QR ticket";
-  const text = [
-    "IBMC 2027",
-    `${name}, your seat is fully paid.`,
-    `QR ticket: ${passUrl}`,
-    EVENT,
-    `Ref ${registration.reference}`,
-  ].join("\n");
+  const values = {
+    first_name: name,
+    amount: "",
+    due_date: "",
+    when: "",
+    pay_url: "",
+    reference: registration.reference,
+    pass_url: passUrl,
+    installment: "",
+    product: registration.product_name,
+    plan_note: "",
+  };
+  const subject = template?.subject ? fillTemplate(template.subject, values) : ENTRY_PASS_SUBJECT;
+  let text = template?.body
+    ? plainBody(fillTemplate(template.body, values))
+    : ["IBMC 2027", `${name}, your seat is fully paid.`, `QR ticket: ${passUrl}`, EVENT, `Ref ${registration.reference}`].join("\n");
+  if (passUrl && !text.includes(passUrl)) text = `${text}\n${passUrl}`;
+  const intro = template?.body && !sameCopy(template.body, ENTRY_PASS_BODY)
+    ? escapeHtml(text).replaceAll("\n", "<br>")
+    : `${escapeHtml(name)}, your ${escapeHtml(registration.product_name)} seat is fully paid. This QR ticket is your entry. Bring it on both days.`;
   const html = shell({
     headline: "You're in.",
-    intro: `${escapeHtml(name)}, your ${escapeHtml(registration.product_name)} seat is fully paid. This QR ticket is your entry. Bring it on both days.`,
+    intro,
     body: `
       <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;border:1px solid #E4E1DC;border-radius:16px;">
         <tr><td align="center" style="padding:28px 22px 12px;">
           <div style="font-family:Arial,sans-serif;font-size:20px;font-weight:800;letter-spacing:0.04em;color:#141416;">IBMC <span style="color:#D0202E;">2027</span></div>
         </td></tr>
         <tr><td align="center" style="padding:0 22px 12px;">
-          <img src="${escapeHtml(qrImageUrl(passUrl))}" width="220" height="220" alt="QR ticket" style="display:block;width:220px;height:220px;border:0;">
+          <img src="${escapeHtml(qrSrc || qrImageUrl(passUrl))}" width="220" height="220" alt="QR ticket" style="display:block;width:220px;height:220px;border:0;">
         </td></tr>
         <tr><td align="center" style="padding:0 22px 24px;font-size:14px;color:#5C5C63;">
           ${escapeHtml(registration.reference)}<br>${EVENT}
