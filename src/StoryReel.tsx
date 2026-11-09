@@ -16,6 +16,7 @@ function previewSrc(videoId: string, start: number) {
   const params = new URLSearchParams({
     autoplay: "1",
     mute: "1",
+    enablejsapi: "1",
     controls: "0",
     modestbranding: "1",
     rel: "0",
@@ -29,6 +30,25 @@ function previewSrc(videoId: string, start: number) {
     origin: window.location.origin,
   });
   return `https://www.youtube-nocookie.com/embed/${videoId}?${params}`;
+}
+
+function commandPlayer(frame: HTMLIFrameElement, func: string, args: unknown[] = []) {
+  frame.contentWindow?.postMessage(JSON.stringify({ event: "command", func, args }), "*");
+}
+
+function playWithSound(frame: HTMLIFrameElement) {
+  commandPlayer(frame, "unMute");
+  commandPlayer(frame, "setVolume", [100]);
+  commandPlayer(frame, "playVideo");
+}
+
+function parsePlayerMessage(data: string): { event?: string } | null {
+  try {
+    const parsed = JSON.parse(data) as { event?: string };
+    return parsed && typeof parsed === "object" ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 export default function StoryReel({ stories }: { stories: MemberStory[] }) {
@@ -52,6 +72,7 @@ export default function StoryReel({ stories }: { stories: MemberStory[] }) {
   const drag = useRef({ active: false, originX: 0, grabX: 0, lastX: 0, lastT: 0, velocity: 0 });
   const [liveKey, setLiveKey] = useState<string | null>(null);
   const liveKeyRef = useRef<string | null>(null);
+  const liveFrameRef = useRef<HTMLIFrameElement | null>(null);
   liveKeyRef.current = liveKey;
   const [previewReady, setPreviewReady] = useState(false);
   const [grabbing, setGrabbing] = useState(false);
@@ -66,7 +87,29 @@ export default function StoryReel({ stories }: { stories: MemberStory[] }) {
 
   useEffect(() => {
     setPreviewReady(false);
+    if (!liveKey) liveFrameRef.current = null;
   }, [liveKey]);
+
+  useEffect(() => {
+    const unmuteLive = () => {
+      const frame = liveFrameRef.current;
+      if (frame) playWithSound(frame);
+    };
+    const onMessage = (event: MessageEvent) => {
+      const frame = liveFrameRef.current;
+      if (!frame || event.source !== frame.contentWindow) return;
+      const data = typeof event.data === "string" ? parsePlayerMessage(event.data) : event.data;
+      if (data?.event === "onReady") playWithSound(frame);
+    };
+    document.addEventListener("pointerdown", unmuteLive, true);
+    document.addEventListener("keydown", unmuteLive, true);
+    window.addEventListener("message", onMessage);
+    return () => {
+      document.removeEventListener("pointerdown", unmuteLive, true);
+      document.removeEventListener("keydown", unmuteLive, true);
+      window.removeEventListener("message", onMessage);
+    };
+  }, []);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -362,8 +405,16 @@ export default function StoryReel({ stories }: { stories: MemberStory[] }) {
                       referrerPolicy="strict-origin-when-cross-origin"
                       tabIndex={-1}
                       aria-hidden="true"
-                      onLoad={() => {
-                        if (liveKeyRef.current === key) setPreviewReady(true);
+                      onLoad={(event) => {
+                        if (liveKeyRef.current !== key) return;
+                        const frame = event.currentTarget;
+                        liveFrameRef.current = frame;
+                        setPreviewReady(true);
+                        frame.contentWindow?.postMessage(JSON.stringify({ event: "listening", id: key }), "*");
+                        playWithSound(frame);
+                        window.setTimeout(() => {
+                          if (liveFrameRef.current === frame) playWithSound(frame);
+                        }, 400);
                       }}
                     />
                   ) : null}
