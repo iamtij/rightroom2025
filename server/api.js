@@ -11,8 +11,9 @@ import { admitPass, cancelRegistration, compRegistration, createRegistration, di
 import { sendEntryPassForRegistration } from "./reminders.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
-import { listMembers, lookupMember, memberContactClash, memberFromProof, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
+import { listMembers, lookupMember, memberContactClash, memberFromProof, memberPreview, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
 import { presentCoupon, priceCoupon } from "./coupons.js";
+import { parseLookupContact } from "./contact.js";
 import { maskEmail, readMemberEditToken, sendMemberOtp, sendRegistrationOtp, verifyMemberOtp, verifyRegistrationOtp } from "./otp.js";
 import { rateLimit } from "./limits.js";
 import { formatLongDate, manilaParts } from "./time.js";
@@ -246,6 +247,7 @@ function clientError(error, fallback) {
     "That email is already",
     "That mobile number is already",
     "for your badge",
+    "Add your name, business",
   ];
   return safe.find((item) => message.includes(item)) ? message : fallback;
 }
@@ -363,6 +365,26 @@ export function createApi() {
 
   router.get("/members/lookup", memberLookupLimit, (_req, res) => {
     res.json({ ok: true });
+  });
+
+  router.post("/members/preview", memberLookupLimit, (req, res) => {
+    const contact = parseLookupContact(req.body?.query || req.body?.email);
+    if (contact.error) {
+      res.status(contact.status || 400).json({ error: contact.error });
+      return;
+    }
+    const preview = memberPreview(db(), contact.value);
+    if (!preview) {
+      res.json({ ok: true, found: false });
+      return;
+    }
+    res.json({
+      ok: true,
+      found: true,
+      firstName: preview.firstName,
+      chapter: preview.chapter,
+      maskedEmail: maskEmail(preview.email),
+    });
   });
 
   router.post("/members/otp", otpLimit, async (req, res) => {
@@ -485,6 +507,14 @@ export function createApi() {
       throw error;
     }
     const proved = memberFromProof(db(), body.memberToken);
+    if (proved) {
+      const ready = lookupMember(db(), proved.email);
+      if (!ready?.profileReady) {
+        const error = new Error("Add your name, business, industry, chapter, email, and mobile number.");
+        error.status = 400;
+        throw error;
+      }
+    }
     return createRegistration(db(), {
       productCode: body.productCode,
       paymentPlan: body.paymentPlan,

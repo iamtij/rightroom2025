@@ -651,6 +651,8 @@ function RegistrationWizard() {
   const [searching, setSearching] = useState(false);
   const [lookupError, setLookupError] = useState("");
   const [member, setMember] = useState<FoundMember | null>(null);
+  const [memberPreview, setMemberPreview] = useState<{ firstName: string; chapter: string; maskedEmail: string } | null>(null);
+  const editAfterCode = useRef(false);
   const [otpSentTo, setOtpSentTo] = useState("");
   const [otpCode, setOtpCode] = useState("");
   const [otpError, setOtpError] = useState("");
@@ -774,8 +776,43 @@ function RegistrationWizard() {
     resetResendCooldown();
   }
 
+  function memberCheckoutAttendee(source: FoundMember): Attendee {
+    const typed = lookup.trim();
+    return {
+      ...memberAttendee(source),
+      email: source.email || (typed.includes("@") ? typed : ""),
+      mobile: source.mobile || (typed.includes("@") ? "" : typed),
+    };
+  }
+
+  function openMemberDetails(source: FoundMember) {
+    setMemberProof(source.memberToken || "");
+    setAttendee(memberCheckoutAttendee(source));
+    setGuestError("");
+    setPlan(memberTest ? "test" : "full");
+    setStep("guest");
+  }
+
+  function editMemberDetails() {
+    if (!member) return;
+    if (!editToken) {
+      editAfterCode.current = true;
+      sendOtp();
+      return;
+    }
+    openMemberDetails(member);
+  }
+
+  function continueVerifiedMember() {
+    if (!member?.profileReady) return;
+    setMemberProof(member.memberToken || "");
+    setAttendee(memberCheckoutAttendee(member));
+    setPlan(memberTest ? "test" : "full");
+    setStep("ticket");
+  }
+
   async function sendOtp() {
-    if (!member || otpBusy || resendSeconds > 0) return;
+    if (otpBusy || resendSeconds > 0 || (!member && !memberPreview)) return;
     const contact = parseLookupContact(lookup.trim());
     if ("error" in contact) {
       setOtpError(contact.error);
@@ -822,6 +859,7 @@ function RegistrationWizard() {
         setMember(payload.member);
         setEditToken(payload.editToken || "");
         setOtpSentTo("");
+        editAfterCode.current = false;
         setStep("manage");
         return;
       }
@@ -830,6 +868,16 @@ function RegistrationWizard() {
       setEditToken(payload.editToken || "");
       setAttendee(memberAttendee(payload.member));
       setOtpSentTo("");
+      setMemberPreview(null);
+      const editing = editAfterCode.current;
+      editAfterCode.current = false;
+      if (editing || !payload.member.profileReady) {
+        setMemberProof(payload.member.memberToken || "");
+        setAttendee(memberCheckoutAttendee(payload.member));
+        setPlan(memberTest ? "test" : "full");
+        setGuestError("");
+        setStep("guest");
+      }
     } catch (error) {
       setOtpError(error instanceof Error ? error.message : "That code is wrong.");
     } finally {
@@ -839,10 +887,12 @@ function RegistrationWizard() {
 
   async function searchMember() {
     const query = lookup.trim();
-    if (!query || searching || resendSeconds > 0) return;
+    if (!query || searching) return;
     const contact = parseLookupContact(query);
     if ("error" in contact) {
       setMember(null);
+      setMemberPreview(null);
+      editAfterCode.current = false;
       clearOtp();
       setLookupError(contact.error);
       return;
@@ -851,24 +901,28 @@ function RegistrationWizard() {
     setLookupError("");
     setOtpError("");
     setMember(null);
+    setMemberPreview(null);
+    editAfterCode.current = false;
+    clearOtp();
     try {
-      const response = await fetch("/api/members/otp", {
+      const response = await fetch("/api/members/preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ query }),
       });
       const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "Could not send the code");
-      setOtpSentTo("your email");
-      setOtpCode("");
-      startResendCooldown();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not send the code";
-      if (otpSentTo) setOtpError(message);
-      else {
-        setOtpSentTo("");
-        setLookupError(message);
+      if (!response.ok) throw new Error(payload.error || "Could not look up that membership");
+      if (!payload.found) {
+        setLookupError("We couldn't find a membership with that email or mobile.");
+        return;
       }
+      setMemberPreview({
+        firstName: String(payload.firstName || ""),
+        chapter: String(payload.chapter || ""),
+        maskedEmail: String(payload.maskedEmail || "your email"),
+      });
+    } catch (error) {
+      setLookupError(error instanceof Error ? error.message : "Could not look up that membership");
     } finally {
       setSearching(false);
     }
@@ -936,8 +990,10 @@ function RegistrationWizard() {
     setMemberTest(true);
     setMemberProof("");
     setMember(null);
+    setMemberPreview(null);
     setLookup("");
     setLookupError("");
+    editAfterCode.current = false;
     clearOtp();
     setStep("member");
   }
@@ -1194,15 +1250,17 @@ function RegistrationWizard() {
       ? { pose: "smile", label: "Lev, already registered", text: `You're already registered, ${first}.` }
       : member
         ? { pose: "smile", label: "Lev smiling, found your membership", text: `Found you, ${first}!` }
-        : otpSentTo
-          ? { pose: "smile", label: "Lev smiling", text: "If we found your membership, we sent a code to your email." }
-          : {
-              pose: "smile",
-              label: "Lev smiling",
-              text: memberTest
-                ? "Testing registration. Use the email or mobile on your BNI Connect profile. Payment is open."
-                : "Use the email or mobile number saved in your BNI Connect profile.",
-            };
+        : memberPreview
+          ? { pose: "smile", label: "Lev smiling, found your membership", text: memberPreview.firstName ? `Found you, ${memberPreview.firstName}!` : "Found your membership." }
+          : otpSentTo
+            ? { pose: "smile", label: "Lev smiling", text: "Enter the code we emailed you." }
+            : {
+                pose: "smile",
+                label: "Lev smiling",
+                text: memberTest
+                  ? "Testing registration. Use the email or mobile on your BNI Connect profile. Payment is open."
+                  : "Use the email or mobile number saved in your BNI Connect profile.",
+              };
     return (
       <Frame
         label="Step 1 of 4"
@@ -1211,19 +1269,10 @@ function RegistrationWizard() {
           <button type="button" className="block w-full text-center text-base font-bold text-[#A8131F]" onClick={() => setStep("manage")}>
             Manage my registration
           </button>
+        ) : member && !member.profileReady ? (
+          <PrimaryButton onClick={editMemberDetails}>Edit my details</PrimaryButton>
         ) : member ? (
-          <PrimaryButton disabled={!member.profileReady && !detailsReady(memberAttendee(member))} onClick={() => {
-            if (!member.profileReady && !detailsReady(memberAttendee(member))) return;
-            const typed = lookup.trim();
-            setMemberProof(member.memberToken || "");
-            setAttendee({
-              ...memberAttendee(member),
-              email: member.email || (typed.includes("@") ? typed : ""),
-              mobile: member.mobile || (typed.includes("@") ? "" : typed),
-            });
-            setPlan(memberTest ? "test" : "full");
-            setStep("ticket");
-          }}>Continue</PrimaryButton>
+          <PrimaryButton onClick={continueVerifiedMember}>Continue</PrimaryButton>
         ) : null}
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep("start")}>← Back</button>
@@ -1240,6 +1289,8 @@ function RegistrationWizard() {
               setLookup(event.target.value);
               setLookupError("");
               setMember(null);
+              setMemberPreview(null);
+              editAfterCode.current = false;
               clearOtp();
             }}
             onKeyDown={(event) => {
@@ -1248,7 +1299,7 @@ function RegistrationWizard() {
           />
           <button
             type="button"
-            disabled={!lookup.trim() || searching || resendSeconds > 0}
+            disabled={!lookup.trim() || searching}
             onClick={searchMember}
             className="shrink-0 rounded-full bg-[#D0202E] px-5 text-base font-bold text-white disabled:bg-[#E4A0A6]"
           >
@@ -1283,20 +1334,31 @@ function RegistrationWizard() {
                   <ResendCodeButton secondsLeft={resendSeconds} busy={otpBusy} onClick={sendOtp} />
                 </div>
               </div>
-            ) : (
+            ) : member.profileReady ? (
               <p className="m-0 text-[13px] text-[#5C5C63]">
                 Something wrong?{" "}
-                <button type="button" className="font-semibold text-[#A8131F]" disabled={otpBusy} onClick={sendOtp}>
-                  {otpBusy ? "Sending a code…" : "Edit my details"}
+                <button type="button" className="font-semibold text-[#A8131F]" disabled={otpBusy} onClick={editMemberDetails}>
+                  Edit my details
                 </button>
               </p>
-            )}
+            ) : null}
             {otpError && !otpSentTo ? <p className="m-0 text-sm text-[#A8131F]">{otpError}</p> : null}
+          </div>
+        ) : memberPreview && !otpSentTo ? (
+          <div className="flex flex-col gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+            <span className="self-start rounded-full bg-[#141416] px-2.5 py-1 text-xs font-bold tracking-[0.1em] text-white uppercase">We found you</span>
+            {memberPreview.firstName ? <p className="m-0 font-archivo text-[22px] font-extrabold">{memberPreview.firstName}</p> : null}
+            {memberPreview.chapter ? <Detail label="Chapter" value={memberPreview.chapter} /> : null}
+            <p className="m-0 text-sm text-[#5C5C63]">We'll send a code to {memberPreview.maskedEmail} when you ask.</p>
+            <button type="button" disabled={otpBusy || resendSeconds > 0} onClick={sendOtp} className="self-start rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]">
+              {otpBusy ? "Sending a code…" : "Send code"}
+            </button>
+            {otpError ? <p className="m-0 text-sm text-[#A8131F]">{otpError}</p> : null}
           </div>
         ) : null}
         {otpSentTo && !member ? (
           <div className="flex flex-col gap-2 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
-            <p className="m-0 text-sm text-[#5C5C63]">Enter the 6-digit code if it arrived.</p>
+            <p className="m-0 text-sm text-[#5C5C63]">Check your email. We sent a code to {otpSentTo}.</p>
             <input
               className={inputClass}
               inputMode="numeric"
@@ -1312,7 +1374,7 @@ function RegistrationWizard() {
             {otpError ? <p className="m-0 text-sm text-[#A8131F]">{otpError}</p> : null}
             <div className="flex gap-2">
               <button type="button" disabled={otpCode.length !== 6 || otpBusy} onClick={confirmOtp} className="rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]">Confirm code</button>
-              <ResendCodeButton secondsLeft={resendSeconds} busy={otpBusy || searching} onClick={searchMember} />
+              <ResendCodeButton secondsLeft={resendSeconds} busy={otpBusy} onClick={sendOtp} />
             </div>
           </div>
         ) : null}
