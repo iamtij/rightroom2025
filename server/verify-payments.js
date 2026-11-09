@@ -116,7 +116,7 @@ delete process.env.UPAY_BILLER_UUID;
 assert.equal(upayPublicCheckoutInfo().checkoutMode, "off");
 process.env.UPAY_BILLER_UUID = "uuid-test";
 const billerOnly = upayPublicCheckoutInfo();
-assert.equal(billerOnly.checkoutMode, "live");
+assert.equal(billerOnly.checkoutMode, "pending_partner_api");
 assert.equal(billerOnly.ingestionReady, true);
 assert.equal(billerOnly.settlementMode, "manual");
 process.env.UPAY_BASE_URL = "https://api.unionbankph.com/ubp/external";

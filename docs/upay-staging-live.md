@@ -11,7 +11,9 @@ IBMC can test **production UnionBank whitelabel checkout** from Railway **stagin
 | MID | `UPAY_PARTNER_ID` and usually `UPAY_USERNAME` | Optional — only if you use partner **status polling** |
 | Password | `UPAY_PASSWORD` | Optional — partner login password |
 
-UnionBank’s **SA CHECKOUT** onboarding treats the biller **Profile ID / UUID** as sufficient for **merchant ingestion** (payments post to the GLOBAL REFERRAL biller). IBMC arms checkout when `UPAY_BILLER_UUID` is set.
+UnionBank’s **SA CHECKOUT** onboarding treats the biller **Profile ID / UUID** as sufficient for **merchant ingestion** (payments post to the GLOBAL REFERRAL biller). **Opening checkout in the browser still requires** either a **Create Payment** API call (Developer Portal `UPAY_CLIENT_ID` / `UPAY_CLIENT_SECRET`) or a whitelabel profile UnionBank has fully activated.
+
+Opening `https://sith.unionbankph.com/UPAY/Whitelabel/{ProfileId}` **alone** currently returns UnionBank’s **Processing Error** page (verified Nov 2026). Do not send buyers there until UnionBank fixes the profile or IBMC has partner API credentials.
 
 **Auto-updating a registration as paid** is separate:
 

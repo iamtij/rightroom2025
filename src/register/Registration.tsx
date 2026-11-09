@@ -244,9 +244,15 @@ type PaynamicsCheckoutPublic = {
   apiAdmissionReason?: string;
 };
 
+type UpayCheckoutPublic = {
+  checkoutMode: string;
+  admissionReason?: string;
+};
+
 function usePaymentChannels() {
   const [channels, setChannels] = useState<PayChannel[] | null>(null);
   const [channel, setChannel] = useState<PayChannelCode | "">("");
+  const [upayCheckout, setUpayCheckout] = useState<UpayCheckoutPublic>({ checkoutMode: "off" });
   const [paynamicsCheckout, setPaynamicsCheckout] = useState<PaynamicsCheckoutPublic>({ checkoutMode: "off" });
   const [paynamicsMethods, setPaynamicsMethods] = useState<PaynamicsMethodOption[]>([]);
   const [paynamicsChannel, setPaynamicsChannel] = useState("");
@@ -268,6 +274,11 @@ function usePaymentChannels() {
           apiAdmissionAllowed: Boolean(paynamics.apiAdmissionAllowed),
           apiAdmissionReason: String(paynamics.apiAdmissionReason || ""),
         });
+        const upay = payload.upay && typeof payload.upay === "object" ? payload.upay : {};
+        setUpayCheckout({
+          checkoutMode: String(upay.checkoutMode || "off"),
+          admissionReason: String(upay.admissionReason || ""),
+        });
       })
       .catch(() => {
         if (!stop) {
@@ -279,7 +290,7 @@ function usePaymentChannels() {
       stop = true;
     };
   }, []);
-  return { channels, channel, setChannel, paynamicsCheckout, paynamicsMethods, paynamicsChannel, setPaynamicsChannel };
+  return { channels, channel, setChannel, upayCheckout, paynamicsCheckout, paynamicsMethods, paynamicsChannel, setPaynamicsChannel };
 }
 
 type Attendee = {
@@ -705,7 +716,7 @@ function RegistrationWizard() {
   const [memberTest, setMemberTest] = useState(false);
   const [agreed, setAgreed] = useState(false);
   const [method, setMethod] = useState<UpayMethod>("instapay");
-  const { channels, channel, setChannel, paynamicsCheckout, paynamicsMethods, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
+  const { channels, channel, setChannel, upayCheckout, paynamicsCheckout, paynamicsMethods, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
   const [checkoutReference, setCheckoutReference] = useState("");
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
@@ -1133,6 +1144,10 @@ function RegistrationWizard() {
     }
     const useInstallment = plan === "installment" && Boolean(charging.installmentCents) && charging.rows.length > 0;
     const peso = charging.currency === "PHP";
+    if (peso && channel === "upay" && upayCheckout.checkoutMode === "pending_partner_api") {
+      setPayError("UnionBank UPay needs Developer Portal credentials (client ID and secret) before checkout can open. The biller link alone shows a Processing Error on UnionBank's site.");
+      return;
+    }
     if (peso && channel === "paynamics" && paynamicsCheckout.checkoutMode === "off") {
       const reason = paynamicsCheckout.apiAdmissionReason ? ` (${paynamicsCheckout.apiAdmissionReason})` : "";
       setPayError(`Paynamics checkout is not enabled on this server${reason}. See docs/paynamics-staging.md for required env vars.`);
@@ -2615,7 +2630,7 @@ function Manage({
   const [busy, setBusy] = useState(false);
   const { secondsLeft: resendSeconds, start: startResendCooldown, reset: resetResendCooldown } = useResendCooldown();
   const [method, setMethod] = useState<UpayMethod>("instapay");
-  const { channels, channel, setChannel, paynamicsCheckout, paynamicsMethods, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
+  const { channels, channel, setChannel, upayCheckout, paynamicsCheckout, paynamicsMethods, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
   const [payingInstallment, setPayingInstallment] = useState(false);
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
@@ -2880,6 +2895,10 @@ function Manage({
 
   async function startPayment() {
     if (!record || busy || record.currency !== "PHP" || !channel) return;
+    if (channel === "upay" && upayCheckout.checkoutMode === "pending_partner_api") {
+      setError("UnionBank UPay needs Developer Portal credentials before checkout can open. The biller link alone shows Processing Error on UnionBank's site.");
+      return;
+    }
     if (channel === "paynamics" && paynamicsCheckout.checkoutMode === "off") {
       const reason = paynamicsCheckout.apiAdmissionReason ? ` (${paynamicsCheckout.apiAdmissionReason})` : "";
       setError(`Paynamics checkout is not enabled on this server${reason}.`);

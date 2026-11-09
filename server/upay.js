@@ -45,15 +45,19 @@ export function upayPublicCheckoutInfo() {
   const biller = upayBillerPageConfigured();
   const partner = upayPartnerApiConfigured();
   const callback = upayCallbackConfigured();
-  /** UnionBank SA CHECKOUT: biller Profile ID (UUID) arms the live whitelabel page and merchant ingestion. */
+  /** UnionBank SA CHECKOUT: biller Profile ID (UUID) arms merchant ingestion, not necessarily the bare whitelabel link. */
   const ingestionReady = biller;
+  const whitelabelDirect = process.env.UPAY_WHITELABEL_DIRECT === "true";
   let checkoutMode = "off";
-  if (ingestionReady) checkoutMode = "live";
+  if (partner) checkoutMode = "live";
+  else if (biller && whitelabelDirect) checkoutMode = "biller_page";
+  else if (biller) checkoutMode = "pending_partner_api";
   let settlementMode = "manual";
   if (callback) settlementMode = "callback";
   else if (partner) settlementMode = "poll";
   const reasons = [];
   if (!biller) reasons.push("missing_biller_uuid");
+  if (biller && !partner && !whitelabelDirect) reasons.push("missing_partner_api");
   return {
     checkoutMode,
     ingestionReady,
@@ -61,7 +65,7 @@ export function upayPublicCheckoutInfo() {
     partnerApiReady: partner,
     callbackReady: callback,
     settlementMode,
-    liveOnStaging: ingestionReady,
+    liveOnStaging: checkoutMode === "live" || checkoutMode === "biller_page",
     admissionReason: reasons.length ? reasons.join(",") : "",
   };
 }
@@ -382,24 +386,101 @@ export async function startUpayPayment(db, registration, paymentMethod) {
   if (mobile.length < 10) {
     return { error: "Add a Philippine mobile number so UnionBank can send the receipt.", status: 400, registration };
   }
-  const sender = senderRefId();
-  const page = productionPageUrl();
-  const result = db.prepare(`
-    INSERT INTO upay_payments (
-      registration_id, installment_id, sender_ref_id, amount_cents, currency, payment_method,
-      status, unionbank_code, unionbank_state, transaction_id, transaction_uuid, qr, payment_url
-    ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL, NULL, NULL, ?)
-  `).run(
-    registration.id,
-    due.id,
-    sender,
+  const input = {
+    fullName: registration.full_name,
+    email: registration.email,
+    mobile,
+    reference: registration.reference,
     amountCents,
-    registration.currency,
-    paymentMethod,
-    page,
-  );
-  const row = db.prepare("SELECT * FROM upay_payments WHERE id = ?").get(result.lastInsertRowid);
-  return { registration, upay: await presentUpay(row) };
+  };
+  if (upayPartnerApiConfigured()) {
+    try {
+      const token = await partnerToken();
+      const references = await loadReferences(token, input);
+      const sender = senderRefId();
+      const created = await upayFetch("/upay/payments/v1/transactions", token, {
+        method: "POST",
+        body: {
+          senderRefId: sender,
+          tranRequestDate: tranRequestDate(),
+          billerUuid: billerUuid(),
+          emailAddress: registration.email,
+          mobileNumber: mobile,
+          amount: pesosFromCents(amountCents),
+          paymentMethod,
+          callbackUrl: callbackUrl(),
+          references,
+        },
+      });
+      if (!created.ok) {
+        return { error: unionbankMessage(created.body, created.status), status: created.status === 400 ? 400 : 502, registration };
+      }
+      const outcome = upayOutcome(created.body);
+      const settlement = upaySettlement(created.body, amountCents);
+      if (outcome === "paid" && settlement !== "paid") {
+        console.error(`UPay amount was not confirmed for ${sender}`);
+      }
+      const link = paymentLink(created.body) || productionPageUrl();
+      const result = db.prepare(`
+        INSERT INTO upay_payments (
+          registration_id, installment_id, sender_ref_id, amount_cents, currency, payment_method,
+          status, unionbank_code, unionbank_state, transaction_id, transaction_uuid, qr, payment_url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        registration.id,
+        due.id,
+        sender,
+        amountCents,
+        registration.currency,
+        paymentMethod,
+        settlement === "failed" ? "failed" : "pending",
+        created.body.code || null,
+        created.body.state || null,
+        created.body.transactionId || null,
+        created.body.uuid || null,
+        qrText(created.body) || null,
+        link,
+      );
+      let row = db.prepare("SELECT * FROM upay_payments WHERE id = ?").get(result.lastInsertRowid);
+      let current = registration;
+      if (settlement === "paid") {
+        current = settle(db, row);
+        row = saveUpay(db, row, { status: "paid" });
+      } else if (settlement === "failed") {
+        row = saveUpay(db, row, { status: "failed" });
+        return { error: created.body.state || "UnionBank declined the payment.", status: 402, registration: current, upay: await presentUpay(row) };
+      }
+      return { registration: current, upay: await presentUpay(row) };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "UnionBank could not start the payment.";
+      return { error: message, status: 502, registration };
+    }
+  }
+  if (process.env.UPAY_WHITELABEL_DIRECT === "true") {
+    const sender = senderRefId();
+    const page = productionPageUrl();
+    const result = db.prepare(`
+      INSERT INTO upay_payments (
+        registration_id, installment_id, sender_ref_id, amount_cents, currency, payment_method,
+        status, unionbank_code, unionbank_state, transaction_id, transaction_uuid, qr, payment_url
+      ) VALUES (?, ?, ?, ?, ?, ?, 'pending', NULL, NULL, NULL, NULL, NULL, ?)
+    `).run(
+      registration.id,
+      due.id,
+      sender,
+      amountCents,
+      registration.currency,
+      paymentMethod,
+      page,
+    );
+    const row = db.prepare("SELECT * FROM upay_payments WHERE id = ?").get(result.lastInsertRowid);
+    return { registration, upay: await presentUpay(row) };
+  }
+  return {
+    error: "UnionBank UPay is not ready for checkout yet. The biller page alone returns a Processing Error — add UPAY_CLIENT_ID and UPAY_CLIENT_SECRET from the Developer Portal, or ask UnionBank to activate the whitelabel profile.",
+    status: 503,
+    registration,
+  };
 }
 
 export async function refreshUpayPayment(db, senderRefIdValue) {
