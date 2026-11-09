@@ -1090,11 +1090,12 @@ function RegistrationWizard() {
   async function pay() {
     const charging = checkoutTier();
     if (!attendee || !charging || saving || !charging.onSale) return;
-    if (turnstileSiteKey && !turnstileToken) {
+    const payingExistingRegistration = Boolean(checkoutReference);
+    if (turnstileSiteKey && !turnstileToken && !payingExistingRegistration) {
       setPayError(
         turnstileBlocked
           ? "Fix the human-check widget below (or disable Turnstile in server env) before paying."
-          : "Confirm you are a person below and try again.",
+          : "Wait until the human check below shows Success, then press Pay again.",
       );
       return;
     }
