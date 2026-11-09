@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type TransitionEvent } from "react";
 import FaqList from "./FaqList.tsx";
+import StoryReel from "./StoryReel.tsx";
 
 const FIRST_MOVER_OPENS = new Date("2026-11-11T00:00:00+08:00");
 const FIRST_MOVER_ENDS = new Date("2026-12-01T00:00:00+08:00");
@@ -11,42 +12,54 @@ const STORIES = [
     place: "BNI Philippines",
     title: "From word of mouth to a scaled firm.",
     href: "https://www.youtube.com/watch?v=UP7zGRdE2EY",
-    photo: "/assets/joy-ejercito.png",
+    videoId: "UP7zGRdE2EY",
+    start: 4,
+    photo: "/assets/stories/joy-ejercito.jpg",
   },
   {
     name: "Mys Sandico",
     place: "BNI Philippines",
     title: "Relationships that grew her events business.",
     href: "https://www.youtube.com/watch?v=Fsb8X42rY2w",
-    photo: "/assets/mys-sandico.png",
+    videoId: "Fsb8X42rY2w",
+    start: 4,
+    photo: "/assets/stories/mys-sandico.jpg",
   },
   {
     name: "Ruel and Nimpha Villaluna",
     place: "BNI Philippines",
     title: "They brought BNI to Cavite.",
     href: "https://www.youtube.com/watch?v=YqygHFimjBw",
-    photo: "/assets/ruel-nimpha-villaluna.png",
+    videoId: "YqygHFimjBw",
+    start: 4,
+    photo: "/assets/stories/ruel-nimpha-villaluna.jpg",
   },
   {
     name: "Jennifer Angsiting",
     place: "BNI Australia",
     title: "From no network to $246K in one year.",
     href: "https://www.youtube.com/shorts/II5em52LAeI",
-    photo: "/assets/jennifer-angsiting.png",
+    videoId: "II5em52LAeI",
+    start: 1,
+    photo: "/assets/stories/jennifer-angsiting.jpg",
   },
   {
     name: "Edwin Duria",
     place: "BNI UAE",
     title: "How BNI sparked an entrepreneurial journey.",
     href: "https://www.youtube.com/watch?v=RqtuZc_YzEw",
-    photo: "/assets/edwin-duria.png",
+    videoId: "RqtuZc_YzEw",
+    start: 4,
+    photo: "/assets/stories/edwin-duria.jpg",
   },
   {
     name: "Alex P Eaganathan",
     place: "BNI Hong Kong",
     title: "From one restaurant to five.",
     href: "https://www.youtube.com/watch?v=EB8Muf81ZHA",
-    photo: "/assets/alex-eaganathan.png",
+    videoId: "EB8Muf81ZHA",
+    start: 4,
+    photo: "/assets/stories/alex-eaganathan.jpg",
   },
 ];
 
@@ -772,32 +785,14 @@ export default function AmplifyHome() {
         </a>
       </section>
 
-      <section className="flex flex-col gap-10 bg-[#F6F4F1] px-4 py-20 text-[#141416] sm:px-8 lg:px-24 lg:py-[100px]">
-        <div className="flex max-w-[760px] flex-col gap-3.5">
+      <section className="flex flex-col gap-10 bg-[#F6F4F1] py-20 text-[#141416] lg:py-[100px]">
+        <div className="flex max-w-[760px] flex-col gap-3.5 px-4 sm:px-8 lg:px-24">
           <p className="m-0 text-[13px] font-semibold uppercase tracking-[0.18em] text-[#A8131F]">Member stories</p>
           <h2 className="m-0 font-archivo text-[clamp(36px,4.4vw,60px)] font-extrabold leading-[1.02]">
             What one more action did for them.
           </h2>
         </div>
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
-          {STORIES.map((story) => (
-            <a
-              key={story.name}
-              href={story.href}
-              target="_blank"
-              rel="noreferrer"
-              className="flex flex-col gap-5 rounded-[18px] bg-white p-6 text-[#141416] no-underline"
-            >
-              <img src={story.photo} alt="" className="h-28 w-28 rounded-full object-cover" />
-              <div className="flex flex-col gap-1.5">
-                <p className="m-0 text-lg font-bold">{story.name}</p>
-                <p className="m-0 text-sm font-semibold text-[#A8131F]">{story.place}</p>
-                <p className="m-0 text-[17px] leading-snug">{story.title}</p>
-              </div>
-              <span className="mt-auto text-sm font-semibold text-[#A8131F]">Watch on YouTube</span>
-            </a>
-          ))}
-        </div>
+        <StoryReel stories={STORIES} />
         <a href="/register" className="self-center w-fit rounded-full bg-[#D0202E] px-[30px] py-4 text-base font-semibold text-white no-underline">
           Register
         </a>

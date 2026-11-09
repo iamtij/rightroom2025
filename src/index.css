@@ -262,17 +262,51 @@ button, a, [role="button"] {
   animation-delay: 0.5s;
 }
 
+.story-shade {
+  z-index: 1;
+  background: linear-gradient(180deg, rgba(10, 10, 12, 0) 28%, rgba(10, 10, 12, 0.55) 58%, rgba(10, 10, 12, 0.94) 76%, rgba(10, 10, 12, 0.98) 100%);
+}
+
+.story-preview-bar {
+  transform: scaleX(0);
+  transform-origin: left center;
+}
+
+.story-card.is-live .story-still {
+  animation: story-drift 8s linear forwards;
+}
+
+.story-card.is-live .story-preview-bar {
+  animation: story-fill 8s linear forwards;
+}
+
+@keyframes story-drift {
+  from { transform: scale(1); }
+  to { transform: scale(1.06); }
+}
+
+@keyframes story-fill {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .mq,
   .quiet-bar,
   .lev,
-  .lev * {
+  .lev *,
+  .story-card.is-live .story-still,
+  .story-card.is-live .story-preview-bar {
     animation: none;
   }
 
   .quiet-bar {
     height: var(--bar-h);
     background-color: var(--bar-c);
+  }
+
+  .story-card.is-live .story-preview-bar {
+    transform: scaleX(1);
   }
 }
 
