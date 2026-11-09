@@ -41,6 +41,7 @@ export default function StoryReel({ stories }: { stories: MemberStory[] }) {
   const nudgingRef = useRef(false);
   const coastRef = useRef(0);
   const movedRef = useRef(0);
+  const openedRef = useRef(false);
   const offscreenRef = useRef(true);
   const cardStepRef = useRef(250);
   const motion = useRef({
@@ -48,7 +49,7 @@ export default function StoryReel({ stories }: { stories: MemberStory[] }) {
     nudge: (_direction: number) => {},
     nearestKey: (): string | null => null,
   });
-  const drag = useRef({ originX: 0, grabX: 0, lastX: 0, lastT: 0, velocity: 0 });
+  const drag = useRef({ active: false, originX: 0, grabX: 0, lastX: 0, lastT: 0, velocity: 0 });
   const [liveKey, setLiveKey] = useState<string | null>(null);
   const liveKeyRef = useRef<string | null>(null);
   liveKeyRef.current = liveKey;
@@ -192,55 +193,80 @@ export default function StoryReel({ stories }: { stories: MemberStory[] }) {
 
   function onPointerDown(event: PointerEvent<HTMLDivElement>) {
     if (event.button !== 0) return;
-    draggingRef.current = true;
-    nudgingRef.current = false;
-    coastRef.current = 0;
+    drag.current.active = true;
+    draggingRef.current = false;
     movedRef.current = 0;
+    openedRef.current = false;
     drag.current.grabX = event.clientX;
     drag.current.originX = xRef.current;
     drag.current.lastX = event.clientX;
     drag.current.lastT = performance.now();
     drag.current.velocity = 0;
-    setGrabbing(true);
-    event.currentTarget.setPointerCapture(event.pointerId);
   }
 
   function onPointerMove(event: PointerEvent<HTMLDivElement>) {
-    if (!draggingRef.current) return;
+    if (!drag.current.active) return;
     const now = performance.now();
     const dt = now - drag.current.lastT || 16;
+    const delta = event.clientX - drag.current.grabX;
     drag.current.velocity = (event.clientX - drag.current.lastX) / dt;
     drag.current.lastX = event.clientX;
     drag.current.lastT = now;
-    movedRef.current = event.clientX - drag.current.grabX;
-    xRef.current = motion.current.wrap(drag.current.originX + movedRef.current);
+    movedRef.current = delta;
+    if (!draggingRef.current) {
+      if (Math.abs(delta) < 8) return;
+      draggingRef.current = true;
+      nudgingRef.current = false;
+      coastRef.current = 0;
+      setGrabbing(true);
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    xRef.current = motion.current.wrap(drag.current.originX + delta);
     if (trackRef.current) trackRef.current.style.transform = `translate3d(${xRef.current}px,0,0)`;
   }
 
+  function storyLinkAt(x: number, y: number) {
+    const node = document.elementFromPoint(x, y);
+    const card = node instanceof Element ? node.closest("a[data-story-card]") : null;
+    return card instanceof HTMLAnchorElement ? card : null;
+  }
+
   function onPointerUp(event: PointerEvent<HTMLDivElement>) {
-    if (!draggingRef.current) return;
+    if (!drag.current.active && !draggingRef.current) return;
+    const moved = movedRef.current;
+    const dragged = draggingRef.current;
+    drag.current.active = false;
     draggingRef.current = false;
     setGrabbing(false);
-    const moved = movedRef.current;
+    if (!dragged) {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      const card = storyLinkAt(event.clientX, event.clientY);
+      if (!card) return;
+      const popup = window.open(card.href, "_blank", "noopener,noreferrer");
+      if (popup) openedRef.current = true;
+      return;
+    }
     if (!reduceRef.current && Math.abs(moved) > 8) {
       coastRef.current = Math.max(-1.4, Math.min(1.4, drag.current.velocity));
     }
-    if (Math.abs(moved) <= 8) return;
     if (event.pointerType === "touch") {
       const key = motion.current.nearestKey();
       if (key) setLiveKey(key);
       return;
     }
-    const node = document.elementFromPoint(event.clientX, event.clientY);
-    const card = node instanceof Element ? node.closest("[data-story-card]") : null;
-    if (card instanceof HTMLElement && card.dataset.liveKey) setLiveKey(card.dataset.liveKey);
+    const card = storyLinkAt(event.clientX, event.clientY);
+    if (card?.dataset.liveKey) setLiveKey(card.dataset.liveKey);
   }
 
   function onCardClick(event: MouseEvent<HTMLAnchorElement>) {
-    if (Math.abs(movedRef.current) > 8) {
+    if (openedRef.current) {
       event.preventDefault();
-      movedRef.current = 0;
+      openedRef.current = false;
+      return;
     }
+    if (Math.abs(movedRef.current) <= 8) return;
+    event.preventDefault();
+    movedRef.current = 0;
   }
 
   function showCard(key: string, card?: HTMLElement) {
@@ -257,8 +283,9 @@ export default function StoryReel({ stories }: { stories: MemberStory[] }) {
   }
 
   function onCardFocus(key: string, event: FocusEvent<HTMLAnchorElement>) {
-    if (draggingRef.current) return;
-    showCard(key, event.currentTarget);
+    if (draggingRef.current || drag.current.active) return;
+    if (event.currentTarget.matches(":focus-visible")) showCard(key, event.currentTarget);
+    else setLiveKey(key);
   }
 
   function onCardBlur(key: string, event: FocusEvent<HTMLAnchorElement>) {
