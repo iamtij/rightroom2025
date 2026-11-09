@@ -581,10 +581,11 @@ export default function AmplifyHome() {
           </article>
           <article className="flex flex-col gap-4 rounded-2xl bg-[#D0202E] p-6 text-white">
             <Photo
-              src="/assets/ibmc-5.png"
-              alt="The IBMC hall filled with business owners"
+              src="/assets/ibmc-stage.jpg"
+              alt="IBMC members on stage at the conference"
               caption="Hundreds of business owners. One room. Two days."
               className="h-[180px] rounded-[10px]"
+              position="center 62%"
             />
             <span className="font-archivo text-sm font-bold">03</span>
             <h3 className="m-0 font-archivo text-[32px] font-extrabold font-wide">IBMC</h3>
@@ -630,39 +631,33 @@ export default function AmplifyHome() {
         </div>
         <div className="room-grid grid grid-cols-1 gap-4 min-[761px]:grid-cols-4">
           <Photo
-            src="/assets/ibmc-5.png"
-            alt="A full house at IBMC inside Newport Performing Arts Theater"
+            src="/assets/ibmc-stage.jpg"
+            alt="IBMC members on stage at the International Business Matching Conference"
             caption="Business owners. One hall. Every one a possible referral."
             captionClassName="text-xl font-bold leading-snug"
             className="min-h-[280px] rounded-[14px] min-[761px]:col-span-2 min-[761px]:row-span-2 min-[761px]:min-h-[400px]"
-            position="center 40%"
+            position="center 58%"
           />
           <Photo
-            src="/assets/ibmc-3.png"
-            alt="Members in a one-on-one matching conversation"
-            caption="Every table is a potential referral partner."
+            src="/assets/ibmc-exchange.jpg"
+            alt="Members exchanging cards in the IBMC hall"
+            caption="A card today. A client next month."
             className="min-h-[200px] rounded-[14px]"
+            position="center 42%"
           />
           <Photo
-            src="/assets/ibmc-4.png"
-            alt="Two business owners meeting at IBMC"
-            caption="A handshake today. A client next month."
-            className="min-h-[200px] rounded-[14px]"
-            position="center 20%"
-          />
-          <Photo
-            src="/assets/ibmc-2.png"
-            alt="Members exchanging referral details"
+            src="/assets/ibmc-introductions.jpg"
+            alt="Members comparing notes and making introductions at IBMC"
             caption="Introductions made at IBMC 2026."
             className="min-h-[200px] rounded-[14px]"
-            position="center 35%"
+            position="center 40%"
           />
           <Photo
-            src="/assets/ibmc-strategic-alignment.png"
-            alt="Members smiling over a referral at IBMC"
-            caption="Members celebrating referrals that closed."
-            className="min-h-[200px] rounded-[14px]"
-            position="center 40%"
+            src="/assets/ibmc-celebrate.jpg"
+            alt="Delegates waving flags in the IBMC audience"
+            caption="The whole hall, on its feet."
+            className="min-h-[200px] rounded-[14px] min-[761px]:col-span-2"
+            position="center 32%"
           />
         </div>
       </section>
