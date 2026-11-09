@@ -614,9 +614,6 @@ export default function AmplifyHome() {
               Business Network International (BNI) members refer clients to each other every week. Once a year, the International Business Matching Conference (IBMC) brings local and international business owners together.
             </p>
           </div>
-          <a href="#pricing" className="rounded-full border border-[#F6F4F1] px-[22px] py-[13px] text-[15px] font-semibold text-[#F6F4F1] no-underline">
-            I'm already a member — skip to tickets
-          </a>
         </div>
 
         <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
@@ -664,6 +661,9 @@ export default function AmplifyHome() {
             </p>
           </article>
         </div>
+        <a href="/register" className="self-center w-fit rounded-full bg-[#D0202E] px-[30px] py-4 text-base font-semibold text-white no-underline">
+          Register
+        </a>
       </section>
 
       <section id="how" className="flex flex-col gap-14 bg-[#F6F4F1] px-4 py-20 text-[#141416] sm:px-8 lg:px-24 lg:py-[100px]">
@@ -689,6 +689,9 @@ export default function AmplifyHome() {
             </div>
           ))}
         </div>
+        <a href="/register" className="self-center w-fit rounded-full bg-[#D0202E] px-[30px] py-4 text-base font-semibold text-white no-underline">
+          Register
+        </a>
       </section>
 
       <section className="flex flex-col gap-10 bg-[#0E0E10] px-4 py-20 text-[#F6F4F1] sm:px-8 lg:px-24 lg:py-[100px]">
@@ -735,6 +738,9 @@ export default function AmplifyHome() {
             position="center 40%"
           />
         </div>
+        <a href="/register" className="self-center w-fit rounded-full bg-[#D0202E] px-[30px] py-4 text-base font-semibold text-white no-underline">
+          Register
+        </a>
       </section>
 
       <section className="flex flex-col gap-10 bg-white px-4 py-20 text-[#141416] sm:px-8 lg:px-24 lg:py-[100px]">
@@ -745,6 +751,9 @@ export default function AmplifyHome() {
           </h2>
         </div>
         <BeforeAfter />
+        <a href="/register" className="self-center w-fit rounded-full bg-[#D0202E] px-[30px] py-4 text-base font-semibold text-white no-underline">
+          Register
+        </a>
       </section>
 
       <section className="flex flex-col gap-10 bg-[#F6F4F1] px-4 py-20 text-[#141416] sm:px-8 lg:px-24 lg:py-[100px]">
@@ -773,6 +782,9 @@ export default function AmplifyHome() {
             </a>
           ))}
         </div>
+        <a href="/register" className="self-center w-fit rounded-full bg-[#D0202E] px-[30px] py-4 text-base font-semibold text-white no-underline">
+          Register
+        </a>
       </section>
 
       <section className="flex flex-col items-center justify-center gap-[26px] bg-[#0E0E10] px-4 py-20 text-center text-[#F6F4F1] sm:px-8 lg:px-24 lg:py-[90px]">
@@ -916,7 +928,7 @@ export default function AmplifyHome() {
 
       <section className="flex flex-col items-center justify-center gap-6 bg-[#D0202E] px-4 py-20 text-center text-white sm:px-8 lg:px-24 lg:py-[100px]">
         <h2 className="m-0 max-w-[900px] font-archivo text-[clamp(40px,5.4vw,76px)] font-black leading-none font-expanded">
-          One voice is quiet. A room is loud.
+          One voice is quiet. A room amplifies it.
         </h2>
         <p className="m-0 text-[17px]">June 16–17, 2027 · Newport Performing Arts Theater · Members and guests welcome</p>
         <div className="flex flex-wrap justify-center gap-3.5">
