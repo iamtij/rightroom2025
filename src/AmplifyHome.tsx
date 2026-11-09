@@ -453,10 +453,73 @@ function BeforeAfter() {
   );
 }
 
+const AMPLIFY_LINES = ["Your Impact", "Relationships", "Your Business", "Your Influence", "as a Team", "Together"];
+
+function AmplifyCycle() {
+  const measure = useRef<HTMLSpanElement>(null);
+  const [index, setIndex] = useState(0);
+  const [slot, setSlot] = useState(0);
+  const [slide, setSlide] = useState(true);
+  const [reduce] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  const lines = [...AMPLIFY_LINES, AMPLIFY_LINES[0]];
+
+  useLayoutEffect(() => {
+    const root = measure.current;
+    if (!root) return;
+    const widths = [...root.querySelectorAll("span")].map((item) => item.getBoundingClientRect().width);
+    setSlot(Math.ceil(Math.max(...widths)));
+  }, []);
+
+  useEffect(() => {
+    if (reduce) return;
+    const id = window.setInterval(() => {
+      setSlide(true);
+      setIndex((value) => value + 1);
+    }, 2200);
+    return () => window.clearInterval(id);
+  }, [reduce]);
+
+  useEffect(() => {
+    if (index !== AMPLIFY_LINES.length) return;
+    const id = window.setTimeout(() => {
+      setSlide(false);
+      setIndex(0);
+    }, 560);
+    return () => window.clearTimeout(id);
+  }, [index]);
+
+  return (
+    <p className="relative m-0 flex justify-center font-archivo text-[clamp(20px,2.04vw,29px)] font-bold leading-none text-[#CF2030]">
+      <span ref={measure} aria-hidden="true" className="pointer-events-none absolute h-0 overflow-hidden opacity-0">
+        {AMPLIFY_LINES.map((line) => (
+          <span key={line} className="block whitespace-nowrap">{line}</span>
+        ))}
+      </span>
+      <span className="inline-flex items-center gap-[0.35em] whitespace-nowrap">
+        <span>Amplify</span>
+        <span className="inline-block h-[1.2em] overflow-hidden text-left" style={{ width: slot || undefined }}>
+          <span
+            aria-hidden="true"
+            className="block"
+            style={{
+              transform: `translateY(calc(${index} * -1.2em))`,
+              transition: slide && !reduce ? "transform 0.55s cubic-bezier(0.22, 1, 0.36, 1)" : "none",
+            }}
+          >
+            {lines.map((line, i) => (
+              <span key={`${line}-${i}`} className="block h-[1.2em] leading-[1.2] whitespace-nowrap">{line}</span>
+            ))}
+          </span>
+        </span>
+      </span>
+      <span className="absolute h-px w-px overflow-hidden whitespace-nowrap" aria-live="polite">Amplify {AMPLIFY_LINES[index % AMPLIFY_LINES.length]}</span>
+    </p>
+  );
+}
+
 export default function AmplifyHome() {
   const now = useNow();
   const phase = firstMoverPhase(now);
-  const countdown = remaining(phase === "before" ? FIRST_MOVER_OPENS : FIRST_MOVER_ENDS, now);
 
   return (
     <div className="scroll-wrapper scroll-smooth bg-[#0E0E10] font-sans text-[#F6F4F1]">
@@ -493,11 +556,7 @@ export default function AmplifyHome() {
               className="mx-auto block h-auto w-full max-w-[900px]"
             />
           </h1>
-          <p className="m-0 font-archivo text-[clamp(22px,2.6vw,36px)] font-bold leading-tight text-[#CF2030]">
-            One More Action.
-            <br />
-            Amplify Your Impact.
-          </p>
+          <AmplifyCycle />
           <p className="m-0 text-[clamp(16px,1.6vw,20px)] text-[#C8C8C8]">
             June 16–17, 2027 · Newport Performing Arts Theater, Pasay City
           </p>
@@ -509,19 +568,6 @@ export default function AmplifyHome() {
               New to BNI?
             </a>
           </div>
-          <p className="m-0 text-[13px] text-[#C8C8C8]">
-            From ₱12,000 ·{" "}
-            {phase === "ended" ? (
-              <strong className="text-[#FFFFFF]">First Mover has ended</strong>
-            ) : (
-              <>
-                First Mover {phase === "before" ? "opens" : "ends"} in{" "}
-                <strong className="text-[#FFFFFF]">
-                  {pad(countdown.days)}d {pad(countdown.hours)}h {pad(countdown.minutes)}m {pad(countdown.seconds)}s
-                </strong>
-              </>
-            )}
-          </p>
         </div>
 
         <div aria-label="Businesses in the room" className="relative flex flex-col gap-3.5 overflow-hidden border-t border-[#64666A] py-5 font-archivo text-[15px] font-semibold uppercase tracking-[0.08em]">
@@ -548,7 +594,9 @@ export default function AmplifyHome() {
           <p className="m-0 font-archivo text-[clamp(28px,3.2vw,44px)] font-extrabold leading-[1.08]">
             It's not your product. It's your network.
           </p>
-          <p className="m-0 text-[19px] leading-relaxed text-[#3A3A40]">That network already meets every week.</p>
+          <p className="m-0 font-archivo text-[clamp(22px,2.4vw,32px)] font-extrabold leading-tight">
+            Amplify it. One more introduction. One more client. One more relationship.
+          </p>
           <a href="#new" className="text-[15px] font-semibold text-[#A8131F] no-underline">
             See who's in the room →
           </a>
@@ -563,7 +611,7 @@ export default function AmplifyHome() {
               The system 355,000 business owners use to refer each other — since 1985.
             </h2>
             <p className="m-0 text-[19px] leading-relaxed text-[#C9C7C2]">
-              BNI members refer clients to each other every week. IBMC puts business owners in one room.
+              Business Network International (BNI) members refer clients to each other every week. Once a year, the International Business Matching Conference (IBMC) brings local and international business owners together.
             </p>
           </div>
           <a href="#pricing" className="rounded-full border border-[#F6F4F1] px-[22px] py-[13px] text-[15px] font-semibold text-[#F6F4F1] no-underline">
@@ -629,7 +677,7 @@ export default function AmplifyHome() {
           <div className="plan-line absolute left-0 right-0 top-16 hidden h-[3px] bg-[#D0202E] min-[761px]:block" aria-hidden="true" />
           {[
             ["01", "Get your seat", "Members and guests are both welcome. Pay in full or in installments."],
-            ["02", "Meet owners who can refer you", "Two days with owners from other industries who can send you clients."],
+            ["02", "Meet owners who can refer you", "Two days with local and international delegates from other industries who can send you clients."],
             ["03", "Leave with referrals", "Go home with introductions, new partners and a plan for your next client."],
           ].map(([num, title, body]) => (
             <div key={num} className="relative flex flex-col gap-3.5">
@@ -892,7 +940,6 @@ export default function AmplifyHome() {
             <span className="font-archivo text-lg font-extrabold text-[#F6F4F1]">
               IBMC <span className="text-[#FF4D5A]">2027</span> · AMPLIFY
             </span>
-            <span>One More Action. Amplify Your Impact.</span>
             <span>Hosted by BNI Philippines. Event photos from ibmcph.com.</span>
           </div>
           <div className="flex flex-col gap-2.5">
