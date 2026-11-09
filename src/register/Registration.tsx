@@ -407,41 +407,64 @@ function MoneyText({ text, className = "" }: { text: string; className?: string 
   );
 }
 
-function EventHeader() {
+function EventHeader({ onManage }: { onManage?: () => void }) {
   return (
     <header className="border-b border-[#C8C8C8] bg-white">
-      <div className="mx-auto flex w-full max-w-[480px] items-center gap-3 px-5 py-3.5">
-        <a href="/" aria-label="BNI" className="shrink-0">
-          <img src="/assets/bni-logo-white.png" alt="" className="h-8 w-auto brightness-0" />
-        </a>
-        <span aria-hidden="true" className="h-5 w-px shrink-0 bg-[#C8C8C8]" />
-        <span className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-[16px] font-bold leading-none text-black">IBMC 2027</span>
-          <span className="text-[12px] leading-none whitespace-nowrap text-[#64666A]">June 16–17, 2027 · Newport, Pasay City</span>
-        </span>
+      <div className="mx-auto flex w-full max-w-[480px] items-center justify-between gap-2 px-5 py-3">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <a href="/" aria-label="BNI" className="shrink-0">
+            <img src="/assets/bni-logo-white.png" alt="" className="h-8 w-auto brightness-0" />
+          </a>
+          <span aria-hidden="true" className="h-8 w-px shrink-0 bg-[#C8C8C8]" />
+          <span className="flex flex-col gap-0.5">
+            <span className="text-[16px] font-bold leading-none text-black">IBMC 2027</span>
+            <span className="text-[12px] leading-tight whitespace-nowrap text-[#64666A]">June 16–17, 2027</span>
+            <span className="text-[12px] leading-tight whitespace-nowrap text-[#64666A]">Newport, Pasay City</span>
+          </span>
+        </div>
+        {onManage ? (
+          <button
+            type="button"
+            onClick={onManage}
+            className="shrink-0 rounded-full border border-black bg-white px-3 py-1.5 text-[13px] font-semibold leading-none text-black"
+          >
+            My registration
+          </button>
+        ) : null}
       </div>
     </header>
   );
 }
 
-function RegistrationFooter({ onManage }: { onManage?: () => void }) {
+function HelpIcon({ children }: { children: ReactNode }) {
   return (
-    <div className="border-t border-[#C8C8C8] pt-5 text-center text-[14px] leading-normal text-[#64666A]">
-      {onManage ? (
-        <p className="m-0">
-          Already registered?{" "}
-          <button type="button" className="font-semibold text-[#CF2030] no-underline" onClick={onManage}>
-            Manage my registration
-          </button>
-        </p>
-      ) : null}
-      <p className={`m-0 ${onManage ? "mt-1" : ""}`}>
-        Need help? Email{" "}
-        <a href="mailto:helpdesk@bni.ph" className="font-semibold text-[#CF2030] no-underline">helpdesk@bni.ph</a>
-        <br />
-        or visit{" "}
-        <a href="https://helpdesk.bni.ph" target="_blank" rel="noreferrer" className="font-semibold text-[#CF2030] no-underline">helpdesk.bni.ph</a>
-      </p>
+    <svg viewBox="0 0 16 16" aria-hidden="true" className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" strokeWidth="1.6">
+      {children}
+    </svg>
+  );
+}
+
+function RegistrationFooter() {
+  const pill = "inline-flex items-center gap-1.5 rounded-full border border-[#CF2030] bg-white px-3 py-1.5 text-[13px] font-semibold leading-none text-[#CF2030] no-underline";
+  return (
+    <div className="border-t border-[#C8C8C8] pt-5 text-center">
+      <p className="m-0 text-[14px] text-[#64666A]">Need help?</p>
+      <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+        <a href="mailto:helpdesk@bni.ph" className={pill}>
+          <HelpIcon>
+            <rect x="2" y="3.5" width="12" height="9" rx="1.5" />
+            <path d="M2.5 4.5 8 8.5 13.5 4.5" />
+          </HelpIcon>
+          helpdesk@bni.ph
+        </a>
+        <a href="https://helpdesk.bni.ph" target="_blank" rel="noreferrer" className={pill}>
+          <HelpIcon>
+            <circle cx="8" cy="8" r="5.25" />
+            <path d="M2.75 8h10.5M8 2.75c1.4 1.5 2.1 3.3 2.1 5.25S9.4 11.75 8 13.25C6.6 11.75 5.9 9.95 5.9 8S6.6 4.25 8 2.75Z" />
+          </HelpIcon>
+          helpdesk.bni.ph
+        </a>
+      </div>
     </div>
   );
 }
@@ -471,14 +494,16 @@ function Frame({
   hideManage?: boolean;
 }) {
   return (
-    <div className="scroll-wrapper min-h-svh bg-[#F2F2F2] font-sans text-black">
-      <EventHeader />
-      <div className="mx-auto w-full max-w-[480px] px-5 py-6">
-        {step ? <Steps step={step} /> : null}
-        <div className="flex flex-col gap-4">{children}</div>
-        {footer ? <div className="mt-6">{footer}</div> : null}
-        <div className="mt-6">
-          <RegistrationFooter onManage={hideManage ? undefined : onManage} />
+    <div className="scroll-wrapper bg-[#F2F2F2] font-sans text-black">
+      <div className="flex min-h-full flex-col">
+        <EventHeader onManage={hideManage ? undefined : onManage} />
+        <div className="mx-auto flex w-full max-w-[480px] flex-1 flex-col px-5 py-6">
+          {step ? <Steps step={step} /> : null}
+          <div className="flex flex-col gap-4">{children}</div>
+          {footer ? <div className="mt-6">{footer}</div> : null}
+          <div className="mt-auto pt-6">
+            <RegistrationFooter />
+          </div>
         </div>
       </div>
     </div>
@@ -1245,43 +1270,34 @@ function RegistrationWizard() {
   if (step === "start") {
     const localTier = gateTier(tierFor(today, false), ticketGates);
     const internationalOnSale = Boolean(gateTier(tierFor(today, true), ticketGates)?.onSale);
-    const closedLines = [
-      today < "2027-01-01" ? "International delegates open Jan 1." : "",
-      !guestsOpen ? "Guests open Feb 1." : "",
-    ].filter(Boolean);
     return (
-      <div className="scroll-wrapper min-h-svh bg-[#F2F2F2] font-sans text-black">
-        <EventHeader />
-        <div className="mx-auto w-full max-w-[480px] px-5 py-6">
-          {localTier ? <StartTierCard tier={localTier} /> : <p className="m-0 text-[15px]">Registration closed on May 31, 2027.</p>}
-          <h1 className="m-0 mt-6 text-[22px] font-bold leading-tight">Who's registering?</h1>
-          <div className="mt-3 flex flex-col gap-3">
-            <AudienceCard title="I'm a BNI Philippines member" body="We'll fill in your details." onClick={() => choose("member")} />
-            {internationalOnSale ? (
-              <AudienceCard title="I'm an international delegate" body="Joining from outside the Philippines. Priced in USD." onClick={() => choose("international")} />
-            ) : null}
-            {guestsOpen ? (
-              <AudienceCard title="I'm a guest" body="New to BNI? You're welcome here." onClick={() => choose("guest")} />
-            ) : null}
-          </div>
-          {closedLines.length ? (
-            <p className="m-0 mt-3 text-[13px] leading-normal text-[#64666A]">
-              {closedLines.map((line) => (
-                <span key={line} className="block">{line}</span>
-              ))}
-            </p>
-          ) : null}
-          <div className="mt-6">
-            <RegistrationFooter onManage={openManage} />
-          </div>
-          {(import.meta.env.DEV && testTicketOpen) || testsOpen ? (
-            <div className="mt-6 flex flex-col gap-3">
-              {import.meta.env.DEV && testTicketOpen ? <AudienceCard title="Test ticket · ₱10" body="Available now, for a local payment test." onClick={startTest} /> : null}
-              {testsOpen ? <AudienceCard title="Staging test · ₱100 full" body="One ₱100 payment. For staging Paynamics checkout before public ticket windows open." onClick={startFullPaymentTest} /> : null}
-              {testsOpen ? <AudienceCard title="Staging test · ₱200 installment" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." onClick={startInstallmentTest} /> : null}
-              {testsOpen ? <AudienceCard title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." onClick={startMemberTest} /> : null}
+      <div className="scroll-wrapper bg-[#F2F2F2] font-sans text-black">
+        <div className="flex min-h-full flex-col">
+          <EventHeader onManage={openManage} />
+          <div className="mx-auto flex w-full max-w-[480px] flex-1 flex-col px-5 py-6">
+            {localTier ? <StartTierCard tier={localTier} /> : <p className="m-0 text-[15px]">Registration closed on May 31, 2027.</p>}
+            <h1 className="m-0 mt-6 text-[22px] font-bold leading-tight">Who's registering?</h1>
+            <div className="mt-3 flex flex-col gap-3">
+              <AudienceCard title="I'm a BNI Philippines member" body="We'll fill in your details." onClick={() => choose("member")} />
+              {internationalOnSale ? (
+                <AudienceCard title="I'm an international delegate" body="Joining from outside the Philippines. Priced in USD." onClick={() => choose("international")} />
+              ) : null}
+              {guestsOpen ? (
+                <AudienceCard title="I'm a guest" body="New to BNI? You're welcome here." onClick={() => choose("guest")} />
+              ) : null}
             </div>
-          ) : null}
+            {(import.meta.env.DEV && testTicketOpen) || testsOpen ? (
+              <div className="mt-6 flex flex-col gap-3">
+                {import.meta.env.DEV && testTicketOpen ? <AudienceCard title="Test ticket · ₱10" body="Available now, for a local payment test." onClick={startTest} /> : null}
+                {testsOpen ? <AudienceCard title="Staging test · ₱100 full" body="One ₱100 payment. For staging Paynamics checkout before public ticket windows open." onClick={startFullPaymentTest} /> : null}
+                {testsOpen ? <AudienceCard title="Staging test · ₱200 installment" body="₱100 when you pay, then ₱50 on day 2 and ₱50 on day 3. Or pay ₱200 in full." onClick={startInstallmentTest} /> : null}
+                {testsOpen ? <AudienceCard title="I'm a BNI Philippines Member (TESTING)" body="Same member registration. Payment is open." onClick={startMemberTest} /> : null}
+              </div>
+            ) : null}
+            <div className="mt-auto pt-6">
+              <RegistrationFooter />
+            </div>
+          </div>
         </div>
       </div>
     );
