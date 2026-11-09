@@ -140,24 +140,6 @@ button, a, [role="button"] {
   to { transform: translateX(0); }
 }
 
-.meter-bar {
-  transform-box: fill-box;
-  transform-origin: center bottom;
-  animation: meterLevel var(--meter-dur, 0.9s) ease-in-out infinite;
-  animation-delay: var(--meter-delay, 0s);
-}
-
-.wordmark:hover .meter-bar {
-  animation-duration: calc(var(--meter-dur, 0.9s) * 0.45);
-}
-
-@keyframes meterLevel {
-  0%, 100% { transform: scaleY(0.22); }
-  35% { transform: scaleY(1); }
-  62% { transform: scaleY(0.48); }
-  80% { transform: scaleY(0.82); }
-}
-
 .quiet-bar {
   height: 186px;
   background-color: #D0202E;
@@ -281,7 +263,6 @@ button, a, [role="button"] {
 
 @media (prefers-reduced-motion: reduce) {
   .mq,
-  .meter-bar,
   .quiet-bar,
   .lev,
   .lev * {

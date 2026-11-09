@@ -5,18 +5,53 @@ const FIRST_MOVER_OPENS = new Date("2026-11-11T00:00:00+08:00");
 const FIRST_MOVER_ENDS = new Date("2026-12-01T00:00:00+08:00");
 const CHAPTER_FINDER = "https://growwithbniph.com/";
 
+const STORIES = [
+  {
+    name: "Joy Ejercito",
+    place: "BNI Philippines",
+    title: "From word of mouth to a scaled firm.",
+    href: "https://www.youtube.com/watch?v=UP7zGRdE2EY",
+    photo: "/assets/joy-ejercito.png",
+  },
+  {
+    name: "Mys Sandico",
+    place: "BNI Philippines",
+    title: "Relationships that grew her events business.",
+    href: "https://www.youtube.com/watch?v=Fsb8X42rY2w",
+    photo: "/assets/mys-sandico.png",
+  },
+  {
+    name: "Ruel and Nimpha Villaluna",
+    place: "BNI Philippines",
+    title: "They brought BNI to Cavite.",
+    href: "https://www.youtube.com/watch?v=YqygHFimjBw",
+    photo: "/assets/ruel-nimpha-villaluna.png",
+  },
+  {
+    name: "Jennifer Angsiting",
+    place: "BNI Australia",
+    title: "From no network to $246K in one year.",
+    href: "https://www.youtube.com/shorts/II5em52LAeI",
+    photo: "/assets/jennifer-angsiting.png",
+  },
+  {
+    name: "Edwin Duria",
+    place: "BNI UAE",
+    title: "How BNI sparked an entrepreneurial journey.",
+    href: "https://www.youtube.com/watch?v=RqtuZc_YzEw",
+    photo: "/assets/edwin-duria.png",
+  },
+  {
+    name: "Alex P Eaganathan",
+    place: "BNI Hong Kong",
+    title: "From one restaurant to five.",
+    href: "https://www.youtube.com/watch?v=EB8Muf81ZHA",
+    photo: "/assets/alex-eaganathan.png",
+  },
+];
+
 const ROW_A = ["Accountants", "Architects", "Caterers", "Insurance", "IT services", "Lawyers", "Logistics", "Printing"];
 const ROW_B = ["Real estate", "Events", "Dentists", "Interior design", "Photography", "Marketing", "Construction", "Travel"];
-
-const METER_BASE = 222;
-const METER_CAP = 146;
-const METER_BARS = [
-  { x: 783, h: 55, fill: "#FFFFFF", dur: "0.78s", delay: "-0.35s" },
-  { x: 796, h: 105, fill: "#FFFFFF", dur: "1.18s", delay: "-0.9s" },
-  { x: 809, h: 146, fill: "#FF4D5A", dur: "0.66s", delay: "-0.2s" },
-  { x: 822, h: 121, fill: "#FF4D5A", dur: "1.02s", delay: "-1.25s" },
-  { x: 835, h: 75, fill: "#FFFFFF", dur: "0.9s", delay: "-0.55s" },
-];
 
 const PROBLEM_BARS = Array.from({ length: 42 }, (_, i) => {
   const t = i / 41;
@@ -425,76 +460,63 @@ export default function AmplifyHome() {
 
   return (
     <div className="scroll-wrapper scroll-smooth bg-[#0E0E10] font-sans text-[#F6F4F1]">
-      <nav aria-label="Main" className="sticky top-0 z-50 flex flex-wrap items-center justify-between gap-4 border-b border-white/10 bg-[#0E0E10]/95 px-4 py-5 backdrop-blur-md sm:px-8 lg:px-14">
-          <a href="#top" className="flex items-center gap-3 text-[#F6F4F1] no-underline">
-            <img src="/assets/bni-philippines-mark.png" alt="BNI Philippines" className="h-12 w-auto sm:h-14" />
-            <span className="font-archivo text-lg font-extrabold tracking-[0.04em]">
-              IBMC <span className="text-[#FF4D5A]">2027</span>
+      <nav aria-label="Main" className="sticky top-0 z-50 flex flex-wrap items-center justify-between gap-4 border-b border-[#64666A] bg-[#000000] px-4 py-5 text-[#FFFFFF] sm:px-8 lg:px-14">
+          <a href="#top" className="flex items-center gap-3 whitespace-nowrap text-[#FFFFFF] no-underline">
+            <img src="/assets/bni-logo-white.png" alt="BNI" className="h-[26px] w-auto" />
+            <span aria-hidden="true" className="h-[22px] w-px shrink-0 bg-[#64666A]" />
+            <span className="font-archivo text-lg font-extrabold tracking-[0.04em] text-[#FFFFFF]">
+              IBMC 2027
             </span>
           </a>
           <div className="nav-links flex flex-wrap items-center gap-7 text-sm">
-            <a href="#why" className="hidden text-[#D9D7D2] no-underline min-[761px]:inline">Why IBMC</a>
-            <a href="#new" className="hidden text-[#D9D7D2] no-underline min-[761px]:inline">New to BNI?</a>
-            <a href="#how" className="hidden text-[#D9D7D2] no-underline min-[761px]:inline">How it works</a>
-            <a href="#pricing" className="hidden text-[#D9D7D2] no-underline min-[761px]:inline">Tickets</a>
-            <a href="#faq" className="hidden text-[#D9D7D2] no-underline min-[761px]:inline">FAQ</a>
-            <a href="/register" className="nav-cta rounded-full bg-[#D0202E] px-[22px] py-3 font-semibold text-white no-underline">
+            <a href="#why" className="hidden text-[#FFFFFF] no-underline min-[761px]:inline">Why IBMC</a>
+            <a href="#new" className="hidden text-[#FFFFFF] no-underline min-[761px]:inline">New to BNI?</a>
+            <a href="#how" className="hidden text-[#FFFFFF] no-underline min-[761px]:inline">How it works</a>
+            <a href="#pricing" className="hidden text-[#FFFFFF] no-underline min-[761px]:inline">Tickets</a>
+            <a href="#faq" className="hidden text-[#FFFFFF] no-underline min-[761px]:inline">FAQ</a>
+            <a href="/register" className="nav-cta rounded-full bg-[#CF2030] px-[22px] py-3 font-semibold text-[#FFFFFF] no-underline">
               Register
             </a>
           </div>
       </nav>
-      <section id="top" className="relative flex min-h-[calc(100svh-5.5rem)] flex-col overflow-hidden bg-[#0E0E10] sm:min-h-[calc(100svh-6rem)] md:min-h-[840px]">
-        <div className="absolute inset-0 bg-[#1C1C20]" />
-
-        <div className="relative flex flex-1 flex-col items-center justify-center gap-[22px] px-4 py-10 text-center sm:px-8 lg:px-14">
-          <p className="m-0 text-[13px] uppercase tracking-[0.18em] text-[#C9C7C2]">
+      <section id="top" className="relative flex min-h-[calc(100svh-5.5rem)] flex-col overflow-hidden bg-[#000000] text-[#FFFFFF] sm:min-h-[calc(100svh-6rem)] md:min-h-[840px]">
+        <div className="relative flex flex-1 flex-col items-center justify-center gap-[22px] px-6 py-10 text-center sm:px-8 lg:px-14">
+          <p className="m-0 text-[13px] uppercase tracking-[0.18em] text-[#C8C8C8]">
             IBMC 2027 · International Business Matching Conference · BNI Philippines
           </p>
-          <h1 aria-label="AMPLIFY" className="wordmark m-0 w-full max-w-[1100px]">
-            <svg aria-hidden="true" viewBox="0 0 1200 260" className="block h-auto w-full">
-              <text x="10" y="222" textLength="755" lengthAdjust="spacingAndGlyphs" fill="#FFFFFF" fontSize="210" fontWeight="900" style={{ fontFamily: "Archivo, sans-serif", fontStretch: "125%" }}>
-                AMPL
-              </text>
-              {METER_BARS.map((bar) => (
-                <g key={bar.x}>
-                  <rect x={bar.x} y={METER_BASE - METER_CAP} width="8" height={METER_CAP} fill="#2B2B30" />
-                  <rect
-                    className="meter-bar"
-                    x={bar.x}
-                    y={METER_BASE - bar.h}
-                    width="8"
-                    height={bar.h}
-                    fill={bar.fill}
-                    style={{ ["--meter-dur" as string]: bar.dur, ["--meter-delay" as string]: bar.delay }}
-                  />
-                </g>
-              ))}
-              <text x="862" y="222" textLength="328" lengthAdjust="spacingAndGlyphs" fill="#FFFFFF" fontSize="210" fontWeight="900" style={{ fontFamily: "Archivo, sans-serif", fontStretch: "125%" }}>
-                FY
-              </text>
-            </svg>
+          <h1 className="m-0 w-full py-6">
+            <img
+              src="/assets/amplify-logo-white.png"
+              alt="AMPLIFY"
+              width={904}
+              height={132}
+              className="mx-auto block h-auto w-full max-w-[900px]"
+            />
           </h1>
-          <p className="m-0 font-archivo text-[clamp(16px,1.8vw,22px)] font-bold uppercase tracking-[0.12em] text-[#FF4D5A]">
-            Amplify others. Get amplified.
+          <p className="m-0 font-archivo text-[clamp(22px,2.6vw,36px)] font-bold leading-tight text-[#CF2030]">
+            One More Action.
+            <br />
+            Amplify Your Impact.
           </p>
-          <p className="m-0 font-archivo text-[clamp(28px,3.4vw,44px)] font-extrabold leading-none text-white">June 16–17, 2027</p>
-          <p className="m-0 text-[clamp(16px,1.6vw,20px)] text-[#C9C7C2]">Newport Performing Arts Theater, Pasay City</p>
+          <p className="m-0 text-[clamp(16px,1.6vw,20px)] text-[#C8C8C8]">
+            June 16–17, 2027 · Newport Performing Arts Theater, Pasay City
+          </p>
           <div className="mt-1.5 flex flex-wrap justify-center gap-3.5">
-            <a href="/register" className="rounded-full bg-[#D0202E] px-[30px] py-4 text-base font-semibold text-white no-underline">
+            <a href="/register" className="rounded-full bg-[#CF2030] px-[30px] py-4 text-base font-semibold text-[#FFFFFF] no-underline">
               Register
             </a>
-            <a href="#new" className="rounded-full border border-[#F6F4F1] px-7 py-[15px] text-base font-semibold text-[#F6F4F1] no-underline">
+            <a href="#new" className="rounded-full border border-[#FFFFFF] px-7 py-[15px] text-base font-semibold text-[#FFFFFF] no-underline">
               New to BNI?
             </a>
           </div>
-          <p className="m-0 text-[13px] text-[#C9C7C2]">
+          <p className="m-0 text-[13px] text-[#C8C8C8]">
             From ₱12,000 ·{" "}
             {phase === "ended" ? (
-              <strong className="text-white">First Mover has ended</strong>
+              <strong className="text-[#FFFFFF]">First Mover has ended</strong>
             ) : (
               <>
                 First Mover {phase === "before" ? "opens" : "ends"} in{" "}
-                <strong className="text-white">
+                <strong className="text-[#FFFFFF]">
                   {pad(countdown.days)}d {pad(countdown.hours)}h {pad(countdown.minutes)}m {pad(countdown.seconds)}s
                 </strong>
               </>
@@ -502,9 +524,9 @@ export default function AmplifyHome() {
           </p>
         </div>
 
-        <div aria-label="Businesses in the room" className="relative flex flex-col gap-3.5 overflow-hidden border-t border-[#34343A] py-5 font-archivo text-[15px] font-semibold uppercase tracking-[0.08em]">
-          <Marquee items={ROW_A} className="text-[#8E8E96]" />
-          <Marquee items={ROW_B} reverse className="text-[#C9C7C2]" />
+        <div aria-label="Businesses in the room" className="relative flex flex-col gap-3.5 overflow-hidden border-t border-[#64666A] py-5 font-archivo text-[15px] font-semibold uppercase tracking-[0.08em]">
+          <Marquee items={ROW_A} className="text-[#64666A]" />
+          <Marquee items={ROW_B} reverse className="text-[#C8C8C8]" />
         </div>
       </section>
 
@@ -677,6 +699,34 @@ export default function AmplifyHome() {
         <BeforeAfter />
       </section>
 
+      <section className="flex flex-col gap-10 bg-[#F6F4F1] px-4 py-20 text-[#141416] sm:px-8 lg:px-24 lg:py-[100px]">
+        <div className="flex max-w-[760px] flex-col gap-3.5">
+          <p className="m-0 text-[13px] font-semibold uppercase tracking-[0.18em] text-[#A8131F]">Member stories</p>
+          <h2 className="m-0 font-archivo text-[clamp(36px,4.4vw,60px)] font-extrabold leading-[1.02]">
+            What one more action did for them.
+          </h2>
+        </div>
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-3">
+          {STORIES.map((story) => (
+            <a
+              key={story.name}
+              href={story.href}
+              target="_blank"
+              rel="noreferrer"
+              className="flex flex-col gap-5 rounded-[18px] bg-white p-6 text-[#141416] no-underline"
+            >
+              <img src={story.photo} alt="" className="h-28 w-28 rounded-full object-cover" />
+              <div className="flex flex-col gap-1.5">
+                <p className="m-0 text-lg font-bold">{story.name}</p>
+                <p className="m-0 text-sm font-semibold text-[#A8131F]">{story.place}</p>
+                <p className="m-0 text-[17px] leading-snug">{story.title}</p>
+              </div>
+              <span className="mt-auto text-sm font-semibold text-[#A8131F]">Watch on YouTube</span>
+            </a>
+          ))}
+        </div>
+      </section>
+
       <section className="flex flex-col items-center justify-center gap-[26px] bg-[#0E0E10] px-4 py-20 text-center text-[#F6F4F1] sm:px-8 lg:px-24 lg:py-[90px]">
         <Waveform bars={STAKES_BARS} height={64} className="w-full max-w-[720px] justify-center" />
         <h2 className="m-0 max-w-[900px] font-archivo text-[clamp(32px,4vw,54px)] font-extrabold leading-[1.08]">
@@ -842,7 +892,7 @@ export default function AmplifyHome() {
             <span className="font-archivo text-lg font-extrabold text-[#F6F4F1]">
               IBMC <span className="text-[#FF4D5A]">2027</span> · AMPLIFY
             </span>
-            <span>Amplify others. Get amplified.</span>
+            <span>One More Action. Amplify Your Impact.</span>
             <span>Hosted by BNI Philippines. Event photos from ibmcph.com.</span>
           </div>
           <div className="flex flex-col gap-2.5">
