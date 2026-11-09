@@ -114,14 +114,19 @@ const savedUpay = {
 delete process.env.UPAY_BILLER_UUID;
 assert.equal(upayPublicCheckoutInfo().checkoutMode, "off");
 process.env.UPAY_BILLER_UUID = "uuid-test";
-assert.equal(upayPublicCheckoutInfo().checkoutMode, "biller_page");
+const billerOnly = upayPublicCheckoutInfo();
+assert.equal(billerOnly.checkoutMode, "live");
+assert.equal(billerOnly.ingestionReady, true);
+assert.equal(billerOnly.settlementMode, "manual");
 process.env.UPAY_BASE_URL = "https://api.unionbankph.com/ubp/external";
 process.env.UPAY_CLIENT_ID = "c";
 process.env.UPAY_CLIENT_SECRET = "s";
 process.env.UPAY_PARTNER_ID = "p";
 process.env.UPAY_USERNAME = "u";
 process.env.UPAY_PASSWORD = "pw";
-assert.equal(upayPublicCheckoutInfo().checkoutMode, "live");
+const withPartner = upayPublicCheckoutInfo();
+assert.equal(withPartner.checkoutMode, "live");
+assert.equal(withPartner.settlementMode, "poll");
 for (const [key, value] of Object.entries(savedUpay)) {
   if (value === undefined) delete process.env[key];
   else process.env[key] = value;

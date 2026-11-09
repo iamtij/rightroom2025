@@ -45,18 +45,23 @@ export function upayPublicCheckoutInfo() {
   const biller = upayBillerPageConfigured();
   const partner = upayPartnerApiConfigured();
   const callback = upayCallbackConfigured();
+  /** UnionBank SA CHECKOUT: biller Profile ID (UUID) arms the live whitelabel page and merchant ingestion. */
+  const ingestionReady = biller;
   let checkoutMode = "off";
-  if (biller) checkoutMode = partner ? "live" : "biller_page";
+  if (ingestionReady) checkoutMode = "live";
+  let settlementMode = "manual";
+  if (callback) settlementMode = "callback";
+  else if (partner) settlementMode = "poll";
   const reasons = [];
   if (!biller) reasons.push("missing_biller_uuid");
-  if (biller && !partner) reasons.push("missing_partner_api");
-  if (biller && !callback) reasons.push("missing_callback_crypto");
   return {
     checkoutMode,
+    ingestionReady,
     billerPageReady: biller,
     partnerApiReady: partner,
     callbackReady: callback,
-    liveOnStaging: checkoutMode === "live",
+    settlementMode,
+    liveOnStaging: ingestionReady,
     admissionReason: reasons.length ? reasons.join(",") : "",
   };
 }
@@ -402,6 +407,12 @@ export async function refreshUpayPayment(db, senderRefIdValue) {
   if (!row) return { error: "Payment not found", status: 404 };
   if (row.status === "paid") {
     return { registration: getRegistration(db, row.registration_id), upay: await presentUpay(row) };
+  }
+  if (!upayPartnerApiConfigured()) {
+    return {
+      registration: getRegistration(db, row.registration_id),
+      upay: await presentUpay(row),
+    };
   }
   try {
     const token = await partnerToken();

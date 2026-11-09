@@ -6,12 +6,22 @@ IBMC can test **production UnionBank whitelabel checkout** from Railway **stagin
 
 | UnionBank email field | Env var | Purpose |
 | --- | --- | --- |
-| Profile ID | `UPAY_BILLER_UUID` | Whitelabel URL segment (`…/Whitelabel/{uuid}`) |
+| Profile ID (UUID) | `UPAY_BILLER_UUID` | **Required for ingestion** — live whitelabel URL (`…/Whitelabel/{uuid}`) |
 | Profile name | `UPAY_BILLER_NAME` | Shown to buyers at checkout |
-| MID | `UPAY_PARTNER_ID` and usually `UPAY_USERNAME` | Partner login (confirm with UnionBank if status calls fail) |
-| Password | `UPAY_PASSWORD` | Partner login password |
+| MID | `UPAY_PARTNER_ID` and usually `UPAY_USERNAME` | Optional — only if you use partner **status polling** |
+| Password | `UPAY_PASSWORD` | Optional — partner login password |
 
-These are **not** the IBM Developer Portal `client_id` / `client_secret`. Those come from [developer.unionbankph.com](https://developer.unionbankph.com) when the app is subscribed to **UPay by UnionBank**.
+UnionBank’s **SA CHECKOUT** onboarding treats the biller **Profile ID / UUID** as sufficient for **merchant ingestion** (payments post to the GLOBAL REFERRAL biller). IBMC arms checkout when `UPAY_BILLER_UUID` is set.
+
+**Auto-updating a registration as paid** is separate:
+
+| `settlementMode` | What IBMC needs |
+| --- | --- |
+| `manual` | UUID only — staff marks paid, or buyer finishes on UnionBank and you reconcile in UBP back office |
+| `poll` | Developer Portal `UPAY_CLIENT_*` + partner login — IBMC polls transaction status |
+| `callback` | `UPAY_AES_KEY` + callback URL registered with UnionBank — encrypted webhook settles seats |
+
+IBM Developer Portal `client_id` / `client_secret` are only required for **poll** mode, not for opening the live biller page.
 
 ## Live partner API base (status polling)
 
@@ -47,11 +57,11 @@ UPAY_CALLBACK_URL=https://rightroom2025-staging.up.railway.app/api/payments/upay
 
 `GET /api/payment-channels` → `upay`:
 
-| `checkoutMode` | Meaning |
+| Field | Meaning |
 | --- | --- |
-| `off` | No biller UUID |
-| `biller_page` | Buyers can open UnionBank; status polling may fail until partner API + AES are set |
-| `live` | Biller + full partner API configured |
+| `checkoutMode: live` | Biller UUID configured — **Continue to UnionBank** uses production whitelabel |
+| `ingestionReady` | Same as biller UUID present (UnionBank ingestion model) |
+| `settlementMode` | `manual` \| `poll` \| `callback` — how IBMC learns a payment cleared |
 
 Enable **U Pay · UnionBank** in admin if the channel is disabled.
 
