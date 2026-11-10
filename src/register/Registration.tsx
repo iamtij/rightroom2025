@@ -2743,22 +2743,28 @@ function Confirmed({ record, onManage, hideManage = false }: { record: StoredReg
   const paidCount = record.payments.filter((item) => item.status === "paid").length;
   const next = record.payments.find((item) => item.status === "due");
   const first = record.attendee.fullName.trim().split(/\s+/)[0];
-  const savedOnly = record.planStatus !== "fully_paid";
+  const fullyPaid = record.planStatus === "fully_paid";
+  const awaitingFirstPayment = !fullyPaid && paidCount === 0;
+  const openCents = next ? Math.max(0, next.amountCents - (next.amountPaidCents || 0)) : Math.max(0, record.totalCents - paid);
   return (
     <Frame step={4} onManage={onManage} hideManage={hideManage}>
       <div className="flex flex-col gap-2 rounded-2xl bg-[#D0202E] px-5 py-[22px] text-white">
-        <span className="text-xs font-bold tracking-[0.14em] text-[#FFE3E5] uppercase">{savedOnly ? "Registration saved" : "Payment received"}</span>
-        <h1 className="m-0 font-archivo text-[30px] leading-[1.05] font-black">{savedOnly ? `You're registered, ${first}.` : `You're in, ${first}.`}</h1>
+        <span className="text-xs font-bold tracking-[0.14em] text-[#FFE3E5] uppercase">{fullyPaid ? "Payment received" : "Registration saved"}</span>
+        <h1 className="m-0 font-archivo text-[30px] leading-[1.05] font-black">
+          {awaitingFirstPayment ? `Your seat is held, ${first}.` : fullyPaid ? `You're in, ${first}.` : `You're registered, ${first}.`}
+        </h1>
         <p className="m-0 text-[15px] leading-snug text-[#FFE3E5]">
-          {savedOnly
-            ? `Your ${record.tierName} seat is held. The amount due stays open until IBMC records the payment.`
-            : "June 16–17, 2027 · Newport Performing Arts Theater"}
+          {awaitingFirstPayment
+            ? `Your ${record.tierName} seat stays open until IBMC records the ${money(openCents, record.currency)}.`
+            : fullyPaid
+              ? "June 16–17, 2027 · Newport Performing Arts Theater"
+              : `Your ${record.tierName} registration is in. The remaining balance stays open until IBMC records it.`}
         </p>
       </div>
-      <LevNote pose={savedOnly ? "smile" : "thumb"} bars={savedOnly ? 2 : Math.min(5, Math.max(paidCount, 1))} label={savedOnly ? "Lev smiling" : "Lev giving a thumbs up"}>
-        {savedOnly
+      <LevNote pose={fullyPaid ? "thumb" : "smile"} bars={fullyPaid ? Math.min(5, Math.max(paidCount, 1)) : awaitingFirstPayment ? 2 : Math.min(5, Math.max(paidCount, 1))} label={fullyPaid ? "Lev giving a thumbs up" : "Lev smiling"}>
+        {awaitingFirstPayment
           ? "Your seat is held. Payment is still open."
-          : record.planStatus === "fully_paid"
+          : fullyPaid
             ? "You're all paid up."
             : paidCount <= 1
               ? "That's bar one. More with each payment."
