@@ -63,24 +63,23 @@ function feeFields(row) {
   };
 }
 
-function readFeePatch(value, patch) {
+function rejectFee(message) {
+  const error = new Error(message);
+  error.status = 400;
+  throw error;
+}
+
+function readFeePatch(value, patch, label = "") {
   if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const prefix = label ? `${label}: ` : "";
   if (Object.prototype.hasOwnProperty.call(value, "feePercent")) {
     const normalized = normalizeFeePercent(value.feePercent);
-    if (!normalized.ok) {
-      const error = new Error(normalized.error);
-      error.status = 400;
-      throw error;
-    }
+    if (!normalized.ok) rejectFee(`${prefix}${normalized.error}`);
     if (!normalized.skip) patch.feePercentBps = normalized.value;
   }
   if (Object.prototype.hasOwnProperty.call(value, "feeFixed")) {
     const normalized = normalizeFeePesos(value.feeFixed);
-    if (!normalized.ok) {
-      const error = new Error(normalized.error);
-      error.status = 400;
-      throw error;
-    }
+    if (!normalized.ok) rejectFee(`${prefix}${normalized.error}`);
     if (!normalized.skip) patch.feeFixedCents = normalized.value;
   }
 }
@@ -199,7 +198,7 @@ export function savePaynamicsMethods(db, input) {
     const patch = { code: method.code };
     if (value && typeof value === "object" && !Array.isArray(value)) {
       if (Object.prototype.hasOwnProperty.call(value, "enabled")) patch.enabled = value.enabled ? 1 : 0;
-      readFeePatch(value, patch);
+      readFeePatch(value, patch, method.label);
     } else {
       patch.enabled = value ? 1 : 0;
     }
@@ -242,7 +241,7 @@ export function savePaymentChannels(db, input) {
         }
         patch.note = normalized.value === channel.note ? null : normalized.value;
       }
-      readFeePatch(value, patch);
+      readFeePatch(value, patch, channel.label);
     } else {
       patch.enabled = value ? 1 : 0;
     }

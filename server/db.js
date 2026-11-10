@@ -591,6 +591,7 @@ function migrate(db) {
   const paynamicsMethodColumns = new Set(db.prepare("PRAGMA table_info(paynamics_methods)").all().map((column) => column.name));
   if (!paynamicsMethodColumns.has("fee_percent_bps")) db.exec("ALTER TABLE paynamics_methods ADD COLUMN fee_percent_bps INTEGER");
   if (!paynamicsMethodColumns.has("fee_fixed_cents")) db.exec("ALTER TABLE paynamics_methods ADD COLUMN fee_fixed_cents INTEGER");
+  migrateFeePercentScale(db);
   for (const table of ["upay_payments", "hitpay_payments", "paynamics_payments"]) {
     const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
     if (columns.size && !columns.has("fee_cents")) db.exec(`ALTER TABLE ${table} ADD COLUMN fee_cents INTEGER NOT NULL DEFAULT 0`);
@@ -608,6 +609,19 @@ function migrate(db) {
   }
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_registrations_resume ON registrations(resume_token) WHERE resume_token IS NOT NULL");
   migrateBuiltinMessages(db);
+}
+
+function migrateFeePercentScale(db) {
+  db.exec("CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+  const unit = db.prepare("SELECT value FROM app_meta WHERE key = 'fee_percent_unit'").get()?.value;
+  if (unit === "milli") return;
+  db.transaction(() => {
+    db.exec(`
+      UPDATE payment_channels SET fee_percent_bps = fee_percent_bps * 10 WHERE fee_percent_bps IS NOT NULL;
+      UPDATE paynamics_methods SET fee_percent_bps = fee_percent_bps * 10 WHERE fee_percent_bps IS NOT NULL;
+    `);
+    db.prepare("INSERT INTO app_meta (key, value) VALUES ('fee_percent_unit', 'milli')").run();
+  })();
 }
 
 function migrateBuiltinMessages(db) {

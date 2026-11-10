@@ -1,10 +1,15 @@
-export function convenienceFeeCents(baseCents, percentBps, fixedCents) {
+function trimDecimals(value, places) {
+  return value.toFixed(places).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+}
+
+// Percent rates are stored as thousandths of a percent: 1% is 1000, 1.904% is 1904.
+export function convenienceFeeCents(baseCents, percentMilli, fixedCents) {
   const base = Math.round(Number(baseCents));
   if (!Number.isFinite(base) || base <= 0) return 0;
   let best = null;
-  if (percentBps !== null && percentBps !== undefined && percentBps !== "") {
-    const bps = Math.round(Number(percentBps));
-    if (Number.isFinite(bps) && bps >= 0) best = Math.round((base * bps) / 10000);
+  if (percentMilli !== null && percentMilli !== undefined && percentMilli !== "") {
+    const milli = Math.round(Number(percentMilli));
+    if (Number.isFinite(milli) && milli >= 0) best = Math.round((base * milli) / 100000);
   }
   if (fixedCents !== null && fixedCents !== undefined && fixedCents !== "") {
     const fixed = Math.round(Number(fixedCents));
@@ -17,11 +22,10 @@ export function hasFeeRate(percentBps, fixedCents) {
   return (percentBps !== null && percentBps !== undefined) || (fixedCents !== null && fixedCents !== undefined);
 }
 
-export function feeRuleLabel(percentBps, fixedCents) {
+export function feeRuleLabel(percentMilli, fixedCents) {
   const parts = [];
-  if (percentBps !== null && percentBps !== undefined) {
-    const text = (Number(percentBps) / 100).toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
-    parts.push(`${text}%`);
+  if (percentMilli !== null && percentMilli !== undefined) {
+    parts.push(`${trimDecimals(Number(percentMilli) / 1000, 3)}%`);
   }
   if (fixedCents !== null && fixedCents !== undefined) {
     const cents = Math.round(Number(fixedCents));
@@ -34,9 +38,9 @@ export function feeRuleLabel(percentBps, fixedCents) {
   return parts.join(" or ");
 }
 
-export function formatFeePercentInput(bps) {
-  if (bps === null || bps === undefined) return "";
-  return (Number(bps) / 100).toFixed(2).replace(/\.00$/, "").replace(/(\.\d)0$/, "$1");
+export function formatFeePercentInput(milli) {
+  if (milli === null || milli === undefined) return "";
+  return trimDecimals(Number(milli) / 1000, 3);
 }
 
 export function formatFeePesoInput(cents) {
@@ -49,10 +53,11 @@ export function normalizeFeePercent(value) {
   if (value === null) return { ok: true, value: null };
   const text = String(value).trim();
   if (!text) return { ok: true, value: null };
-  if (!/^\d{1,3}(\.\d{1,2})?$/.test(text)) return { ok: false, error: "Enter a percent from 0 to 100." };
+  if (!/^\d{1,3}(\.\d{1,3})?$/.test(text)) return { ok: false, error: "Enter a percent from 0 to 100 with up to 3 decimal places." };
   const number = Number(text);
-  if (!Number.isFinite(number) || number > 100) return { ok: false, error: "Enter a percent from 0 to 100." };
-  return { ok: true, value: Math.round(number * 100) };
+  if (!Number.isFinite(number) || number > 100) return { ok: false, error: "Enter a percent from 0 to 100 with up to 3 decimal places." };
+  const [whole, frac = ""] = text.split(".");
+  return { ok: true, value: Number(whole) * 1000 + Number((frac + "000").slice(0, 3)) };
 }
 
 export function normalizeFeePesos(value) {

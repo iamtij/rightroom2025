@@ -59,19 +59,33 @@ savePaymentChannels(db, { hitpay_qr: { label: "" } });
 assert.equal(qrChannel().customLabel, "");
 assert.equal(qrChannel().feePercentBps, null);
 assert.equal(qrChannel().feeFixedCents, null);
-assert.equal(convenienceFeeCents(1_500_000, 100, 2000), 15_000);
-assert.equal(convenienceFeeCents(100_000, 100, 2000), 2_000);
+assert.equal(convenienceFeeCents(1_500_000, 1000, 2000), 15_000);
+assert.equal(convenienceFeeCents(100_000, 1000, 2000), 2_000);
+assert.equal(convenienceFeeCents(1_500_000, 1904, 2800), 28_560);
+assert.equal(convenienceFeeCents(100_000, 1904, 2800), 2_800);
 assert.equal(convenienceFeeCents(1_500_000, null, 2000), 2_000);
 assert.equal(convenienceFeeCents(1_500_000, null, null), 0);
 assert.equal(settlementBaseCents({ amount_cents: 1_515_000, fee_cents: 15_000 }), 1_500_000);
 assert.equal(settlementBaseCents({ amount_cents: 1_500_000 }), 1_500_000);
 savePaymentChannels(db, { hitpay_qr: { feePercent: "1", feeFixed: "20", enabled: true } });
-assert.equal(qrChannel().feePercentBps, 100);
+assert.equal(qrChannel().feePercentBps, 1000);
 assert.equal(qrChannel().feeFixedCents, 2000);
 assert.equal(buyerPaymentChannels(db).find((item) => item.code === "hitpay_qr").feeFixedCents, 2000);
 assert.throws(() => savePaymentChannels(db, { hitpay_qr: { feePercent: "101" } }), /percent/);
 savePaynamicsMethods(db, { paymaya_ph: { feePercent: "2.5", feeFixed: "" } });
-assert.equal(db.prepare("SELECT fee_percent_bps FROM paynamics_methods WHERE code = 'paymaya_ph'").get().fee_percent_bps, 250);
+assert.equal(db.prepare("SELECT fee_percent_bps FROM paynamics_methods WHERE code = 'paymaya_ph'").get().fee_percent_bps, 2500);
+savePaynamicsMethods(db, {
+  paymaya_ph: { feePercent: "2.8", feeFixed: "28" },
+  grabpay_ph: { feePercent: "2.8", feeFixed: "28" },
+  bpi_online: { feePercent: "1.904", feeFixed: "28" },
+  ubp_online: { feePercent: "", feeFixed: "28" },
+  br_landbank_ph: { feePercent: "", feeFixed: "28" },
+});
+const bpiFee = db.prepare("SELECT fee_percent_bps, fee_fixed_cents FROM paynamics_methods WHERE code = 'bpi_online'").get();
+assert.equal(bpiFee.fee_percent_bps, 1904);
+assert.equal(bpiFee.fee_fixed_cents, 2800);
+assert.equal(db.prepare("SELECT fee_percent_bps FROM paynamics_methods WHERE code = 'ubp_online'").get().fee_percent_bps, null);
+assert.throws(() => savePaynamicsMethods(db, { bpi_online: { feePercent: "1.9041" } }), /3 decimal places/);
 db.prepare("UPDATE ticket_products SET fee_bearer = 'pass' WHERE code = 'early_bird'").run();
 const passedOn = paymentCharge(db, { currency: "PHP", product_code: "early_bird" }, 1_500_000, { channel: "hitpay_qr" });
 assert.equal(passedOn.feeCents, 15_000);
@@ -85,6 +99,34 @@ db.prepare("UPDATE ticket_products SET fee_bearer = 'shoulder' WHERE code = 'ear
 savePaymentChannels(db, { hitpay_qr: { feePercent: "", feeFixed: "", enabled: false } });
 assert.equal(qrChannel().feePercentBps, null);
 assert.equal(qrChannel().enabled, false);
+
+const scaleFile = path.join(os.tmpdir(), `ibmc-fee-scale-${process.pid}.sqlite`);
+fs.rmSync(scaleFile, { force: true });
+const scaleDb = new Database(scaleFile);
+scaleDb.exec(`
+  CREATE TABLE payment_channels (
+    code TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    fee_percent_bps INTEGER,
+    fee_fixed_cents INTEGER
+  );
+  INSERT INTO payment_channels (code, enabled, fee_percent_bps, fee_fixed_cents) VALUES ('hitpay_qr', 1, 280, 2000);
+  CREATE TABLE paynamics_methods (
+    code TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    fee_percent_bps INTEGER,
+    fee_fixed_cents INTEGER
+  );
+  INSERT INTO paynamics_methods (code, enabled, fee_percent_bps, fee_fixed_cents) VALUES ('bpi_online', 1, 190, NULL);
+`);
+scaleDb.close();
+const scaled = openDatabase(scaleFile);
+assert.equal(listPaymentChannels(scaled).find((item) => item.code === "hitpay_qr").feePercentBps, 2800);
+assert.equal(scaled.prepare("SELECT fee_percent_bps FROM paynamics_methods WHERE code = 'bpi_online'").get().fee_percent_bps, 1900);
+scaled.close();
+fs.rmSync(scaleFile, { force: true });
+fs.rmSync(`${scaleFile}-wal`, { force: true });
+fs.rmSync(`${scaleFile}-shm`, { force: true });
 
 const legacyFile = path.join(os.tmpdir(), `ibmc-channel-label-${process.pid}.sqlite`);
 fs.rmSync(legacyFile, { force: true });
@@ -795,8 +837,24 @@ try {
   });
   const savedFeeBody = await savedFee.json();
   assert.equal(savedFee.status, 200);
-  assert.equal(savedFeeBody.channels.find((row) => row.code === "hitpay_qr").feePercentBps, 100);
+  assert.equal(savedFeeBody.channels.find((row) => row.code === "hitpay_qr").feePercentBps, 1000);
   assert.equal(savedFeeBody.channels.find((row) => row.code === "hitpay_qr").feeFixedCents, 2000);
+  const bpiSaved = await fetch(`${base}/api/admin/payment-channels`, {
+    method: "PATCH",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ paynamicsMethods: { bpi_online: { feePercent: "1.904", feeFixed: "28" } } }),
+  });
+  const bpiSavedBody = await bpiSaved.json();
+  assert.equal(bpiSaved.status, 200);
+  const bpiMethod = bpiSavedBody.paynamicsMethods.find((row) => row.code === "bpi_online");
+  assert.equal(bpiMethod.feePercentBps, 1904);
+  assert.equal(bpiMethod.feeFixedCents, 2800);
+  const bpiRejected = await fetch(`${base}/api/admin/payment-channels`, {
+    method: "PATCH",
+    headers: { cookie, "Content-Type": "application/json" },
+    body: JSON.stringify({ paynamicsMethods: { bpi_online: { feePercent: "1.9041" } } }),
+  });
+  assert.equal(bpiRejected.status, 400);
   const publicFees = await fetch(`${base}/api/payment-channels`);
   const publicFeesBody = await publicFees.json();
   assert.equal(publicFeesBody.channels.find((row) => row.code === "hitpay_qr").feeFixedCents, 2000);

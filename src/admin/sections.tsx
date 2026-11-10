@@ -1429,7 +1429,7 @@ function FeePair({
 }) {
   return (
     <div className="ml-8 flex flex-wrap items-end gap-2">
-      <label className="flex w-24 flex-col gap-1 text-[12px] font-semibold text-[#5C5C63]">
+      <label className="flex w-28 flex-col gap-1 text-[12px] font-semibold text-[#5C5C63]">
         %
         <input
           className={`${field} w-full text-right tabular-nums disabled:bg-[#F6F4F1]`}
@@ -1967,10 +1967,12 @@ function PaymentSettingsScreen({ role, onError }: { role: "super" | "admin" | ""
   const [editing, setEditing] = useState(false);
   const [confirming, setConfirming] = useState<string[] | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const canEdit = role === "super";
   const locked = !editing || Boolean(confirming) || saving;
 
   function askSave() {
+    setSaveError("");
     const changes = [...(ticketsRef.current?.changes() || []), ...(channelsRef.current?.changes() || [])];
     if (!changes.length) {
       setEditing(false);
@@ -1981,13 +1983,16 @@ function PaymentSettingsScreen({ role, onError }: { role: "super" | "admin" | ""
 
   async function confirmSave() {
     setSaving(true);
+    setSaveError("");
     try {
       await ticketsRef.current?.save();
       await channelsRef.current?.save();
       setConfirming(null);
       setEditing(false);
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Settings were not saved");
+      const message = error instanceof Error ? error.message : "Settings were not saved";
+      setSaveError(message);
+      onError(message);
     } finally {
       setSaving(false);
     }
@@ -2021,8 +2026,9 @@ function PaymentSettingsScreen({ role, onError }: { role: "super" | "admin" | ""
           </ul>
           <div className="flex gap-2">
             <button type="button" className={buttonClass} disabled={saving} onClick={confirmSave}>{saving ? "Saving" : "Confirm save"}</button>
-            <button type="button" className={ghostButton} disabled={saving} onClick={() => setConfirming(null)}>Back</button>
+            <button type="button" className={ghostButton} disabled={saving} onClick={() => { setConfirming(null); setSaveError(""); }}>Back</button>
           </div>
+          {saveError ? <p className="m-0 text-sm text-[#A8131F]">{saveError}</p> : null}
         </div>
       ) : null}
       <TicketPaymentSettings ref={ticketsRef} onError={onError} editing={!locked} />
