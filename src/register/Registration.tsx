@@ -1869,7 +1869,7 @@ function RegistrationWizard() {
         ) : null}
         <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-2">
           <Row label="Attendee" value={attendee.fullName} />
-          <Row label={`${charging.name} · ${plan === "installment" ? "installment" : "paid in full"}`} value={`${money(listTotal, charging.currency)} total`} />
+          <Row label={`${charging.name} · ${plan === "installment" ? "installment" : "one payment"}`} value={`${money(listTotal, charging.currency)} total`} />
           {laterCount > 0 ? <Row label={`Then, ${laterCount} payments`} value={laterEach ? `${laterCount} × ${money(laterEach, tier.currency)}` : money(laterCents, tier.currency)} /> : null}
           {applied ? <Row label={`Coupon ${applied.code}`} value={`${applied.label} · −${money(applied.discountCents, charging.currency)}`} /> : null}
           {fee.shown ? (
@@ -3270,7 +3270,7 @@ function Manage({
     <Frame hideManage>
       <div className="flex flex-col gap-1">
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Hi {first}</h1>
-        <p className="m-0 text-[15px] text-[#5C5C63]">{record.tierName} · {record.plan === "installment" ? "installment plan" : "paid in full"}</p>
+        <p className="m-0 text-[15px] text-[#5C5C63]">{record.tierName} · {record.plan === "installment" ? "installment plan" : "one payment"}</p>
       </div>
       <PageSection
         title="Payment"
