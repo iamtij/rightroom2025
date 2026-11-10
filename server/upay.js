@@ -81,8 +81,7 @@ function aesKey() {
 }
 
 function productionPageUrl() {
-  const base = String(process.env.UPAY_PAGE_URL || "https://sith.unionbankph.com/UPAY/Whitelabel").replace(/\/$/, "");
-  return `${base}/${encodeURIComponent(billerUuid())}`;
+  return `${whitelabelBase()}/${encodeURIComponent(billerUuid())}`;
 }
 
 function callbackUrl() {
@@ -230,10 +229,30 @@ function qrText(body) {
   return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 
+function whitelabelBase() {
+  return String(process.env.UPAY_PAGE_URL || "https://sith.unionbankph.com/UPAY/Whitelabel").replace(/\/$/, "");
+}
+
+function isWhitelabelUrl(value) {
+  try {
+    const url = new URL(value);
+    const base = new URL(whitelabelBase());
+    return url.origin === base.origin && url.pathname.replace(/\/$/, "").toLowerCase().startsWith(base.pathname.replace(/\/$/, "").toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+function buyerPaymentUrl(row) {
+  const url = row.payment_url || "";
+  if (upayPartnerApiConfigured() && isWhitelabelUrl(url)) return "";
+  return url;
+}
+
 function paymentLink(body) {
   for (const key of ["paymentUrl", "paymentLink", "redirectUrl", "url", "link"]) {
     const value = body?.[key];
-    if (typeof value === "string" && /^https?:\/\//i.test(value)) return value;
+    if (typeof value === "string" && /^https?:\/\//i.test(value) && !isWhitelabelUrl(value)) return value;
   }
   return "";
 }
@@ -302,7 +321,7 @@ async function presentUpay(row) {
     state: row.unionbank_state || "",
     code: row.unionbank_code || "",
     qrDataUrl,
-    paymentUrl: row.payment_url || "",
+    paymentUrl: buyerPaymentUrl(row),
     billerName: process.env.UPAY_BILLER_NAME || "UnionBank UPay",
   };
 }
@@ -422,7 +441,7 @@ export async function startUpayPayment(db, registration, paymentMethod) {
       if (outcome === "paid" && settlement !== "paid") {
         console.error(`UPay amount was not confirmed for ${sender}`);
       }
-      const link = paymentLink(created.body) || productionPageUrl();
+      const link = paymentLink(created.body);
       const result = db.prepare(`
         INSERT INTO upay_payments (
           registration_id, installment_id, sender_ref_id, amount_cents, fee_cents, currency, payment_method,
@@ -523,7 +542,7 @@ export async function refreshUpayPayment(db, senderRefIdValue) {
       transactionId: response.body.transactionId || row.transaction_id,
       transactionUuid: response.body.uuid || row.transaction_uuid,
       qr: qrText(response.body) || row.qr,
-      paymentUrl: paymentLink(response.body) || row.payment_url,
+      paymentUrl: paymentLink(response.body) || buyerPaymentUrl(row),
     });
     if (settlement === "paid") current = settle(db, next);
     return { registration: current, upay: await presentUpay(next) };
