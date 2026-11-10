@@ -474,22 +474,11 @@ function BeforeAfter() {
 const AMPLIFY_LINES = ["Your Impact", "Relationships", "Your Business", "Your Influence", "as a Team", "Together"];
 
 function AmplifyCycle() {
-  const measure = useRef<HTMLSpanElement>(null);
   const resetting = useRef(false);
   const [index, setIndex] = useState(0);
-  const [slot, setSlot] = useState(0);
-  const [lineHeight, setLineHeight] = useState(0);
   const [animate, setAnimate] = useState(true);
   const [reduce] = useState(() => window.matchMedia("(prefers-reduced-motion: reduce)").matches);
   const lines = [...AMPLIFY_LINES, AMPLIFY_LINES[0]];
-
-  useLayoutEffect(() => {
-    const root = measure.current;
-    if (!root) return;
-    const spans = [...root.querySelectorAll("span")];
-    setSlot(Math.ceil(Math.max(...spans.map((item) => item.getBoundingClientRect().width))));
-    setLineHeight(spans[0]?.getBoundingClientRect().height ?? 0);
-  }, []);
 
   useEffect(() => {
     if (reduce) return;
@@ -517,26 +506,24 @@ function AmplifyCycle() {
   };
 
   return (
-    <p className="relative m-0 flex justify-center font-archivo text-[clamp(20px,2.04vw,29px)] font-bold leading-none text-[#CF2030]">
-      <span ref={measure} aria-hidden="true" className="pointer-events-none absolute h-0 overflow-hidden opacity-0">
-        {AMPLIFY_LINES.map((line) => (
-          <span key={line} className="block whitespace-nowrap leading-[1.2]">{line}</span>
-        ))}
-      </span>
-      <span className="inline-flex items-center gap-[0.35em] whitespace-nowrap">
+    <p className="relative m-0 flex w-max max-w-full justify-center font-archivo text-[clamp(20px,2.04vw,29px)] font-bold leading-none text-[#CF2030]" style={{ justifyContent: "safe center" }}>
+      <span className="inline-flex max-w-full items-center gap-[0.35em] whitespace-nowrap">
         <span>Amplify</span>
-        <span className="inline-block overflow-hidden text-left" style={{ width: slot || undefined, height: lineHeight || "1.2em" }}>
+        <span className="relative inline-grid h-[1.2em] items-start overflow-hidden leading-[1.2]">
+          {AMPLIFY_LINES.map((line) => (
+            <span key={line} aria-hidden="true" className="invisible col-start-1 row-start-1 whitespace-nowrap">{line}</span>
+          ))}
           <span
             aria-hidden="true"
-            className="block"
+            className="absolute top-0 left-0"
             onTransitionEnd={finishLoop}
             style={{
-              transform: lineHeight ? `translateY(${-index * lineHeight}px)` : undefined,
+              transform: `translateY(calc(${-index} * 1.2em))`,
               transition: animate && !reduce ? "transform 0.55s cubic-bezier(0.22, 1, 0.36, 1)" : "none",
             }}
           >
             {lines.map((line, i) => (
-              <span key={`${line}-${i}`} className="block whitespace-nowrap leading-[1.2]" style={{ height: lineHeight || "1.2em" }}>{line}</span>
+              <span key={`${line}-${i}`} className="block h-[1.2em] whitespace-nowrap leading-[1.2]">{line}</span>
             ))}
           </span>
         </span>
@@ -572,7 +559,7 @@ export default function AmplifyHome() {
           </div>
       </nav>
       <section id="top" className="relative flex min-h-[calc(100svh-5.5rem)] flex-col overflow-hidden bg-[#000000] text-[#FFFFFF] sm:min-h-[calc(100svh-6rem)] md:min-h-[840px]">
-        <div className="relative flex flex-1 flex-col items-center justify-center gap-[22px] px-6 py-10 text-center sm:px-8 lg:px-14">
+        <div className="relative flex flex-1 flex-col items-center justify-center gap-[22px] px-6 py-10 text-center sm:px-8 lg:px-14" style={{ alignItems: "safe center" }}>
           <p className="m-0 text-[13px] uppercase tracking-[0.18em] text-[#C8C8C8]">
             IBMC 2027 · International Business Matching Conference · BNI Philippines
           </p>
