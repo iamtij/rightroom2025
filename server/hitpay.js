@@ -163,6 +163,8 @@ async function presentHitpay(db, row) {
     sessionId: row.session_id,
     channel: row.channel,
     status: row.status,
+    amountCents: Math.max(0, Math.round(Number(row.amount_cents) || 0)),
+    feeCents: Math.max(0, Math.round(Number(row.fee_cents) || 0)),
     qrDataUrl: row.channel === "qr" ? await qrImage(row.qr_code) : "",
     paymentUrl: allowedHitpayUrl(row.payment_url),
     expiresAt: row.expires_at || "",

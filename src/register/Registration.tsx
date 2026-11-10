@@ -166,6 +166,11 @@ function moneyExact(cents: number) {
   return new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(cents / 100);
 }
 
+function payFigure(cents: number, currency: Currency) {
+  if (currency === "PHP" && cents % 100 !== 0) return moneyExact(cents);
+  return money(cents, currency);
+}
+
 function readPaynamicsMethods(value: unknown): PaynamicsMethodOption[] {
   if (!Array.isArray(value)) return [];
   return value.flatMap((item) => {
@@ -204,6 +209,8 @@ type HitpaySession = {
   sessionId: string;
   channel: "qr" | "online";
   status: "pending" | "paid" | "failed" | "expired";
+  amountCents?: number;
+  feeCents?: number;
   qrDataUrl: string;
   paymentUrl: string;
   expiresAt: string;
@@ -2457,6 +2464,9 @@ function HitpayPending({
   }
 
   const due = record.payments.find((item) => item.status === "due");
+  const chargedCents = session.amountCents && session.amountCents > 0 ? session.amountCents : due?.amountCents || 0;
+  const feeCents = session.feeCents && session.feeCents > 0 ? session.feeCents : 0;
+  const feeNote = feeCents > 0 ? `Includes a ${payFigure(feeCents, record.currency)} convenience fee. ` : "";
   const title = session.channel === "qr" ? "Pay with QR Ph" : "Pay with online banking";
   const qrClosed = session.channel === "qr" && clock.expired && !showRefresh && session.status !== "paid";
   return (
@@ -2479,11 +2489,18 @@ function HitpayPending({
       <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">{title}</h1>
       <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">
         {session.channel === "online" ? "Checking payment status. " : ""}
-        {due ? `${money(due.amountCents, record.currency)} for IBMC 2027. ` : ""}
+        {session.channel === "online" && chargedCents > 0 ? `${payFigure(chargedCents, record.currency)} for IBMC 2027. ` : ""}
+        {feeNote}
         {record.attendee.email ? `The receipt goes to ${record.attendee.email}. ` : ""}Coming back to this page does not by itself confirm the payment.
       </p>
       {session.channel === "qr" && session.qrDataUrl ? (
         <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+          {chargedCents > 0 ? (
+            <div className="flex flex-col items-center gap-1">
+              <MoneyText text={payFigure(chargedCents, record.currency)} className="text-center font-archivo text-[40px] leading-none font-extrabold tabular-nums text-[#141416]" />
+              <span className="text-center text-[13px] leading-snug text-[#5C5C63]">for IBMC 2027</span>
+            </div>
+          ) : null}
           <img src={session.qrDataUrl} alt="QR Ph" className={`h-[280px] w-[280px] ${clock.expired ? "opacity-40" : ""}`} />
           <span className={`text-center text-sm font-semibold tabular-nums ${clock.lastMinute || clock.expired ? "text-[#A8131F]" : "text-[#3A3A40]"}`}>
             {clock.expired ? "QR expired" : `Expires in ${clock.label}`}
