@@ -769,6 +769,7 @@ function RegistrationWizard() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState<StoredRegistration | null>(null);
   const [managedRecord, setManagedRecord] = useState<StoredRegistration | null>(null);
+  const [resumePay, setResumePay] = useState(false);
   const [chapters, setChapters] = useState<string[]>([]);
   const [testMode, setTestMode] = useState(false);
   const [installmentTest, setInstallmentTest] = useState(false);
@@ -1896,11 +1897,11 @@ function RegistrationWizard() {
         }}
         onLater={() => {
           setPaynamicsSession(null);
-          setStep("form");
+          setStep("done");
         }}
         onBack={() => {
           setPaynamicsSession(null);
-          setStep("form");
+          setStep("pay");
         }}
         onManage={openManage}
       />
@@ -1940,14 +1941,32 @@ function RegistrationWizard() {
       />
     );
   }
-  if (step === "done" && saved) return <Confirmed record={saved} onManage={() => setStep("manage")} />;
+  if (step === "done" && saved) {
+    return (
+      <Confirmed
+        record={saved}
+        onManage={() => {
+          setManagedRecord(saved);
+          setResumePay(false);
+          setStep("manage");
+        }}
+        onPay={() => {
+          setManagedRecord(saved);
+          setResumePay(true);
+          setStep("manage");
+        }}
+      />
+    );
+  }
   if (step === "manage") {
     return (
       <Manage
         initialQuery={lookup}
         initialRecord={managedRecord}
+        openPayOnLoad={resumePay}
         onStart={() => {
           setManagedRecord(null);
+          setResumePay(false);
           setStep("start");
         }}
       />
@@ -2738,7 +2757,7 @@ function PayChoice({
   );
 }
 
-function Confirmed({ record, onManage, hideManage = false }: { record: StoredRegistration; onManage: () => void; hideManage?: boolean }) {
+function Confirmed({ record, onManage, onPay, hideManage = false }: { record: StoredRegistration; onManage: () => void; onPay?: () => void; hideManage?: boolean }) {
   const paid = record.payments.filter((item) => item.status === "paid").reduce((sum, item) => sum + item.amountCents, 0);
   const paidCount = record.payments.filter((item) => item.status === "paid").length;
   const next = record.payments.find((item) => item.status === "due");
@@ -2790,6 +2809,11 @@ function Confirmed({ record, onManage, hideManage = false }: { record: StoredReg
             : "Reminders come by email and SMS. Your QR ticket unlocks when you're fully paid."}
         </p>
       </div>
+      {next && record.currency === "PHP" && !fullyPaid && onPay ? (
+        <button type="button" onClick={onPay} className="rounded-full bg-[#D0202E] px-4 py-3.5 text-base font-bold text-white">
+          Continue payment · {money(openCents, record.currency)}
+        </button>
+      ) : null}
       <div className="flex justify-center gap-6 text-sm">
         <a href={CALENDAR_URL} target="_blank" rel="noreferrer">Add to calendar</a>
         <button type="button" className="font-semibold text-[#A8131F]" onClick={onManage}>Manage my registration</button>
@@ -2822,7 +2846,12 @@ function Manage({
   const { secondsLeft: resendSeconds, start: startResendCooldown, reset: resetResendCooldown } = useResendCooldown();
   const [method, setMethod] = useState<UpayMethod>("instapay");
   const { channels, channel, setChannel, upayCheckout, paynamicsCheckout, paynamicsMethods, paynamicsChannel, setPaynamicsChannel } = usePaymentChannels();
-  const [payingInstallment, setPayingInstallment] = useState(false);
+  const [payingInstallment, setPayingInstallment] = useState(() => {
+    if (!openPayOnLoad || !initialRecord) return false;
+    return initialRecord.currency === "PHP"
+      && initialRecord.planStatus !== "fully_paid"
+      && initialRecord.payments.some((item) => item.status === "due");
+  });
   const [upaySession, setUpaySession] = useState<UpaySession | null>(null);
   const [hitpaySession, setHitpaySession] = useState<HitpaySession | null>(null);
   const [paynamicsSession, setPaynamicsSession] = useState<PaynamicsSession | null>(null);
