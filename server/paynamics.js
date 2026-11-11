@@ -15,7 +15,8 @@ export {
   railwaySignalsPresent,
 };
 import { reportError } from "./report-error.js";
-import { getRegistration, recordPayment } from "./registrations.js";
+import { getRegistration } from "./registrations.js";
+import { HOLD_EXPIRED_MESSAGE, expireRegistrationHold, refreshHeldRegistration, sessionStartedBeforeHold, settleOpeningPayment } from "./payment-hold.js";
 import { isChannelEnabled, isPaynamicsMethodEnabled, paynamicsMethodByCode } from "./payment-channels.js";
 import { paymentCharge, settlementBaseCents } from "./convenience-fee.js";
 
@@ -654,12 +655,13 @@ function settlePaynamics(db, row) {
     if (current.status === "paid") return getRegistration(db, current.registration_id);
     const existing = db.prepare("SELECT id FROM payments WHERE external_reference = ?").get(current.request_id);
     if (!existing) {
-      recordPayment(db, {
+      settleOpeningPayment(db, {
         registrationId: current.registration_id,
         installmentId: current.installment_id,
         amountCents: settlementBaseCents(current),
         method: "paynamics",
         externalReference: current.request_id,
+        sessionCreatedAt: current.created_at,
       });
     }
     db.prepare(`
@@ -890,6 +892,10 @@ export async function startPaynamicsPayment(db, registration, pchannel) {
   if (!isChannelEnabled(db, "paynamics")) return { error: "That payment option is turned off.", status: 400, registration };
   if (!isPaynamicsMethodEnabled(db, selection.code)) return { error: "That Paynamics option is turned off.", status: 400, registration };
   if (registration.currency !== "PHP") return { error: "Paynamics collects peso payments.", status: 400, registration };
+  const held = refreshHeldRegistration(db, registration);
+  registration = held.registration;
+  if (!registration) return { error: "Registration not found", status: 404 };
+  if (held.decision === "closed") return { error: "Registration is not payable", status: 400, registration };
   if (!paynamicsApiCallsAllowed()) {
     return {
       error: "Paynamics checkout is not enabled until test Workflow credentials and host are confirmed.",
@@ -914,13 +920,21 @@ export async function startPaynamicsPayment(db, registration, pchannel) {
       const expires = Date.parse(open.expires_at || "");
       const sameMethod = String(open.payment_channel || "") === selection.code;
       const sameCharge = open.amount_cents === quote.totalCents && (open.fee_cents || 0) === quote.feeCents;
-      if (sameMethod && sameCharge && (!Number.isFinite(expires) || Date.now() < expires)) {
+      const stillOpen = sameMethod && sameCharge && (!Number.isFinite(expires) || Date.now() < expires);
+      const startedInTime = held.decision !== "expired" || sessionStartedBeforeHold(registration, open.created_at);
+      if (stillOpen && startedInTime) {
         return view(db, registration, open);
+      }
+      if (held.decision === "expired") {
+        return { error: HOLD_EXPIRED_MESSAGE, status: 400, registration };
       }
       db.prepare(`
         UPDATE paynamics_payments SET status = 'expired', updated_at = datetime('now')
         WHERE id = ? AND status = 'pending'
       `).run(open.id);
+    }
+    if (held.decision === "expired") {
+      return { error: HOLD_EXPIRED_MESSAGE, status: 400, registration };
     }
     const merchantId = required("PAYNAMICS_MERCHANT_ID");
     const merchantKey = required("PAYNAMICS_MERCHANT_KEY");
@@ -984,6 +998,7 @@ export async function startPaynamicsPayment(db, registration, pchannel) {
 export async function refreshPaynamicsPayment(db, requestId) {
   const row = findRequest(db, requestId);
   if (!row) return { error: "Payment not found", status: 404 };
+  expireRegistrationHold(db, row.registration_id);
   let current = row;
   const expires = Date.parse(current.expires_at || "");
   if (current.status === "pending" && Number.isFinite(expires) && Date.now() >= expires) {

@@ -9,6 +9,7 @@ import {
 } from "./staging-early-payments.js";
 import { beginMfaSetup, clearSessionCookie, cookieValue, createAdmin, listAdmins, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
 import { admitPass, cancelRegistration, compRegistration, createRegistration, discardUnopenedRegistration, ensureResumeToken, entryPassEligible, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
+import { assignFirstPaymentHold, expireRegistrationHold, firstPaymentHoldEnabled, HOLD_EXPIRED_MESSAGE } from "./payment-hold.js";
 import { sendEntryPassForRegistration, syncBuiltinSchedule } from "./reminders.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
@@ -190,6 +191,7 @@ function present(registration, options = {}) {
     planStatus: registration.status === "cancelled" ? "cancelled" : registration.balance_cents === 0 ? "fully_paid" : registration.plan_status || "active",
     qrReady: entryPassEligible(registration),
     registeredOn: registration.registered_on,
+    paymentHoldUntil: registration.payment_hold_until || null,
     payments,
     ...(options.transactions ? { transactions: options.transactions } : {}),
     ...(options.resume && registration.resume_token ? { resumeToken: registration.resume_token } : {}),
@@ -444,6 +446,7 @@ export function createApi() {
       turnstileConfigured: Boolean(siteKey && secret),
       turnstileSiteKey: siteKey && secret && !skipTurnstileCheckout ? siteKey : "",
       turnstileRequiredForCheckout: Boolean(siteKey && secret && !skipTurnstileCheckout),
+      firstPaymentHold: firstPaymentHoldEnabled(),
       tickets: [
         ...publicTicketGates(db()).map((ticket) => ({ code: ticket.code, paymentsOpen: ticket.paymentsOpen, feeBearer: ticket.feeBearer })),
         ...db().prepare(`
@@ -719,7 +722,9 @@ export function createApi() {
 
   function finishNewCheckout(res, send, registration, result) {
     if (hostedCheckoutStarted(result)) {
-      send(res, { ...result, resume: true }, true);
+      assignFirstPaymentHold(db(), registration.id);
+      const held = getRegistration(db(), registration.id) || registration;
+      send(res, { ...result, registration: held, resume: true }, true);
       return;
     }
     discardUnopenedRegistration(db(), registration.id);
@@ -784,9 +789,10 @@ export function createApi() {
       res.status(404).json({ error: "Registration not found" });
       return;
     }
+    expireRegistrationHold(db(), row.id);
     const registration = getRegistration(db(), row.id);
     if (!registration || registration.status !== "confirmed") {
-      res.status(400).json({ error: "Registration is not payable" });
+      res.status(400).json({ error: registration?.payment_hold_cancelled_at ? HOLD_EXPIRED_MESSAGE : "Registration is not payable" });
       return;
     }
     const result = await startHitpayPayment(db(), registration, channel);
@@ -799,9 +805,10 @@ export function createApi() {
       res.status(404).json({ error: "Registration not found" });
       return;
     }
+    expireRegistrationHold(db(), row.id);
     const registration = getRegistration(db(), row.id);
     if (!registration || registration.status !== "confirmed") {
-      res.status(400).json({ error: "Registration is not payable" });
+      res.status(400).json({ error: registration?.payment_hold_cancelled_at ? HOLD_EXPIRED_MESSAGE : "Registration is not payable" });
       return;
     }
     const result = await startUpayPayment(db(), registration, req.body?.paymentMethod);
@@ -837,9 +844,10 @@ export function createApi() {
       res.status(404).json({ error: "Registration not found" });
       return;
     }
+    expireRegistrationHold(db(), row.id);
     const registration = getRegistration(db(), row.id);
     if (!registration || registration.status !== "confirmed") {
-      res.status(400).json({ error: "Registration is not payable" });
+      res.status(400).json({ error: registration?.payment_hold_cancelled_at ? HOLD_EXPIRED_MESSAGE : "Registration is not payable" });
       return;
     }
     const result = await startPaynamicsPayment(db(), registration, selection.code);
@@ -973,7 +981,8 @@ export function createApi() {
       res.status(status).json({ error: message });
       return;
     }
-    const registration = ensureResumeToken(db(), result.registration);
+    expireRegistrationHold(db(), result.registration.id);
+    const registration = ensureResumeToken(db(), getRegistration(db(), result.registration.id));
     attachResume(res, registration);
     res.json(present(registration, { resume: true }));
   });
@@ -1031,6 +1040,7 @@ export function createApi() {
       res.status(404).json({ error: "Registration not found" });
       return;
     }
+    expireRegistrationHold(db(), row.id);
     const registration = getRegistration(db(), row.id);
     const access = ownerAccess(registration, resumeCredential(req));
     if (access.resume) attachResume(res, registration);

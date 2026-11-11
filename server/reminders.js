@@ -4,6 +4,7 @@ import { createRegistration, getRegistration, recordPayment } from "./registrati
 import { sendEmail, sendSms } from "./providers.js";
 import { renderEntryPass, renderInstallmentReminder, renderPlainEmail, templateUses } from "./templates.js";
 import { reportError } from "./report-error.js";
+import { expireUnpaidFirstPayments } from "./payment-hold.js";
 import { addDays, formatLongDate, manilaParts } from "./time.js";
 
 export { createRegistration, getRegistration, recordPayment };
@@ -144,6 +145,7 @@ export function queueEntryPassAfterPayment(db, registrationId) {
 }
 
 export async function runReminders(db, now = new Date()) {
+  expireUnpaidFirstPayments(db, now.getTime());
   const clock = manilaParts(now);
   const rules = db.prepare("SELECT * FROM reminder_rules WHERE enabled = 1").all();
   let created = 0;

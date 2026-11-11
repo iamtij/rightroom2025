@@ -62,6 +62,8 @@ CREATE TABLE IF NOT EXISTS registrations (
   resume_token TEXT,
   qr_token TEXT UNIQUE,
   fully_paid_at TEXT,
+  payment_hold_until TEXT,
+  payment_hold_cancelled_at TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -578,6 +580,8 @@ function migrate(db) {
     ["coupon_code", "TEXT"],
     ["plan_status", "TEXT NOT NULL DEFAULT 'active'"],
     ["resume_token", "TEXT"],
+    ["payment_hold_until", "TEXT"],
+    ["payment_hold_cancelled_at", "TEXT"],
   ];
   for (const [name, type] of columns) {
     if (!names.has(name)) db.exec(`ALTER TABLE registrations ADD COLUMN ${name} ${type}`);

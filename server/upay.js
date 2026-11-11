@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import QRCode from "qrcode";
-import { getRegistration, recordPayment } from "./registrations.js";
+import { getRegistration } from "./registrations.js";
+import { HOLD_EXPIRED_MESSAGE, expireRegistrationHold, refreshHeldRegistration, sessionStartedBeforeHold, settleOpeningPayment } from "./payment-hold.js";
 import { isChannelEnabled } from "./payment-channels.js";
 import { paymentCharge, settlementBaseCents } from "./convenience-fee.js";
 
@@ -346,17 +347,16 @@ function saveUpay(db, row, patch) {
 }
 
 function settle(db, row) {
-  const already = db.prepare("SELECT id FROM payments WHERE external_reference = ?").get(row.sender_ref_id);
-  if (already) return getRegistration(db, row.registration_id);
   const registration = getRegistration(db, row.registration_id);
   const target = registration?.installments.find((item) => item.id === row.installment_id);
-  if (!target || target.status !== "due") return registration;
-  return recordPayment(db, {
-    registrationId: registration.id,
-    installmentId: target.id,
+  if (registration?.status === "confirmed" && (!target || target.status !== "due")) return registration;
+  return settleOpeningPayment(db, {
+    registrationId: row.registration_id,
+    installmentId: row.installment_id,
     amountCents: settlementBaseCents(row),
     method: `upay:${row.payment_method}`,
     externalReference: row.sender_ref_id,
+    sessionCreatedAt: row.created_at,
   });
 }
 
@@ -387,6 +387,10 @@ export async function startUpayPayment(db, registration, paymentMethod) {
   if (registration.currency !== "PHP") {
     return { error: "UnionBank Upay collects peso payments.", status: 400, registration };
   }
+  const held = refreshHeldRegistration(db, registration);
+  registration = held.registration;
+  if (!registration) return { error: "Registration not found", status: 404 };
+  if (held.decision === "closed") return { error: "Registration is not payable", status: 400, registration };
   const due = dueInstallment(registration);
   const baseCents = due ? due.amount_cents - due.amount_paid_cents : 0;
   const quote = paymentCharge(db, registration, baseCents, { channel: "upay" });
@@ -399,9 +403,17 @@ export async function startUpayPayment(db, registration, paymentMethod) {
     ORDER BY id DESC
     LIMIT 1
   `).get(due.id, paymentMethod);
-  if (open && open.amount_cents === quote.totalCents && (open.fee_cents || 0) === quote.feeCents) {
+  if (
+    open
+    && open.amount_cents === quote.totalCents
+    && (open.fee_cents || 0) === quote.feeCents
+    && (held.decision !== "expired" || sessionStartedBeforeHold(registration, open.created_at))
+  ) {
     const refreshed = await refreshUpayPayment(db, open.sender_ref_id);
     if (refreshed.upay?.status === "pending" || refreshed.upay?.status === "paid") return refreshed;
+  }
+  if (held.decision === "expired") {
+    return { error: HOLD_EXPIRED_MESSAGE, status: 400, registration };
   }
   const mobile = upayMobile(registration.mobile);
   if (mobile.length < 10) {
@@ -508,6 +520,7 @@ export async function startUpayPayment(db, registration, paymentMethod) {
 
 export async function refreshUpayPayment(db, senderRefIdValue) {
   const row = db.prepare("SELECT * FROM upay_payments WHERE sender_ref_id = ?").get(senderRefIdValue);
+  if (row) expireRegistrationHold(db, row.registration_id);
   if (!row) return { error: "Payment not found", status: 404 };
   if (row.status === "paid") {
     return { registration: getRegistration(db, row.registration_id), upay: await presentUpay(row) };

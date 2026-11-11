@@ -392,10 +392,28 @@ type StoredRegistration = {
   currency: Currency;
   totalCents: number;
   payments: StoredPayment[];
-  planStatus: "active" | "fully_paid";
+  status?: "pending" | "confirmed" | "cancelled";
+  planStatus: "active" | "fully_paid" | "cancelled";
+  paymentHoldUntil?: string | null;
   qrReady?: boolean;
   qrToken?: string;
 };
+
+function formatHoldDeadline(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function holdCancelled(record: StoredRegistration) {
+  return record.planStatus === "cancelled" || record.status === "cancelled";
+}
 
 const STORAGE_KEY = "ibmc2027-registration";
 const RESUME_KEY = "ibmc2027-resume";
@@ -785,6 +803,7 @@ function RegistrationWizard() {
   const [challenge, setChallenge] = useState("");
   const [companyWebsite, setCompanyWebsite] = useState("");
   const [testsOpen, setTestsOpen] = useState(false);
+  const [firstPaymentHold, setFirstPaymentHold] = useState(false);
   const [testTicketOpen, setTestTicketOpen] = useState(false);
   const [ticketGates, setTicketGates] = useState<Record<string, boolean> | null>(null);
   const [feeBearers, setFeeBearers] = useState<Record<string, FeeBearer>>({});
@@ -814,6 +833,7 @@ function RegistrationWizard() {
         const payload = await response.json();
         if (!stop) {
           setTestsOpen(Boolean(payload.tests));
+          setFirstPaymentHold(Boolean(payload.firstPaymentHold));
           setTestTicketOpen(Boolean(payload.testTicket));
           setTurnstileSiteKey(payload.turnstileSiteKey || "");
           if (Array.isArray(payload.tickets)) {
@@ -1825,6 +1845,11 @@ function RegistrationWizard() {
             <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
               Receipt · {attendee.email} · {attendee.mobile}
             </p>
+            {firstPaymentHold ? (
+              <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
+                The first payment locks this ticket. It is due within 24 hours of checkout. After that, this registration is cancelled and you start again.
+              </p>
+            ) : null}
           </>
         ) : (
           <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
@@ -2359,6 +2384,8 @@ function UpayPending({
         {due ? `${money(due.amountCents, record.currency)} to ${session.billerName}. ` : ""}
         This page updates when UnionBank confirms the payment.{record.attendee.email ? ` The receipt goes to ${record.attendee.email}.` : ""}
       </p>
+      {holdCancelled(record) ? <p className="m-0 text-sm text-[#A8131F]">This registration expired. A payment already sent can still be confirmed. Otherwise start again.</p> : null}
+      {record.paymentHoldUntil && !holdCancelled(record) ? <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">Pay by {formatHoldDeadline(record.paymentHoldUntil)} to lock this ticket.</p> : null}
       {session.qrDataUrl ? (
         <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
           <img src={session.qrDataUrl} alt="InstaPay QR" className="h-[220px] w-[220px]" />
@@ -2493,6 +2520,8 @@ function HitpayPending({
         {feeNote}
         {record.attendee.email ? `The receipt goes to ${record.attendee.email}. ` : ""}Coming back to this page does not by itself confirm the payment.
       </p>
+      {holdCancelled(record) ? <p className="m-0 text-sm text-[#A8131F]">This registration expired. A payment already sent can still be confirmed. Otherwise start again.</p> : null}
+      {record.paymentHoldUntil && !holdCancelled(record) ? <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">Pay by {formatHoldDeadline(record.paymentHoldUntil)} to lock this ticket.</p> : null}
       {session.channel === "qr" && session.qrDataUrl ? (
         <div className="flex flex-col items-center gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
           {chargedCents > 0 ? (
@@ -2607,6 +2636,8 @@ function PaynamicsPending({
           ? "Finish payment on Paynamics. This page does not confirm payment from a return link alone; settlement waits for a verified provider notification contract."
           : "Finish payment on Paynamics. This page checks with Paynamics every few seconds and when you tap check again — your return from Paynamics alone does not confirm payment."}
       </p>
+      {holdCancelled(record) ? <p className="m-0 text-sm text-[#A8131F]">This registration expired. A payment already sent can still be confirmed. Otherwise start again.</p> : null}
+      {record.paymentHoldUntil && !holdCancelled(record) ? <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">Pay by {formatHoldDeadline(record.paymentHoldUntil)} to lock this ticket.</p> : null}
       <div className="rounded-[14px] border border-[#E4E1DC] bg-white p-4 text-sm leading-normal text-[#3A3A40]">
         {current.status === "expired"
           ? "The Paynamics checkout window expired. Nothing was charged unless Paynamics confirms otherwise."
@@ -2791,7 +2822,9 @@ function Confirmed({ record, onManage, onPay, hideManage = false }: { record: St
         </h1>
         <p className="m-0 text-[15px] leading-snug text-[#FFE3E5]">
           {awaitingFirstPayment
-            ? `Your ${record.tierName} seat stays open until IBMC records the ${money(openCents, record.currency)}.`
+            ? record.paymentHoldUntil
+              ? `Pay ${money(openCents, record.currency)} by ${formatHoldDeadline(record.paymentHoldUntil)} to lock this ticket. After that, this registration is cancelled and you start again.`
+              : `Your ${record.tierName} seat stays open until IBMC records the ${money(openCents, record.currency)}.`
             : fullyPaid
               ? "June 16–17, 2027 · Newport Performing Arts Theater"
               : `Your ${record.tierName} registration is in. The remaining balance stays open until IBMC records it.`}
@@ -2799,7 +2832,9 @@ function Confirmed({ record, onManage, onPay, hideManage = false }: { record: St
       </div>
       <LevNote pose={fullyPaid ? "thumb" : "smile"} bars={fullyPaid ? Math.min(5, Math.max(paidCount, 1)) : awaitingFirstPayment ? 2 : Math.min(5, Math.max(paidCount, 1))} label={fullyPaid ? "Lev giving a thumbs up" : "Lev smiling"}>
         {awaitingFirstPayment
-          ? "Your seat is held. Payment is still open."
+          ? record.paymentHoldUntil
+            ? `Pay by ${formatHoldDeadline(record.paymentHoldUntil)} to lock this ticket.`
+            : "Your seat is held. Payment is still open."
           : fullyPaid
             ? "You're all paid up."
             : paidCount <= 1
@@ -3263,7 +3298,10 @@ function Manage({
     : { listed: 0, total: dueBase, shown: false };
   const remaining = record.totalCents - paidCents;
   const first = record.attendee.fullName.trim().split(/\s+/)[0];
-  const keepUntil = due && due.dueOn !== "on-registration" ? addDays(due.dueOn, 15) : null;
+  const expiredHold = holdCancelled(record);
+  const openingHold = Boolean(record.paymentHoldUntil) && paid.length === 0 && !expiredHold && record.currency === "PHP";
+  const holdDeadline = openingHold && record.paymentHoldUntil ? formatHoldDeadline(record.paymentHoldUntil) : "";
+  const keepUntil = !openingHold && !expiredHold && due && due.dueOn !== "on-registration" ? addDays(due.dueOn, 15) : null;
   const shownBadgeName = badgeName.trim() || "Your name";
   const shownBadgeCompany = badgeCompany.trim() || "Your company";
   return (
@@ -3282,9 +3320,13 @@ function Manage({
         bars={record.planStatus === "fully_paid" ? 5 : due ? 2 : Math.min(5, Math.max(paid.length, 1))}
         label={due ? "Lev with a payment reminder" : "Lev"}
       >
-        {record.planStatus === "fully_paid"
+        {expiredHold
+          ? "This registration expired. The first payment did not arrive within 24 hours. Start again to lock a ticket."
+          : record.planStatus === "fully_paid"
           ? "You're all paid up. Your QR ticket is ready."
-          : due && keepUntil && record.currency === "PHP" && record.plan === "installment"
+          : holdDeadline
+            ? `Pay by ${holdDeadline} to lock this ticket.`
+            : due && keepUntil && record.currency === "PHP" && record.plan === "installment"
             ? `Pay by ${formatLongDate(keepUntil)} to keep your ${money(record.totalCents, record.currency)} rate.`
             : due
               ? `Payment ${record.payments.indexOf(due) + 1} is due ${due.dueOn === "on-registration" ? "today" : formatLongDate(due.dueOn)}.`
@@ -3309,7 +3351,7 @@ function Manage({
             </div>
             <span className="font-archivo text-[26px] font-extrabold">{money(due.amountCents, record.currency)}</span>
           </div>
-          {record.currency === "PHP" && record.planStatus !== "fully_paid" ? (
+          {record.currency === "PHP" && record.planStatus !== "fully_paid" && !expiredHold ? (
             payingInstallment ? (
               <>
                 <h2 className="m-0 text-[17px] font-bold">Choose how to pay</h2>
@@ -3373,6 +3415,11 @@ function Manage({
           ) : (
             <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">UnionBank UPay collects peso payments. IBMC records this dollar payment separately.</p>
           )}
+          {holdDeadline ? (
+            <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">
+              This first payment locks the ticket. After {holdDeadline}, this registration is cancelled and you start again.
+            </p>
+          ) : null}
           {keepUntil && record.currency === "PHP" ? (
             <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">
               After {formatLongDate(keepUntil)}, your ticket moves to the Regular rate (₱18,000).

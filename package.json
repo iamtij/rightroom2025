@@ -10,6 +10,7 @@
     "start": "node --import ./instrument.js server.js",
     "reminders": "node server/reminders.js",
     "verify:reminders": "node server/verify-reminders.js",
+    "verify:payment-hold": "node server/verify-payment-hold.js",
     "verify:paynamics": "node server/verify-paynamics.js",
     "verify:staging-safe": "node server/verify-staging-safe.js",
     "verify:staging-early-payments": "node server/verify-staging-early-payments.js",

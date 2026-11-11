@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import QRCode from "qrcode";
-import { getRegistration, recordPayment } from "./registrations.js";
+import { getRegistration } from "./registrations.js";
+import { HOLD_EXPIRED_MESSAGE, expireRegistrationHold, refreshHeldRegistration, sessionStartedBeforeHold, settleOpeningPayment } from "./payment-hold.js";
 import { isChannelEnabled } from "./payment-channels.js";
 import { paymentCharge, settlementBaseCents } from "./convenience-fee.js";
 
@@ -211,12 +212,13 @@ function settleHitpay(db, row) {
     if (current.status === "paid") return getRegistration(db, current.registration_id);
     const existing = db.prepare("SELECT id FROM payments WHERE external_reference = ?").get(current.session_id);
     if (!existing) {
-      recordPayment(db, {
+      settleOpeningPayment(db, {
         registrationId: current.registration_id,
         installmentId: current.installment_id,
         amountCents: settlementBaseCents(current),
         method: `hitpay:${current.channel}`,
         externalReference: current.session_id,
+        sessionCreatedAt: current.created_at,
       });
     }
     db.prepare(`
@@ -367,6 +369,10 @@ export async function startHitpayPayment(db, registration, channel) {
   if (!setting) return { error: "Choose a payment option.", status: 400, registration };
   if (!isChannelEnabled(db, setting)) return { error: "That payment option is turned off.", status: 400, registration };
   if (registration.currency !== "PHP") return { error: "HitPay collects peso payments.", status: 400, registration };
+  const held = refreshHeldRegistration(db, registration);
+  registration = held.registration;
+  if (!registration) return { error: "Registration not found", status: 404 };
+  if (held.decision === "closed") return { error: "Registration is not payable", status: 400, registration };
   const due = dueInstallment(registration);
   const baseCents = due ? due.amount_cents - due.amount_paid_cents : 0;
   const quote = paymentCharge(db, registration, baseCents, { channel: setting });
@@ -383,7 +389,12 @@ export async function startHitpayPayment(db, registration, channel) {
     if (open) {
       const state = windowState(open);
       const sameCharge = open.amount_cents === quote.totalCents && (open.fee_cents || 0) === quote.feeCents;
-      if (sameCharge && (state === "open" || (channel === "qr" && state === "refresh"))) return await view(db, registration, open);
+      const reusable = sameCharge && (state === "open" || (channel === "qr" && state === "refresh"));
+      const startedInTime = held.decision !== "expired" || sessionStartedBeforeHold(registration, open.created_at);
+      if (reusable && startedInTime) return await view(db, registration, open);
+    }
+    if (held.decision === "expired") {
+      return { error: HOLD_EXPIRED_MESSAGE, status: 400, registration };
     }
     if (channel === "qr" && refreshesLeft(db, due.id) <= 0) {
       return { error: "This payment already used its QR codes. Nothing was charged.", status: 400, registration };
@@ -397,6 +408,7 @@ export async function startHitpayPayment(db, registration, channel) {
 export async function refreshHitpayPayment(db, sessionId) {
   const row = db.prepare("SELECT * FROM hitpay_payments WHERE session_id = ?").get(sessionId);
   if (!row) return { error: "Payment not found", status: 404 };
+  expireRegistrationHold(db, row.registration_id);
   const registration = getRegistration(db, row.registration_id);
   if (row.status === "paid" || row.gateway_status === "mismatch" || !row.gateway_ref) {
     return view(db, registration, row);
@@ -460,6 +472,15 @@ export async function refreshHitpayQr(db, sessionId) {
       return { error: "Nothing is due.", status: 400, registration: getRegistration(db, row.registration_id), hitpay: shown };
     }
     const latestRegistration = getRegistration(db, row.registration_id);
+    const held = refreshHeldRegistration(db, latestRegistration);
+    if (held.decision !== "allow") {
+      return {
+        error: held.decision === "expired" ? HOLD_EXPIRED_MESSAGE : "Registration is not payable",
+        status: 400,
+        registration: held.registration,
+        hitpay: shown,
+      };
+    }
     const baseCents = due.amount_cents - due.amount_paid_cents;
     const quote = paymentCharge(db, latestRegistration, baseCents, { channel: "hitpay_qr" });
     return await createHitpaySession(db, latestRegistration, due, quote.totalCents, "qr", current.id, quote.feeCents);
