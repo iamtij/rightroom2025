@@ -110,7 +110,7 @@ function titleCase(value: string) {
 }
 
 function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
-  return <input className={field} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />;
+  return <input className={`${field} w-full`} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />;
 }
 
 function DataTable({ columns, children, empty }: { columns: string[]; children: ReactNode; empty: string }) {
@@ -569,6 +569,19 @@ export function AdminSections() {
 
 const emptyRegistration = { fullName: "", email: "", mobile: "", business: "", industry: "", chapter: "", productCode: "first_mover", paymentPlan: "full" };
 
+function registrationListStatus(row: Registration) {
+  if (row.status === "cancelled") return "cancelled";
+  if (row.balanceCents === 0) return "fully_paid";
+  return "active";
+}
+
+function registrationStatusLabel(row: Registration) {
+  const status = registrationListStatus(row);
+  if (status === "fully_paid") return "Fully paid";
+  if (status === "cancelled") return "Cancelled";
+  return "Active";
+}
+
 function planPlace(row: Registration) {
   if (row.status === "cancelled") return "This registration is cancelled.";
   const total = row.payments.length;
@@ -612,7 +625,7 @@ function RegistrationView({
     ["Ticket", row.tierName],
     ["Reference", row.reference],
     ["Registered", row.registeredOn || ""],
-    ["Status", row.status === "cancelled" ? "Cancelled" : row.balanceCents === 0 ? "Fully paid" : "Active"],
+    ["Status", registrationStatusLabel(row)],
   ];
   return (
     <section className="flex flex-col gap-4 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
@@ -715,6 +728,7 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
   const [editor, setEditor] = useState<null | "add" | Registration>(null);
   const [viewing, setViewing] = useState<Registration | null>(null);
   const [editingDetails, setEditingDetails] = useState(false);
@@ -786,8 +800,11 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
     }
   }
 
-  const visible = rows.filter((row) => matches(query, [row.attendee.fullName, row.attendee.email, row.attendee.mobile, row.reference, row.tierName, row.attendee.business, row.attendee.chapter, row.status]));
-  const empty = rows.length === 0 ? "No registrations yet." : visible.length === 0 ? "No registrations match that search." : "";
+  const visible = rows.filter((row) => {
+    if (statusFilter && registrationListStatus(row) !== statusFilter) return false;
+    return matches(query, [row.attendee.fullName, row.attendee.email, row.attendee.mobile, row.reference, row.tierName, row.attendee.business, row.attendee.chapter, row.status]);
+  });
+  const empty = rows.length === 0 ? "No registrations yet." : visible.length === 0 ? "No registrations match those filters." : "";
 
   return (
     <section className="flex flex-col gap-3">
@@ -795,7 +812,19 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
         <h1 className="m-0 font-archivo text-[28px] font-extrabold">Registrations</h1>
         <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setDraft(emptyRegistration); }}>Add manual</button>
       </div>
-      <SearchBox value={query} onChange={setQuery} placeholder="Search name, email, mobile, or reference" />
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="min-w-[240px] flex-1">
+          <SearchBox value={query} onChange={setQuery} placeholder="Search name, email, mobile, or reference" />
+        </div>
+        <Field label="Status">
+          <select className={`${field} min-w-[160px]`} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+            <option value="">All</option>
+            <option value="active">Active</option>
+            <option value="fully_paid">Fully paid</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </Field>
+      </div>
       {editor === "add" ? (
         <form className="grid gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4 sm:grid-cols-2" onSubmit={addManual}>
           <Field label="Name"><input className={field} required value={draft.fullName} onChange={(event) => setDraft({ ...draft, fullName: event.target.value })} /></Field>
@@ -830,7 +859,7 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
             <td className={tdClass}>{row.tierName}</td>
             <td className={tdClass}>{money(row.totalCents - row.balanceCents, row.currency)}</td>
             <td className={tdClass}>{money(row.balanceCents, row.currency)}</td>
-            <td className={tdClass}>{row.status === "cancelled" ? "Cancelled" : row.balanceCents === 0 ? "Fully paid" : "Active"}</td>
+            <td className={tdClass}>{registrationStatusLabel(row)}</td>
             <td className={`${tdClass} whitespace-nowrap text-right`}>
               <button type="button" className={linkButton} onClick={() => openView(row)}>View</button>
             </td>
