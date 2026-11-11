@@ -75,7 +75,7 @@ export function dailyReportSubject(report) {
 function pill(text, active) {
   const color = active ? "#1E7B4F" : "#64666A";
   const background = active ? "#E6F2EC" : "#F2F2F2";
-  return `<span style="display:inline-block;font-size:12px;line-height:1.4;font-weight:700;color:${color};background:${background};padding:2px 8px;border-radius:999px;">${esc(text)}</span>`;
+  return `<span style="display:inline-block;font-size:12px;line-height:1.4;font-weight:700;color:${color};background:${background};padding:2px 8px;">${esc(text)}</span>`;
 }
 
 function tile(label, value, subHtml, alert) {
@@ -85,7 +85,7 @@ function tile(label, value, subHtml, alert) {
   const labelColor = alert ? "#CF2030" : "#64666A";
   const subColor = alert ? "#7A1A22" : "#64666A";
   return `<td width="50%" valign="top" style="width:50%;padding:6px;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${background}" style="background:${background};border:1px solid ${border};border-radius:14px;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="${background}" style="background:${background};border:1px solid ${border};">
       <tr><td style="padding:16px 16px 14px;font-family:${FONT};">
         <p style="margin:0;font-size:11px;line-height:1.3;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:${labelColor};">${esc(label)}</p>
         <p style="margin:8px 0 0;font-size:28px;line-height:1.05;font-weight:800;color:${accent};">${esc(value)}</p>
@@ -101,12 +101,12 @@ function metric(dash, value) {
 
 function chip(phase, label) {
   if (phase === "open") {
-    return `<span style="display:inline-block;font-size:12px;line-height:1.3;font-weight:700;padding:3px 8px;border-radius:999px;background:#E6F2EC;color:#1E7B4F;white-space:nowrap;">${esc(label)}</span>`;
+    return `<span style="display:inline-block;font-size:12px;line-height:1.3;font-weight:700;padding:3px 8px;background:#E6F2EC;color:#1E7B4F;white-space:nowrap;">${esc(label)}</span>`;
   }
   if (phase === "ended") {
-    return `<span style="display:inline-block;font-size:12px;line-height:1.3;font-weight:700;padding:3px 8px;border-radius:999px;background:#F2F2F2;color:#64666A;white-space:nowrap;">${esc(label)}</span>`;
+    return `<span style="display:inline-block;font-size:12px;line-height:1.3;font-weight:700;padding:3px 8px;background:#F2F2F2;color:#64666A;white-space:nowrap;">${esc(label)}</span>`;
   }
-  return `<span style="display:inline-block;font-size:12px;line-height:1.3;font-weight:700;padding:3px 8px;border-radius:999px;border:1px dashed #C8C8C8;color:#64666A;white-space:nowrap;">${esc(label)}</span>`;
+  return `<span style="display:inline-block;font-size:12px;line-height:1.3;font-weight:700;padding:3px 8px;border:1px dashed #C8C8C8;color:#64666A;white-space:nowrap;">${esc(label)}</span>`;
 }
 
 const TH = `font-family:${FONT};font-size:10px;line-height:1.3;font-weight:700;letter-spacing:0.04em;text-transform:uppercase;color:#64666A;text-align:left;padding:8px 5px;border-bottom:2px solid #000000;`;
@@ -150,21 +150,21 @@ function totalRow(label, totals, currency) {
 function bar(bands) {
   const active = bands.filter((band) => band.count > 0);
   if (!active.length) {
-    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;background:#F2F2F2;border-radius:6px;"><tr><td height="22" style="height:22px;font-size:0;line-height:22px;">&nbsp;</td></tr></table>`;
+    return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;background:#F2F2F2;"><tr><td height="22" style="height:22px;font-size:0;line-height:22px;">&nbsp;</td></tr></table>`;
   }
   const cells = active.map((band) => (
     `<td width="${band.width}%" height="22" bgcolor="${band.color}" style="width:${band.width}%;height:22px;background:${band.color};font-size:0;line-height:22px;">&nbsp;</td>`
   )).join("");
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;background:#F2F2F2;border-radius:6px;"><tr>${cells}</tr></table>`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;background:#F2F2F2;"><tr>${cells}</tr></table>`;
 }
 
 function healthTable(report) {
-  const rows = report.health.bands.map((band) => {
+  const rows = report.health.bands.filter((band) => band.count != null).map((band) => {
     const background = band.key === "day15" ? "#EFEFEF" : band.late ? "#FBEAEB" : "#FFFFFF";
     const amount = band.late ? (moneyLine(band.overdue) || "–") : "–";
     const amountStyle = band.late && amount !== "–" ? "color:#CF2030;font-weight:700;" : "";
     return `<tr>
-      <td style="${TD}background:${background};"><span style="display:inline-block;width:12px;height:12px;border-radius:3px;background:${band.color};margin-right:8px;">&nbsp;</span>${esc(band.label)}</td>
+      <td style="${TD}background:${background};"><span style="display:inline-block;width:12px;height:12px;background:${band.color};margin-right:8px;">&nbsp;</span>${esc(band.label)}</td>
       <td align="right" style="${TD}background:${background};text-align:right;">${band.count == null ? "–" : band.count.toLocaleString("en-US")}</td>
       <td align="right" style="${TD}background:${background};text-align:right;${amountStyle}">${esc(amount)}</td>
     </tr>`;
@@ -196,7 +196,7 @@ function atRisk(report) {
   const more = report.health.atRiskHidden > 0
     ? `<p style="margin:8px 0 0;font-size:13px;color:#64666A;">And ${countLabel(report.health.atRiskHidden, "more registration", "more registrations")}.</p>`
     : "";
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;border:2px solid #CF2030;border-radius:14px;">
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:16px;border:2px solid #CF2030;">
     <tr><td bgcolor="#CF2030" style="background:#CF2030;padding:12px 16px;font-family:${FONT};">
       <p style="margin:0;font-size:15px;line-height:1.3;font-weight:800;color:#FFFFFF;">Reaches the Regular price within 3 days</p>
       <p style="margin:4px 0 0;font-size:13px;line-height:1.4;color:#FFFFFF;">${esc(summary)}</p>
@@ -228,7 +228,7 @@ function methodsBlock(report) {
     return `<tr>
       <td width="118" valign="middle" style="width:118px;padding:7px 8px 7px 0;font-family:${FONT};font-size:14px;color:#000000;">${esc(method.label)}</td>
       <td valign="middle" style="padding:7px 0;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#F2F2F2" style="background:#F2F2F2;border-radius:999px;"><tr>${fill}</tr></table>
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#F2F2F2" style="background:#F2F2F2;"><tr>${fill}</tr></table>
       </td>
       <td width="132" valign="middle" align="right" style="width:132px;padding:7px 0 7px 8px;font-family:${FONT};font-size:14px;line-height:1.3;text-align:right;color:#000000;">${peso(method.cents)}<br><span style="font-size:12px;color:#64666A;">${method.percent}%${method.count == null ? "" : ` · ${countLabel(method.count, "payment")}`}</span></td>
     </tr>`;
@@ -240,7 +240,7 @@ function methodsBlock(report) {
 }
 
 function card(title, hint, body) {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="background:#FFFFFF;border:1px solid #C8C8C8;border-radius:16px;">
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="background:#FFFFFF;border:1px solid #C8C8C8;">
     <tr><td style="padding:22px;font-family:${FONT};color:#000000;">
       <h2 style="margin:0;font-family:${FONT};font-size:20px;line-height:1.2;font-weight:800;color:#000000;">${esc(title)}</h2>
       ${hint ? `<p style="margin:4px 0 0;font-size:13px;line-height:1.45;color:#64666A;">${esc(hint)}</p>` : ""}
@@ -276,7 +276,138 @@ function paymentStripLabel(report) {
   return parts.join(" · ");
 }
 
+function countCell(value) {
+  return value == null ? "–" : Number(value).toLocaleString("en-US");
+}
+
+function renderCountReport(report) {
+  const clock = clockLabel(report.asOf);
+  const covers = report.coversLabel || `${shortStamp(report.windowStart)} to ${shortStamp(report.asOf)}`;
+  const subject = `IBMC 2027 Report · ${clock.dateLine.replace(/^[A-Za-z]+, /, "")}`;
+  const preview = `${report.seatsConfirmed.toLocaleString("en-US")} seats confirmed · ${report.cancelledToDate.toLocaleString("en-US")} cancelled · ${report.roster.total.toLocaleString("en-US")} on the roster`;
+  const ticketRows = report.tickets.map((ticket) => {
+    const dash = ticket.showDash;
+    const color = ticket.phase === "later" && dash ? "#64666A" : "#000000";
+    const cell = `${TD}color:${color};`;
+    return `<tr>
+      <td style="${cell}font-weight:700;">${esc(ticket.name)}</td>
+      <td style="${cell}">${chip(ticket.phase, ticket.phaseLabel)}</td>
+      <td align="right" style="${cell}text-align:right;">${esc(countCell(dash ? null : ticket.seats))}</td>
+      <td align="right" style="${cell}text-align:right;">${esc(countCell(dash ? null : ticket.cancelled))}</td>
+    </tr>`;
+  }).join("");
+  const healthRows = report.health.bands.filter((band) => band.count != null).map((band) => {
+    const background = band.key === "day15" ? "#EFEFEF" : band.late ? "#FBEAEB" : "#FFFFFF";
+    return `<tr>
+      <td style="${TD}background:${background};"><span style="display:inline-block;width:12px;height:12px;background:${band.color};margin-right:8px;">&nbsp;</span>${esc(band.label)}</td>
+      <td align="right" style="${TD}background:${background};text-align:right;">${band.count == null ? "–" : band.count.toLocaleString("en-US")}</td>
+    </tr>`;
+  }).join("");
+  const notes = report.notes.map((note) => `<li style="margin:0 0 6px;font-size:14px;line-height:1.45;">${esc(note)}</li>`).join("");
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<meta name="supported-color-schemes" content="light">
+<title>${esc(subject)}</title>
+</head>
+<body style="margin:0;padding:0;background:#F2F2F2;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#F2F2F2" style="background:#F2F2F2;">
+  <tr><td align="center" style="padding:24px 12px 32px;">
+    <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="width:100%;max-width:680px;">
+      <tr><td style="padding-bottom:16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#000000" style="background:#000000;">
+          <tr><td style="padding:24px 28px 22px;font-family:${FONT};color:#FFFFFF;">
+            <p style="margin:0;font-size:12px;line-height:1.4;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#C8C8C8;">BNI Philippines · Report</p>
+            <h1 style="margin:8px 0 0;font-family:${FONT};font-size:28px;line-height:1.15;font-weight:800;color:#FFFFFF;">IBMC 2027 Report</h1>
+            <p style="margin:8px 0 0;font-size:15px;line-height:1.4;font-weight:700;color:#FFFFFF;">As of ${esc(clock.dateLine)} · ${esc(clock.timeLine)} (PHT)</p>
+            <p style="margin:4px 0 0;font-size:13px;line-height:1.4;color:#C8C8C8;">Covers ${esc(covers)}</p>
+          </td></tr>
+        </table>
+      </td></tr>
+      <tr><td style="padding-bottom:16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            ${tile("Seats confirmed", report.seatsConfirmed.toLocaleString("en-US"), `${pill(`+${report.activity.registrations.toLocaleString("en-US")} today`, report.activity.registrations > 0)} ${esc(`${report.cancelledToDate.toLocaleString("en-US")} cancelled to date`)}`, false)}
+            ${tile("First movers", report.firstMovers.toLocaleString("en-US"), esc(report.firstMoverNote), false)}
+          </tr>
+        </table>
+      </td></tr>
+      <tr><td style="padding-bottom:16px;">
+        ${card("Last 24 hours", "", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;border:1px solid #C8C8C8;"><tr>
+          <td width="33%" valign="top" style="width:33%;padding:14px 10px;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;">${report.activity.registrations.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">New registrations</p></td>
+          <td width="33%" valign="top" style="width:33%;padding:14px 10px;border-left:1px solid #C8C8C8;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;">${report.activity.cancellations.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">Cancellations</p></td>
+          <td width="34%" valign="top" style="width:34%;padding:14px 10px;border-left:1px solid #C8C8C8;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;color:${report.activity.reached15 > 0 ? "#CF2030" : "#000000"};">${report.activity.reached15.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">Moved to Regular</p></td>
+        </tr></table>`)}
+      </td></tr>
+      <tr><td style="padding-bottom:16px;">
+        ${card("By ticket", "Every tier is listed from day one, so the table keeps its shape.", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border-collapse:collapse;">
+          <thead><tr>
+            <th align="left" style="${TH}">Ticket</th>
+            <th align="left" style="${TH}">Status</th>
+            <th align="right" style="${TH}text-align:right;">Seats</th>
+            <th align="right" style="${TH}text-align:right;">Cancelled</th>
+          </tr></thead>
+          <tbody>${ticketRows}</tbody>
+        </table>`)}
+      </td></tr>
+      <tr><td style="padding-bottom:16px;">
+        ${card("Installment health", report.healthHint, `${bar(report.health.bands)}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border-collapse:collapse;">
+          <thead><tr>
+            <th align="left" style="${TH}">Status</th>
+            <th align="right" style="${TH}text-align:right;">Plans</th>
+          </tr></thead>
+          <tbody>${healthRows}</tbody>
+        </table>${atRisk(report)}`)}
+      </td></tr>
+      <tr><td style="padding-bottom:16px;">
+        ${card("Roster", "Members on the chapter roster.", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;border:1px solid #C8C8C8;"><tr>
+          <td width="50%" valign="top" style="width:50%;padding:14px 10px;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;">${report.roster.total.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">On the roster · ${esc(report.roster.updated)} updated</p></td>
+          <td width="50%" valign="top" style="width:50%;padding:14px 10px;border-left:1px solid #C8C8C8;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;">${report.roster.firstMovers.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">First movers on the roster</p></td>
+        </tr></table>`)}
+      </td></tr>
+      <tr><td style="padding-bottom:16px;">
+        ${card("Notes", "", `<ul style="margin:12px 0 0;padding-left:18px;">${notes}</ul>`)}
+      </td></tr>
+      <tr><td style="padding:4px 8px 0;font-family:${FONT};font-size:12px;line-height:1.5;color:#64666A;text-align:center;">
+        Sample for review · No sales figures · Figures as of the time above
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>`;
+  const text = [
+    "IBMC 2027 Report",
+    `As of ${clock.dateLine} · ${clock.timeLine} (PHT)`,
+    `Covers ${covers}`,
+    "",
+    `Seats confirmed: ${report.seatsConfirmed} (+${report.activity.registrations} today, ${report.cancelledToDate} cancelled to date)`,
+    `First movers: ${report.firstMovers} (${report.firstMoverNote})`,
+    `Roster: ${report.roster.total} on the roster, ${report.roster.updated} updated, ${report.roster.delayed} delayed`,
+    `First movers on the roster: ${report.roster.firstMovers}`,
+    "",
+    "Last 24 hours",
+    `New registrations: ${report.activity.registrations}`,
+    `Cancellations: ${report.activity.cancellations}`,
+    `Moved to Regular: ${report.activity.reached15}`,
+    "",
+    "By ticket",
+    ...report.tickets.map((ticket) => `${ticket.name} · ${ticket.phaseLabel} · ${ticket.showDash ? "no seats yet" : `${ticket.seats} seats · ${ticket.cancelled} cancelled`}`),
+    "",
+    report.healthHint,
+    ...report.health.bands.filter((band) => band.count != null).map((band) => `${band.label}: ${band.count}`),
+    "",
+    "Notes",
+    ...report.notes.map((note) => `- ${note}`),
+  ].join("\n");
+  return { subject, html, text };
+}
+
 export function renderDailyReport(report) {
+  if (report.omitSales) return renderCountReport(report);
   const subject = dailyReportSubject(report);
   const clock = clockLabel(report.asOf);
   const covers = report.coversLabel || `${shortStamp(report.windowStart)} to ${shortStamp(report.asOf)}`;
@@ -321,12 +452,11 @@ export function renderDailyReport(report) {
 <title>${esc(subject)}</title>
 </head>
 <body style="margin:0;padding:0;background:#F2F2F2;">
-<div style="display:none;max-height:0;overflow:hidden;mso-hide:all;color:#F2F2F2;">${esc(preview)}&#847;&zwnj;&nbsp;&#847;&zwnj;&nbsp;</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#F2F2F2" style="background:#F2F2F2;">
   <tr><td align="center" style="padding:24px 12px 32px;">
     <table role="presentation" width="680" cellpadding="0" cellspacing="0" style="width:100%;max-width:680px;">
       <tr><td style="padding-bottom:16px;">
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#000000" style="background:#000000;border-radius:16px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#000000" style="background:#000000;">
           <tr><td style="padding:24px 28px 18px;font-family:${FONT};color:#FFFFFF;">
             <p style="margin:0;font-size:12px;line-height:1.4;font-weight:700;letter-spacing:0.16em;text-transform:uppercase;color:#C8C8C8;">BNI Philippines · Sales Report</p>
             <h1 style="margin:8px 0 0;font-family:${FONT};font-size:28px;line-height:1.15;font-weight:800;color:#FFFFFF;">IBMC 2027 Sales Report</h1>
@@ -355,7 +485,7 @@ export function renderDailyReport(report) {
         </table>
       </td></tr>
       ${report.screen ? `<tr><td style="padding-bottom:16px;">
-        ${card("Roster", "Same counts as the dashboard.", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;border:1px solid #C8C8C8;border-radius:12px;"><tr>
+        ${card("Roster", "Same counts as the dashboard.", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;border:1px solid #C8C8C8;"><tr>
           <td width="25%" valign="top" style="width:25%;padding:14px 10px;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;">${report.screen.rosterTotal.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">On the roster</p></td>
           <td width="25%" valign="top" style="width:25%;padding:14px 10px;border-left:1px solid #C8C8C8;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;">${esc(report.screen.updated)}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">Updated</p></td>
           <td width="25%" valign="top" style="width:25%;padding:14px 10px;border-left:1px solid #C8C8C8;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;">${esc(report.screen.delayed)}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">Delayed</p></td>
@@ -365,7 +495,7 @@ export function renderDailyReport(report) {
       <tr><td style="padding-bottom:16px;">
         ${card("By ticket", "Every confirmed signup is a First Mover.", `<p style="margin:14px 0 0;font-size:15px;line-height:1.45;">First Mover is open through Nov 30. <b>${report.screen.confirmed.toLocaleString("en-US")} confirmed</b>, ${report.screen.cancelled.toLocaleString("en-US")} cancelled. Collected ${peso(report.screen.collectedCents)}. Still due ${peso(report.screen.stillDueCents)}.</p>`)}
       </td></tr>` : `<tr><td style="padding-bottom:16px;">
-        ${card("Last 24 hours", "", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;border:1px solid #C8C8C8;border-radius:12px;"><tr>
+        ${card("Last 24 hours", "", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;border:1px solid #C8C8C8;"><tr>
           <td width="25%" valign="top" style="width:25%;padding:14px 10px;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;">${report.activity.registrations.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">New registrations</p></td>
           <td width="25%" valign="top" style="width:25%;padding:14px 10px;border-left:1px solid #C8C8C8;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;">${report.activity.paymentCount == null ? "–" : report.activity.paymentCount.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">${esc(paymentStripLabel(report))}</p></td>
           <td width="25%" valign="top" style="width:25%;padding:14px 10px;border-left:1px solid #C8C8C8;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;">${report.activity.cancellations.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">Cancellations</p></td>
