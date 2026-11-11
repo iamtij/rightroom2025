@@ -248,7 +248,7 @@ function chapterSection(chapters) {
     <td align="right" style="${TD}text-align:right;">${chapter.count.toLocaleString("en-US")}</td>
   </tr>`).join("");
   return `<tr><td style="padding-bottom:16px;">
-    ${card("By chapter", "Confirmed seats only, highest first.", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border-collapse:collapse;">
+    ${card("By chapter", "", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border-collapse:collapse;">
       <thead><tr>
         <th align="left" style="${TH}">Chapter</th>
         <th align="right" style="${TH}text-align:right;">Seats</th>
@@ -317,7 +317,6 @@ function renderCountReport(report) {
       <td style="${cell}font-weight:700;">${esc(ticket.name)}</td>
       <td style="${cell}">${chip(ticket.phase, ticket.phaseLabel)}</td>
       <td align="right" style="${cell}text-align:right;">${esc(countCell(dash ? null : ticket.seats))}</td>
-      <td align="right" style="${cell}text-align:right;">${esc(countCell(dash ? null : ticket.cancelled))}</td>
     </tr>`;
   }).join("");
   const healthRows = report.health.bands.filter((band) => band.count != null).map((band) => {
@@ -336,6 +335,9 @@ function renderCountReport(report) {
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
 <title>${esc(subject)}</title>
+<style type="text/css">
+  table, td, p, h1, h2, div { overflow: visible !important; max-height: none !important; }
+</style>
 </head>
 <body style="margin:0;padding:0;background:#F2F2F2;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#F2F2F2" style="background:#F2F2F2;">
@@ -354,16 +356,15 @@ function renderCountReport(report) {
       <tr><td style="padding-bottom:16px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
           <tr>
-            ${tile("Seats confirmed", report.seatsConfirmed.toLocaleString("en-US"), `${pill(`+${report.activity.registrations.toLocaleString("en-US")} today`, report.activity.registrations > 0)} ${esc(`${report.cancelledToDate.toLocaleString("en-US")} cancelled to date`)}`, false)}
-            ${tile("First movers", report.firstMovers.toLocaleString("en-US"), esc(report.firstMoverNote), false)}
+            ${tile("Seats confirmed", report.seatsConfirmed.toLocaleString("en-US"), pill(`+${report.activity.registrations.toLocaleString("en-US")} today`, report.activity.registrations > 0), false)}
+            ${tile("First movers", report.firstMovers.toLocaleString("en-US"), esc("Confirmed seats"), false)}
           </tr>
         </table>
       </td></tr>
       <tr><td style="padding-bottom:16px;">
         ${card("Last 24 hours", "", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:14px;border:1px solid #C8C8C8;"><tr>
-          <td width="33%" valign="top" style="width:33%;padding:14px 10px;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;">${report.activity.registrations.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">New registrations</p></td>
-          <td width="33%" valign="top" style="width:33%;padding:14px 10px;border-left:1px solid #C8C8C8;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;">${report.activity.cancellations.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">Cancellations</p></td>
-          <td width="34%" valign="top" style="width:34%;padding:14px 10px;border-left:1px solid #C8C8C8;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;color:${report.activity.reached15 > 0 ? "#CF2030" : "#000000"};">${report.activity.reached15.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">Moved to Regular</p></td>
+          <td width="50%" valign="top" style="width:50%;padding:14px 10px;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;">${report.activity.registrations.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">New registrations</p></td>
+          <td width="50%" valign="top" style="width:50%;padding:14px 10px;border-left:1px solid #C8C8C8;font-family:${FONT};"><p style="margin:0;font-size:22px;line-height:1.1;font-weight:800;color:${report.activity.reached15 > 0 ? "#CF2030" : "#000000"};">${report.activity.reached15.toLocaleString("en-US")}</p><p style="margin:4px 0 0;font-size:13px;line-height:1.35;color:#64666A;">Moved to Regular</p></td>
         </tr></table>`)}
       </td></tr>
       <tr><td style="padding-bottom:16px;">
@@ -372,7 +373,6 @@ function renderCountReport(report) {
             <th align="left" style="${TH}">Ticket</th>
             <th align="left" style="${TH}">Status</th>
             <th align="right" style="${TH}text-align:right;">Seats</th>
-            <th align="right" style="${TH}text-align:right;">Cancelled</th>
           </tr></thead>
           <tbody>${ticketRows}</tbody>
         </table>`)}
@@ -409,18 +409,17 @@ function renderCountReport(report) {
     `As of ${clock.dateLine} · ${clock.timeLine} (PHT)`,
     `Covers ${covers}`,
     "",
-    `Seats confirmed: ${report.seatsConfirmed} (+${report.activity.registrations} today, ${report.cancelledToDate} cancelled to date)`,
-    `First movers: ${report.firstMovers} (${report.firstMoverNote})`,
+    `Seats confirmed: ${report.seatsConfirmed} (+${report.activity.registrations} today)`,
+    `First movers: ${report.firstMovers}`,
     `Roster: ${report.roster.total} on the roster, ${report.roster.updated} updated, ${report.roster.delayed} delayed`,
     `First movers on the roster: ${report.roster.firstMovers}`,
     "",
     "Last 24 hours",
     `New registrations: ${report.activity.registrations}`,
-    `Cancellations: ${report.activity.cancellations}`,
     `Moved to Regular: ${report.activity.reached15}`,
     "",
     "By ticket",
-    ...report.tickets.map((ticket) => `${ticket.name} · ${ticket.phaseLabel} · ${ticket.showDash ? "no seats yet" : `${ticket.seats} seats · ${ticket.cancelled} cancelled`}`),
+    ...report.tickets.map((ticket) => `${ticket.name} · ${ticket.phaseLabel} · ${ticket.showDash ? "no seats yet" : `${ticket.seats} seats`}`),
     "",
     "By chapter",
     ...(report.chapters?.length ? report.chapters.map((chapter) => `${chapter.name}: ${chapter.count}`) : ["None"]),
@@ -479,6 +478,9 @@ export function renderDailyReport(report) {
 <meta name="color-scheme" content="light">
 <meta name="supported-color-schemes" content="light">
 <title>${esc(subject)}</title>
+<style type="text/css">
+  table, td, p, h1, h2, div { overflow: visible !important; max-height: none !important; }
+</style>
 </head>
 <body style="margin:0;padding:0;background:#F2F2F2;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#F2F2F2" style="background:#F2F2F2;">
@@ -504,7 +506,7 @@ export function renderDailyReport(report) {
             ${tile("Collected", peso(report.screen.collectedCents), esc("Confirmed registrations, pesos"), false)}
             ${tile("Still due", peso(report.screen.stillDueCents), esc(report.screen.stillDueNote), true)}
           </tr>` : `<tr>
-            ${tile("Seats confirmed", report.seatsConfirmed.toLocaleString("en-US"), `${pill(`+${report.activity.registrations.toLocaleString("en-US")} today`, report.activity.registrations > 0)} ${esc(`${report.cancelledToDate.toLocaleString("en-US")} cancelled to date`)}`, false)}
+            ${tile("Seats confirmed", report.seatsConfirmed.toLocaleString("en-US"), pill(`+${report.activity.registrations.toLocaleString("en-US")} today`, report.activity.registrations > 0), false)}
             ${tile("Collected", peso(report.collected.PHP), collectedSub(report), false)}
           </tr>
           <tr>
@@ -586,7 +588,7 @@ function renderText(report, clock, covers) {
     `As of ${clock.dateLine} · ${clock.timeLine} (PHT)`,
     `Covers ${covers}`,
     "",
-    `Seats confirmed: ${report.seatsConfirmed.toLocaleString("en-US")} (+${report.activity.registrations.toLocaleString("en-US")} today, ${report.cancelledToDate.toLocaleString("en-US")} cancelled to date)`,
+    `Seats confirmed: ${report.seatsConfirmed.toLocaleString("en-US")} (+${report.activity.registrations.toLocaleString("en-US")} today)`,
     `Collected: ${peso(report.collected.PHP)} (+${peso(report.activity.collected.PHP || 0)} today)${report.collected.USD ? `, plus ${formatMoney(report.collected.USD, "USD")}` : ""}`,
     `Scheduled: ${peso(report.scheduled.PHP)}`,
     `Overdue: ${peso(report.overdue.PHP)} · ${overdueSub(report)}`,
