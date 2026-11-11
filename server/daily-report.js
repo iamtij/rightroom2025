@@ -185,7 +185,7 @@ export function buildDailyReport(db, asOf = new Date()) {
     SELECT
       p.code, p.name, p.currency, p.full_price_cents, p.installment_total_cents, p.sales_start, p.sales_end,
       SUM(CASE WHEN r.id IS NOT NULL AND r.status != 'cancelled' THEN 1 ELSE 0 END) AS seats,
-      SUM(CASE WHEN r.status != 'cancelled' AND r.fully_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS paid_full,
+      SUM(CASE WHEN r.status = 'confirmed' AND r.fully_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS paid_full,
       SUM(CASE WHEN r.status = 'confirmed' AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN 1 ELSE 0 END) AS installment,
       COALESCE(SUM(CASE WHEN r.status != 'cancelled' THEN (
         SELECT COALESCE(SUM(pay.amount_cents), 0) FROM payments pay
@@ -369,6 +369,7 @@ export function buildDailyReport(db, asOf = new Date()) {
   }
 
   const late15 = bandState.get("day15").count;
+  const fullyPaid = tickets.reduce((sum, ticket) => sum + ticket.paidFull, 0);
   const chapters = db.prepare(`
     SELECT TRIM(r.chapter) AS name, COUNT(*) AS count
     FROM registrations r
@@ -385,6 +386,7 @@ export function buildDailyReport(db, asOf = new Date()) {
     windowStart,
     today,
     seatsConfirmed,
+    fullyPaid,
     cancelledToDate,
     collected,
     scheduled,

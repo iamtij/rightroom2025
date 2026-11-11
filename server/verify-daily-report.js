@@ -119,6 +119,9 @@ assert.deepEqual(report.health.bands.map((band) => [band.key, band.count]), [
   ["day15", 1],
 ]);
 assert.equal(report.health.atRisk.length, 1);
+assert.equal(report.tickets.find((ticket) => ticket.code === "first_mover").paidFull, 1);
+assert.equal(report.fullyPaid, 1);
+assert.equal(report.totals.PHP.paidFull, 1);
 assert.deepEqual(report.chapters, [{ name: "BNI Legacy", count: 1 }]);
 assert.equal(report.health.atRisk[0].name, "Joy Dizon");
 assert.equal(report.health.atRisk[0].chapter, "BNI Legacy");

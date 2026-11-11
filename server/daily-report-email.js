@@ -317,6 +317,7 @@ function renderCountReport(report) {
       <td style="${cell}font-weight:700;">${esc(ticket.name)}</td>
       <td style="${cell}">${chip(ticket.phase, ticket.phaseLabel)}</td>
       <td align="right" style="${cell}text-align:right;">${esc(countCell(dash ? null : ticket.seats))}</td>
+      <td align="right" style="${cell}text-align:right;">${esc(countCell(dash ? null : ticket.paidFull))}</td>
     </tr>`;
   }).join("");
   const healthRows = report.health.bands.filter((band) => band.count != null).map((band) => {
@@ -359,6 +360,9 @@ function renderCountReport(report) {
             ${tile("Seats confirmed", report.seatsConfirmed.toLocaleString("en-US"), pill(`+${report.activity.registrations.toLocaleString("en-US")} today`, report.activity.registrations > 0), false)}
             ${tile("First movers", report.firstMovers.toLocaleString("en-US"), esc("Confirmed seats"), false)}
           </tr>
+          <tr>
+            ${tile("Fully paid", (report.fullyPaid ?? 0).toLocaleString("en-US"), esc("Confirmed seats, all tickets"), false)}
+          </tr>
         </table>
       </td></tr>
       <tr><td style="padding-bottom:16px;">
@@ -373,6 +377,7 @@ function renderCountReport(report) {
             <th align="left" style="${TH}">Ticket</th>
             <th align="left" style="${TH}">Status</th>
             <th align="right" style="${TH}text-align:right;">Seats</th>
+            <th align="right" style="${TH}text-align:right;">Fully paid</th>
           </tr></thead>
           <tbody>${ticketRows}</tbody>
         </table>`)}
@@ -410,7 +415,7 @@ function renderCountReport(report) {
     `Covers ${covers}`,
     "",
     `Seats confirmed: ${report.seatsConfirmed} (+${report.activity.registrations} today)`,
-    `First movers: ${report.firstMovers}`,
+    `Fully paid: ${report.fullyPaid ?? 0}`,
     `Roster: ${report.roster.total} on the roster, ${report.roster.updated} updated, ${report.roster.delayed} delayed`,
     `First movers on the roster: ${report.roster.firstMovers}`,
     "",
@@ -419,7 +424,7 @@ function renderCountReport(report) {
     `Moved to Regular: ${report.activity.reached15}`,
     "",
     "By ticket",
-    ...report.tickets.map((ticket) => `${ticket.name} · ${ticket.phaseLabel} · ${ticket.showDash ? "no seats yet" : `${ticket.seats} seats`}`),
+    ...report.tickets.map((ticket) => `${ticket.name} · ${ticket.phaseLabel} · ${ticket.showDash ? "no seats yet" : `${ticket.seats} seats · ${ticket.paidFull || 0} fully paid`}`),
     "",
     "By chapter",
     ...(report.chapters?.length ? report.chapters.map((chapter) => `${chapter.name}: ${chapter.count}`) : ["None"]),
@@ -507,10 +512,13 @@ export function renderDailyReport(report) {
             ${tile("Still due", peso(report.screen.stillDueCents), esc(report.screen.stillDueNote), true)}
           </tr>` : `<tr>
             ${tile("Seats confirmed", report.seatsConfirmed.toLocaleString("en-US"), pill(`+${report.activity.registrations.toLocaleString("en-US")} today`, report.activity.registrations > 0), false)}
-            ${tile("Collected", peso(report.collected.PHP), collectedSub(report), false)}
+            ${tile("Fully paid", (report.fullyPaid ?? 0).toLocaleString("en-US"), esc("Confirmed seats, all tickets"), false)}
           </tr>
           <tr>
+            ${tile("Collected", peso(report.collected.PHP), collectedSub(report), false)}
             ${tile("Scheduled", peso(report.scheduled.PHP), esc(report.scheduledNote || `Future installments, not late${scheduledUsd}`), false)}
+          </tr>
+          <tr>
             ${tile("Overdue", peso(report.overdue.PHP), overdueSub(report), report.overdueAlert)}
           </tr>`}
         </table>
@@ -589,6 +597,7 @@ function renderText(report, clock, covers) {
     `Covers ${covers}`,
     "",
     `Seats confirmed: ${report.seatsConfirmed.toLocaleString("en-US")} (+${report.activity.registrations.toLocaleString("en-US")} today)`,
+    `Fully paid: ${(report.fullyPaid ?? 0).toLocaleString("en-US")}`,
     `Collected: ${peso(report.collected.PHP)} (+${peso(report.activity.collected.PHP || 0)} today)${report.collected.USD ? `, plus ${formatMoney(report.collected.USD, "USD")}` : ""}`,
     `Scheduled: ${peso(report.scheduled.PHP)}`,
     `Overdue: ${peso(report.overdue.PHP)} · ${overdueSub(report)}`,
