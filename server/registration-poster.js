@@ -85,6 +85,7 @@ export function buildRegistrationPoster(db, asOf = new Date()) {
       AND r.payment_hold_cancelled_at IS NULL
       AND p.code NOT LIKE ?
       AND TRIM(COALESCE(r.chapter, '')) != ''
+      AND (r.fully_paid_at IS NOT NULL OR (r.payment_plan = 'installment' AND r.fully_paid_at IS NULL))
     GROUP BY TRIM(r.chapter)
     ORDER BY COUNT(*) DESC, TRIM(r.chapter)
   `).all(TEST_PRODUCT).map((row) => ({ name: row.name, count: Number(row.count) }));
@@ -117,8 +118,8 @@ export function buildRegistrationPoster(db, asOf = new Date()) {
   };
 }
 
-export function renderRegistrationPoster(poster) {
-  const jpeg = renderPosterJpeg(poster);
+export async function renderRegistrationPoster(poster) {
+  const jpeg = await renderPosterJpeg(poster);
   const subject = `IBMC 2027 Registration update · ${poster.subjectDate}`;
   const html = `<!doctype html>
 <html lang="en">

@@ -529,7 +529,7 @@ export async function runRegistrationPoster(db, now = new Date(), options = {}) 
 
   const asOf = force ? now : atManila(clock.date, 9, 0);
   const reportOn = manilaParts(asOf).date;
-  const rendered = renderRegistrationPoster(buildRegistrationPoster(db, asOf));
+  const rendered = await renderRegistrationPoster(buildRegistrationPoster(db, asOf));
   const results = [];
   for (let index = 0; index < recipients.length; index += 1) {
     const recipient = recipients[index];

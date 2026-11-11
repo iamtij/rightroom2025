@@ -188,7 +188,7 @@ assert.equal(posterModel.daysLeft, 19);
 assert.equal(posterModel.bannerTitle, "First Mover · ₱12,000");
 assert.match(posterModel.bannerNote, /Ends Nov 30 · Early Bird is ₱15,000/);
 assert.deepEqual(posterModel.chapters, [{ name: "BNI Legacy", count: 1 }]);
-const poster = renderRegistrationPoster(posterModel);
+const poster = await renderRegistrationPoster(posterModel);
 assert.equal(poster.subject, "IBMC 2027 Registration update · Nov 11, 2026");
 assert.equal(poster.filename, "IBMC-2027-registration-update.jpg");
 assert.equal(poster.jpeg[0], 0xff);
