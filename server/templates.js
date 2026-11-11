@@ -1,7 +1,15 @@
 import QRCode from "qrcode";
-import { daysLabel, formatLongDate, formatMoney } from "./time.js";
+import { daysLabel, formatDateTimeManila, formatLongDate, formatMoney } from "./time.js";
 
 const EVENT = "June 16–17, 2027 · Newport Performing Arts Theater, Pasay City";
+const EVENT_LOGO = "https://ibmcph.com/assets/ibmc-2027-logo.png?v=3";
+
+function brandHeader() {
+  return `<tr><td style="background:#0E0E10;padding:22px 32px 18px;">
+          <img src="${EVENT_LOGO}" width="320" height="89" alt="IBMC 2027" style="display:block;border:0;width:320px;max-width:100%;height:auto;">
+        </td></tr>
+        <tr><td style="height:4px;background:#D0202E;font-size:0;line-height:0;">&nbsp;</td></tr>`;
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -22,11 +30,7 @@ function shell({ headline, intro, body, action }) {
   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F6F4F1;">
     <tr><td align="center" style="padding:28px 16px;">
       <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="width:100%;max-width:560px;">
-        <tr><td style="background:#0E0E10;padding:28px 32px;">
-          <div style="font-family:Arial,sans-serif;font-size:22px;font-weight:800;letter-spacing:0.04em;color:#FFFFFF;">IBMC <span style="color:#FF4D5A;">2027</span></div>
-          <div style="margin-top:8px;font-family:Arial,sans-serif;font-size:12px;font-weight:700;letter-spacing:0.18em;color:#FF4D5A;">AMPLIFY</div>
-        </td></tr>
-        <tr><td style="height:4px;background:#D0202E;font-size:0;line-height:0;">&nbsp;</td></tr>
+        ${brandHeader()}
         <tr><td style="background:#FFFFFF;padding:36px 32px;font-family:Arial,sans-serif;color:#141416;">
           <h1 style="margin:0;font-size:30px;line-height:1.15;font-weight:800;">${headline}</h1>
           <p style="margin:16px 0 0;font-size:16px;line-height:1.55;color:#3A3A40;">${intro}</p>
@@ -92,7 +96,16 @@ export function renderInstallmentReminder({ registration, installment, daysBefor
   return { subject, body: text, html, includesQr: false };
 }
 
-export function renderPaymentConfirmation({ registration, installment, amountCents, payUrl, manageUrl }) {
+export function renderPaymentConfirmation({
+  registration,
+  installment,
+  amountCents,
+  payUrl,
+  manageUrl,
+  paymentChannel = "",
+  paidAt = "",
+  paymentReference = "",
+}) {
   const amount = formatMoney(amountCents, registration.currency);
   const paidTotal = registration.installments.reduce((sum, item) => sum + item.amount_paid_cents, 0);
   const seatTotal = registration.installments.reduce((sum, item) => sum + item.amount_cents, 0);
@@ -115,6 +128,23 @@ export function renderPaymentConfirmation({ registration, installment, amountCen
   const intro = fullyPaid
     ? `Hi ${escapeHtml(name)}, we recorded ${escapeHtml(amount)} for your ${escapeHtml(registration.product_name)} seat. Your QR ticket is on its way by email and SMS.`
     : `Hi ${escapeHtml(name)}, we recorded ${escapeHtml(amount)} for your ${escapeHtml(registration.product_name)} seat.${installmentLine ? ` ${escapeHtml(installmentLine)}.` : ""} Your QR ticket is sent only after the seat is fully paid.`;
+  const paidWhen = formatDateTimeManila(paidAt);
+  const receiptMeta = [
+    paymentChannel ? `Payment channel: ${paymentChannel}` : "",
+    paidWhen ? `Date & time: ${paidWhen}` : "",
+    `Reference: ${registration.reference}`,
+    paymentReference && paymentReference !== registration.reference
+      ? `Payment reference: ${paymentReference}`
+      : "",
+  ].filter(Boolean);
+  const receiptMetaHtml = receiptMeta.length
+    ? `<div style="margin-top:16px;padding-top:16px;border-top:1px solid #E4E1DC;font-size:14px;line-height:1.7;color:#5C5C63;">
+          ${receiptMeta.map((line) => {
+            const [label, ...rest] = line.split(": ");
+            return `<div><span style="color:#3A3A40;font-weight:700;">${escapeHtml(label)}</span><span style="color:#3A3A40;">: </span>${escapeHtml(rest.join(": "))}</div>`;
+          }).join("")}
+        </div>`
+    : "";
   const nextBlock = !fullyPaid && next
     ? `<div style="margin-top:14px;padding-top:14px;border-top:1px solid #E4E1DC;font-size:15px;color:#3A3A40;">
           <span style="color:#5C5C63;">Next payment</span><br>
@@ -127,6 +157,7 @@ export function renderPaymentConfirmation({ registration, installment, amountCen
     fullyPaid
       ? `Hi ${name}, we recorded ${amount} for your ${registration.product_name} seat. Your seat is fully paid.`
       : `Hi ${name}, we recorded ${amount} for your ${registration.product_name} seat.${installmentLine ? ` ${installmentLine}.` : ""}`,
+    ...receiptMeta,
     `Paid so far: ${paidSoFar} of ${seatTotalLabel}.`,
     fullyPaid ? "Balance: ₱0." : `Balance: ${balance}.`,
     !fullyPaid && next
@@ -135,7 +166,6 @@ export function renderPaymentConfirmation({ registration, installment, amountCen
     fullyPaid
       ? "Your QR ticket is on its way by email and SMS."
       : "Reminders come by email and SMS. Your QR ticket unlocks when you're fully paid.",
-    `Ref ${registration.reference}`,
     !fullyPaid && next ? payUrl : manageUrl,
   ].filter(Boolean).join("\n");
   const html = shell({
@@ -149,7 +179,7 @@ export function renderPaymentConfirmation({ registration, installment, amountCen
           <div style="margin-top:8px;font-size:16px;color:#3A3A40;">Paid so far <strong>${escapeHtml(paidSoFar)}</strong> of ${escapeHtml(seatTotalLabel)}</div>
           <div style="margin-top:6px;font-size:14px;color:#5C5C63;">${paidCount} of ${registration.installment_count} payments made · Balance ${escapeHtml(balance)}</div>
           ${nextBlock}
-          <div style="margin-top:14px;font-size:14px;color:#5C5C63;">Reference ${escapeHtml(registration.reference)}</div>
+          ${receiptMetaHtml}
         </td></tr>
       </table>`,
     action: fullyPaid

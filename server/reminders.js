@@ -2,6 +2,7 @@ import { pathToFileURL } from "url";
 import { openDatabase, registrationBalance } from "./db.js";
 import { createRegistration, getRegistration, recordPayment } from "./registrations.js";
 import { sendEmail, sendSms } from "./providers.js";
+import { paymentChannelLabel } from "./labels.js";
 import { renderEntryPass, renderInstallmentReminder, renderPaymentConfirmation } from "./templates.js";
 import { addDays, formatLongDate, manilaParts } from "./time.js";
 
@@ -141,9 +142,22 @@ export function queueEntryPassAfterPayment(db, registrationId) {
   });
 }
 
+function gatewayChannelForPayment(db, payment) {
+  const reference = String(payment.external_reference || "").trim();
+  if (!reference) return null;
+  const method = String(payment.method || "");
+  if (method === "paynamics") {
+    const row = db.prepare("SELECT payment_channel FROM paynamics_payments WHERE request_id = ?").get(reference);
+    return row?.payment_channel || null;
+  }
+  if (method.startsWith("hitpay:")) return method.slice("hitpay:".length);
+  if (method.startsWith("upay:")) return method.slice("upay:".length);
+  return null;
+}
+
 export async function sendPaymentConfirmation(db, registrationId, paymentId) {
   const payment = db.prepare(`
-    SELECT id, installment_id, amount_cents, method
+    SELECT id, installment_id, amount_cents, method, external_reference, recorded_at
     FROM payments WHERE id = ? AND registration_id = ?
   `).get(paymentId, registrationId);
   if (!payment) return { ok: false, error: "payment_not_found" };
@@ -161,6 +175,9 @@ export async function sendPaymentConfirmation(db, registrationId, paymentId) {
     amountCents: payment.amount_cents,
     payUrl,
     manageUrl,
+    paymentChannel: paymentChannelLabel(payment.method, gatewayChannelForPayment(db, payment)),
+    paidAt: payment.recorded_at,
+    paymentReference: payment.external_reference || "",
   });
   const dispatchKey = `payment:${payment.id}`;
   const existing = db.prepare("SELECT id, status FROM reminder_dispatches WHERE dispatch_key = ?").get(dispatchKey);

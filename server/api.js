@@ -14,6 +14,7 @@ import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./ch
 import { listMembers, lookupMember, memberContactClash, memberFromProof, memberPreview, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
 import { presentCoupon, priceCoupon } from "./coupons.js";
 import { parseLookupContact } from "./contact.js";
+import { channelLabel } from "./labels.js";
 import { maskEmail, readMemberEditToken, sendMemberOtp, sendRegistrationOtp, verifyMemberOtp, verifyRegistrationOtp } from "./otp.js";
 import { rateLimit } from "./limits.js";
 import { formatLongDate, manilaParts } from "./time.js";
@@ -32,24 +33,6 @@ function db() {
     seedAdmin(database);
   }
   return database;
-}
-
-function channelLabel(value) {
-  const labels = {
-    paymaya_ph: "Maya",
-    grabpay_ph: "GrabPay",
-    bpi_online: "BPI",
-    ubp_online: "UnionBank Online",
-    br_landbank_ph: "Landbank",
-    gc: "GCash",
-    qr: "QR Ph",
-    online: "Online banking",
-    instapay: "InstaPay",
-    paygate: "Other banks",
-    "UB Online": "UnionBank Online",
-  };
-  const key = String(value || "").trim();
-  return labels[key] || key.replaceAll("_", " ");
 }
 
 function registrationTransactions(database, registrationId) {
