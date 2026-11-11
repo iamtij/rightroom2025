@@ -85,15 +85,6 @@ try {
   const db = openDatabase();
   const { repairHitpayMismatches } = await import('./server/hitpay.js');
   await repairHitpayMismatches(db);
-  const { deleteCancelledRegistrations } = await import('./server/registrations.js');
-  const removedCancelled = deleteCancelledRegistrations(db, [
-    "IBMC27-EC40FE",
-    "IBMC27-902FCD",
-    "IBMC27-3EE3BE",
-    "IBMC27-2A6A9E",
-    "IBMC27-3684FC",
-  ]);
-  for (const reference of removedCancelled) console.log(`Removed cancelled registration ${reference}`);
   startBackupLoop(db);
   if (process.env.REMINDERS_ENABLED !== 'false') {
     const { startReminderLoop } = await import('./server/reminders.js');

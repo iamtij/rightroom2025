@@ -303,39 +303,6 @@ export function cancelRegistration(db, id) {
   return getRegistration(db, id);
 }
 
-const CANCELLED_CHILD_TABLES = [
-  "upay_payments",
-  "hitpay_payments",
-  "paynamics_payments",
-  "pass_scans",
-  "reminder_dispatches",
-  "schedule_sends",
-  "payments",
-  "registration_installments",
-];
-
-export function deleteCancelledRegistrations(db, references) {
-  const wanted = [...new Set(references.map((item) => String(item || "").trim()).filter(Boolean))];
-  const remove = db.transaction(() => {
-    const removed = [];
-    for (const reference of wanted) {
-      const row = db.prepare("SELECT id, coupon_code, status FROM registrations WHERE reference = ?").get(reference);
-      if (!row || row.status !== "cancelled") continue;
-      if (row.coupon_code) {
-        db.prepare("UPDATE coupons SET usage_count = MAX(usage_count - 1, 0) WHERE code = ?").run(row.coupon_code);
-      }
-      db.prepare("DELETE FROM comp_requests WHERE reference = ?").run(reference);
-      for (const table of CANCELLED_CHILD_TABLES) {
-        db.prepare(`DELETE FROM ${table} WHERE registration_id = ?`).run(row.id);
-      }
-      db.prepare("DELETE FROM registrations WHERE id = ? AND status = 'cancelled'").run(row.id);
-      removed.push(reference);
-    }
-    return removed;
-  });
-  return remove();
-}
-
 export function discardUnopenedRegistration(db, id) {
   const row = db.prepare("SELECT id, coupon_code FROM registrations WHERE id = ?").get(id);
   if (!row) return false;
