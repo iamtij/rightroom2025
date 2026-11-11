@@ -369,6 +369,16 @@ export function buildDailyReport(db, asOf = new Date()) {
   }
 
   const late15 = bandState.get("day15").count;
+  const chapters = db.prepare(`
+    SELECT TRIM(r.chapter) AS name, COUNT(*) AS count
+    FROM registrations r
+    JOIN ticket_products p ON p.id = r.product_id
+    WHERE r.status != 'cancelled'
+      AND p.code NOT LIKE ?
+      AND TRIM(COALESCE(r.chapter, '')) != ''
+    GROUP BY TRIM(r.chapter)
+    ORDER BY COUNT(*) DESC, TRIM(r.chapter)
+  `).all(TEST_PRODUCT).map((row) => ({ name: row.name, count: Number(row.count) }));
   return {
     asOf,
     windowStart,
@@ -401,6 +411,7 @@ export function buildDailyReport(db, asOf = new Date()) {
     methods,
     usdPayments,
     notes,
+    chapters,
   };
 }
 

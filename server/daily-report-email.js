@@ -239,6 +239,23 @@ function methodsBlock(report) {
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:8px;">${rows}</table>${usd}`;
 }
 
+function chapterSection(chapters) {
+  if (!chapters?.length) return "";
+  const rows = chapters.map((chapter) => `<tr>
+    <td style="${TD}">${esc(chapter.name)}</td>
+    <td align="right" style="${TD}text-align:right;font-weight:700;">${chapter.count.toLocaleString("en-US")}</td>
+  </tr>`).join("");
+  return `<tr><td style="padding-bottom:16px;">
+    ${card("By chapter", "Chapters with a registration, highest first.", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border-collapse:collapse;">
+      <thead><tr>
+        <th align="left" style="${TH}">Chapter</th>
+        <th align="right" style="${TH}text-align:right;">Seats</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`)}
+  </td></tr>`;
+}
+
 function card(title, hint, body) {
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#FFFFFF" style="background:#FFFFFF;border:1px solid #C8C8C8;">
     <tr><td style="padding:22px;font-family:${FONT};color:#000000;">
@@ -353,6 +370,7 @@ function renderCountReport(report) {
           <tbody>${ticketRows}</tbody>
         </table>`)}
       </td></tr>
+      ${chapterSection(report.chapters)}
       <tr><td style="padding-bottom:16px;">
         ${card("Installment health", report.healthHint, `${bar(report.health.bands)}<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border-collapse:collapse;">
           <thead><tr>
@@ -396,6 +414,9 @@ function renderCountReport(report) {
     "",
     "By ticket",
     ...report.tickets.map((ticket) => `${ticket.name} · ${ticket.phaseLabel} · ${ticket.showDash ? "no seats yet" : `${ticket.seats} seats · ${ticket.cancelled} cancelled`}`),
+    "",
+    "By chapter",
+    ...(report.chapters?.length ? report.chapters.map((chapter) => `${chapter.name}: ${chapter.count}`) : ["None"]),
     "",
     report.healthHint,
     ...report.health.bands.filter((band) => band.count != null).map((band) => `${band.label}: ${band.count}`),
@@ -505,6 +526,7 @@ export function renderDailyReport(report) {
       <tr><td style="padding-bottom:16px;">
         ${card("By ticket", "Every tier is listed from day one, so the table keeps its shape. US dollar tickets stay separate from peso totals.", ticketTable)}
       </td></tr>
+      ${chapterSection(report.chapters)}
       <tr><td style="padding-bottom:16px;">
         ${card("Installment health", healthHint, `${bar(report.health.bands)}${healthTable(report)}${atRisk(report)}`)}
       </td></tr>
@@ -577,6 +599,10 @@ function renderText(report, clock, covers) {
     lines.push(`${ticket.name} · ${ticket.phaseLabel} · ${ticket.priceLabel} · ${ticket.seats} seats · ${ticket.paidFull} paid in full · ${ticket.installment} installment · collected ${formatMoney(ticket.collectedCents, ticket.currency)} · scheduled ${formatMoney(ticket.scheduledCents, ticket.currency)}`);
   }
   lines.push(`Total (PHP): ${report.totals.PHP.seats} seats · collected ${peso(report.totals.PHP.collectedCents)} · scheduled ${peso(report.totals.PHP.scheduledCents)}`);
+  lines.push("", "By chapter");
+  if (report.chapters?.length) {
+    for (const chapter of report.chapters) lines.push(`${chapter.name}: ${chapter.count}`);
+  } else lines.push("None");
   if (report.totals.USD) {
     lines.push(`Total (USD): ${report.totals.USD.seats} seats · collected ${formatMoney(report.totals.USD.collectedCents, "USD")} · scheduled ${formatMoney(report.totals.USD.scheduledCents, "USD")}`);
   }

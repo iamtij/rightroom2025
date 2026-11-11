@@ -119,6 +119,7 @@ assert.deepEqual(report.health.bands.map((band) => [band.key, band.count]), [
   ["day15", 1],
 ]);
 assert.equal(report.health.atRisk.length, 1);
+assert.deepEqual(report.chapters, [{ name: "BNI Legacy", count: 1 }]);
 assert.equal(report.health.atRisk[0].name, "Joy Dizon");
 assert.equal(report.health.atRisk[0].chapter, "BNI Legacy");
 assert.equal(report.health.atRisk[0].daysLate, 14);
@@ -138,6 +139,7 @@ assert.match(mail.html, /₱78,700/);
 assert.match(mail.html, /₱6,000/);
 assert.match(mail.html, /3 registrations behind · 1 moved to the Regular price/);
 assert.match(mail.html, /Joy Dizon/);
+assert.match(mail.html, /By chapter/);
 assert.match(mail.html, /BNI Legacy/);
 assert.match(mail.html, /14 days/);
 assert.match(mail.html, /Nov 13/);
