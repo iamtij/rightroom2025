@@ -241,17 +241,24 @@ function methodsBlock(report) {
 
 function chapterSection(chapters) {
   if (!chapters?.length) return "";
+  const total = chapters.reduce((sum, chapter) => sum + chapter.count, 0);
+  const cell = `${TD}font-weight:700;border-top:2px solid #000000;border-bottom:none;`;
   const rows = chapters.map((chapter) => `<tr>
     <td style="${TD}">${esc(chapter.name)}</td>
-    <td align="right" style="${TD}text-align:right;font-weight:700;">${chapter.count.toLocaleString("en-US")}</td>
+    <td align="right" style="${TD}text-align:right;">${chapter.count.toLocaleString("en-US")}</td>
   </tr>`).join("");
   return `<tr><td style="padding-bottom:16px;">
-    ${card("By chapter", "Chapters with a registration, highest first.", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border-collapse:collapse;">
+    ${card("By chapter", "Confirmed registrations only, highest first. Cancellations are not included.", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border-collapse:collapse;">
       <thead><tr>
         <th align="left" style="${TH}">Chapter</th>
         <th align="right" style="${TH}text-align:right;">Seats</th>
       </tr></thead>
-      <tbody>${rows}</tbody>
+      <tbody>${rows}
+        <tr>
+          <td style="${cell}">Total</td>
+          <td align="right" style="${cell}text-align:right;">${total.toLocaleString("en-US")}</td>
+        </tr>
+      </tbody>
     </table>`)}
   </td></tr>`;
 }
@@ -417,6 +424,7 @@ function renderCountReport(report) {
     "",
     "By chapter",
     ...(report.chapters?.length ? report.chapters.map((chapter) => `${chapter.name}: ${chapter.count}`) : ["None"]),
+    ...(report.chapters?.length ? [`Total: ${report.chapters.reduce((sum, chapter) => sum + chapter.count, 0)}`] : []),
     "",
     report.healthHint,
     ...report.health.bands.filter((band) => band.count != null).map((band) => `${band.label}: ${band.count}`),
@@ -602,6 +610,7 @@ function renderText(report, clock, covers) {
   lines.push("", "By chapter");
   if (report.chapters?.length) {
     for (const chapter of report.chapters) lines.push(`${chapter.name}: ${chapter.count}`);
+    lines.push(`Total: ${report.chapters.reduce((sum, chapter) => sum + chapter.count, 0)}`);
   } else lines.push("None");
   if (report.totals.USD) {
     lines.push(`Total (USD): ${report.totals.USD.seats} seats · collected ${formatMoney(report.totals.USD.collectedCents, "USD")} · scheduled ${formatMoney(report.totals.USD.scheduledCents, "USD")}`);
