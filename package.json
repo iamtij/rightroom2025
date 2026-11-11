@@ -27,6 +27,7 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1162.0",
     "@google/genai": "^1.29.0",
+    "@napi-rs/canvas": "^0.1.80",
     "@sentry/node": "^11.11.0",
     "@sentry/react": "^11.11.0",
     "@tailwindcss/postcss": "^4.2.2",

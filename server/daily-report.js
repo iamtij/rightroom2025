@@ -5,7 +5,7 @@ import { assessProductionLiveDeploymentIdentity } from "./deployment-identity.js
 import { sendEmail } from "./providers.js";
 import { reportError } from "./report-error.js";
 import { renderDailyReport } from "./daily-report-email.js";
-import { posterRecipients, renderRegistrationPoster } from "./registration-poster.js";
+import { buildRegistrationPoster, posterRecipients, renderRegistrationPoster } from "./registration-poster.js";
 import { addDays, formatMoney, manilaParts } from "./time.js";
 
 const TEST_PRODUCT = "test%";
@@ -529,7 +529,7 @@ export async function runRegistrationPoster(db, now = new Date(), options = {}) 
 
   const asOf = force ? now : atManila(clock.date, 9, 0);
   const reportOn = manilaParts(asOf).date;
-  const rendered = renderRegistrationPoster(buildDailyReport(db, asOf));
+  const rendered = renderRegistrationPoster(buildRegistrationPoster(db, asOf));
   const results = [];
   for (let index = 0; index < recipients.length; index += 1) {
     const recipient = recipients[index];
@@ -548,6 +548,12 @@ export async function runRegistrationPoster(db, now = new Date(), options = {}) 
       subject: rendered.subject,
       html: rendered.html,
       text: rendered.text,
+      attachments: [{
+        filename: rendered.filename,
+        content: rendered.jpeg,
+        contentType: "image/jpeg",
+        contentId: "registration-poster",
+      }],
       idempotencyKey: `registration-poster/${force ? "manual" : "scheduled"}/${stamp}/${recipient}`,
       deliveryKind: "daily_report",
       bypassSafeMode: force,
