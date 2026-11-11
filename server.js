@@ -85,6 +85,9 @@ try {
   const db = openDatabase();
   const { repairHitpayMismatches } = await import('./server/hitpay.js');
   await repairHitpayMismatches(db);
+  const { syncRosterTickets } = await import('./server/members.js');
+  const syncedTickets = syncRosterTickets(db);
+  if (syncedTickets) console.log(`Roster tickets synced from registrations: ${syncedTickets}`);
   startBackupLoop(db);
   if (process.env.REMINDERS_ENABLED !== 'false') {
     const { startReminderLoop } = await import('./server/reminders.js');

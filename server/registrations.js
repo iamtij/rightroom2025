@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { claimCoupon, priceCoupon } from "./coupons.js";
 import { registrationBalance, testTicketEnabled } from "./db.js";
+import { syncRosterTickets } from "./members.js";
 import { stagingTestRegistrationAllowed } from "./staging-early-payments.js";
 import { addDays, manilaParts } from "./time.js";
 
@@ -233,7 +234,9 @@ export function createRegistration(db, input) {
     }
     return result.lastInsertRowid;
   });
-  return getRegistration(db, run());
+  const registration = getRegistration(db, run());
+  syncRosterTickets(db, { email: registration.email, mobile: registration.mobile });
+  return registration;
 }
 
 export function registrationContactClash(db, { email, mobile, excludeId = 0 }) {
@@ -277,6 +280,7 @@ export function updateBadge(db, id, input) {
 }
 
 export function updateRegistration(db, id, input) {
+  const previous = db.prepare("SELECT email, mobile FROM registrations WHERE id = ?").get(id);
   const email = input.email.trim().toLowerCase();
   const mobile = input.mobile.trim();
   const clash = registrationContactClash(db, { email, mobile, excludeId: id });
@@ -295,16 +299,20 @@ export function updateRegistration(db, id, input) {
     input.chapter?.trim() || null,
     id,
   );
+  if (previous) syncRosterTickets(db, previous, { clear: true });
+  syncRosterTickets(db, { email, mobile }, { clear: true });
   return getRegistration(db, id);
 }
 
 export function cancelRegistration(db, id) {
+  const current = db.prepare("SELECT email, mobile FROM registrations WHERE id = ?").get(id);
   db.prepare("UPDATE registrations SET status = 'cancelled' WHERE id = ? AND status != 'cancelled'").run(id);
+  if (current) syncRosterTickets(db, current, { clear: true });
   return getRegistration(db, id);
 }
 
 export function discardUnopenedRegistration(db, id) {
-  const row = db.prepare("SELECT id, coupon_code FROM registrations WHERE id = ?").get(id);
+  const row = db.prepare("SELECT id, coupon_code, email, mobile FROM registrations WHERE id = ?").get(id);
   if (!row) return false;
   const paid = db.prepare("SELECT COUNT(*) AS n FROM payments WHERE registration_id = ?").get(id).n;
   if (paid) return false;
@@ -318,6 +326,7 @@ export function discardUnopenedRegistration(db, id) {
     db.prepare("DELETE FROM registrations WHERE id = ?").run(id);
   });
   remove();
+  syncRosterTickets(db, { email: row.email, mobile: row.mobile }, { clear: true });
   return true;
 }
 

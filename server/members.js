@@ -158,6 +158,7 @@ export function saveMember(db, input) {
     input.goldClub ? 1 : 0,
     "",
   );
+  syncRosterTickets(db, { email: input.email, mobile: input.mobile });
 }
 
 export function memberContactClash(db, { email, mobile, excludeId = 0 }) {
@@ -205,6 +206,7 @@ export function updateMemberRecord(db, id, input) {
     "",
     existing.id,
   );
+  syncRosterTickets(db, { email, mobile });
   return { member: listMembers(db).find((member) => member.id === existing.id) };
 }
 
@@ -238,6 +240,7 @@ export function updateMemberProfile(db, currentEmail, input) {
 }
 
 export function listMembers(db) {
+  syncRosterTickets(db);
   return db.prepare("SELECT * FROM members ORDER BY registered_at DESC, id DESC").all().map(presentMember);
 }
 
@@ -316,4 +319,64 @@ function presentMember(row) {
 function blank(value) {
   const text = String(value || "").trim();
   return text || null;
+}
+
+function membersMatching(db, contact) {
+  const email = String(contact?.email || "").trim().toLowerCase();
+  const key = phoneKey(contact?.mobile);
+  const seen = new Set();
+  const rows = [];
+  const add = (row) => {
+    if (!row || seen.has(row.id)) return;
+    seen.add(row.id);
+    rows.push(row);
+  };
+  if (email) add(db.prepare("SELECT id, email, mobile, ticket_type FROM members WHERE email = ?").get(email));
+  if (key) {
+    for (const row of db.prepare("SELECT id, email, mobile, ticket_type FROM members WHERE phone_key = ?").all(key)) add(row);
+  }
+  return rows;
+}
+
+function ticketForMember(member, tickets) {
+  const email = String(member.email || "").trim().toLowerCase();
+  const key = phoneKey(member.mobile);
+  if (email) {
+    const byEmail = tickets.find((ticket) => String(ticket.email || "").trim().toLowerCase() === email);
+    if (byEmail) return byEmail.product_name;
+  }
+  if (key) {
+    const byPhone = tickets.find((ticket) => phoneKey(ticket.mobile) === key);
+    if (byPhone) return byPhone.product_name;
+  }
+  return "";
+}
+
+export function syncRosterTickets(db, contact, { clear = false } = {}) {
+  const tickets = db.prepare(`
+    SELECT r.email, r.mobile, p.name AS product_name
+    FROM registrations r
+    JOIN ticket_products p ON p.id = r.product_id
+    WHERE r.status != 'cancelled'
+    ORDER BY r.id DESC
+  `).all();
+  const members = contact
+    ? membersMatching(db, contact)
+    : db.prepare("SELECT id, email, mobile, ticket_type FROM members").all();
+  const update = db.prepare("UPDATE members SET ticket_type = ?, updated_at = datetime('now') WHERE id = ?");
+  const clearTicket = db.prepare("UPDATE members SET ticket_type = NULL, updated_at = datetime('now') WHERE id = ?");
+  let changed = 0;
+  for (const member of members) {
+    const next = ticketForMember(member, tickets);
+    const current = String(member.ticket_type || "");
+    if (next) {
+      if (current === next) continue;
+      update.run(next, member.id);
+      changed += 1;
+    } else if (clear && current) {
+      clearTicket.run(member.id);
+      changed += 1;
+    }
+  }
+  return changed;
 }

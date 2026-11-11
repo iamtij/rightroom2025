@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { openDatabase } from "./db.js";
 import { cancelRegistration, createRegistration, recordPayment } from "./registrations.js";
+import { listMembers, saveMember } from "./members.js";
 import { dashboardStats } from "./dashboard.js";
 import { savePaymentChannels } from "./payment-channels.js";
 
@@ -136,5 +137,41 @@ assert.deepEqual(renamed.find((row) => row.channel === "upay").methods.map((row)
   "Other banks",
   "Custom",
 ]);
+
+function rosterMember(email, mobile, ticketType = "") {
+  saveMember(db, {
+    fullName: email,
+    email,
+    mobile,
+    chapter: "BNI Overflowing",
+    category: "Care",
+    businessName: "Marykay Philippines Inc",
+    ticketType,
+    regStatus: "updated",
+    country: "Philippines",
+    goldClub: false,
+  });
+}
+
+function memberTicket(email) {
+  return listMembers(db).find((row) => row.email === email)?.ticketType;
+}
+
+rosterMember("missionnanette56@yahoo.com", "09175078547");
+const mission = signup("first_mover", "missionnanette56@yahoo.com", "09175078547");
+assert.equal(memberTicket("missionnanette56@yahoo.com"), "First Mover");
+
+rosterMember("phone-match@example.com", "09175551212");
+signup("early_bird", "other-email@example.com", "09175551212");
+assert.equal(memberTicket("phone-match@example.com"), "Early Bird");
+
+rosterMember("csv-only@example.com", "09170000077", "Regular");
+assert.equal(memberTicket("csv-only@example.com"), "Regular");
+
+cancelRegistration(db, mission.id);
+assert.equal(memberTicket("missionnanette56@yahoo.com"), "");
+const missionAgain = signup("early_bird", "missionnanette56@yahoo.com", "09175078547");
+assert.equal(memberTicket("missionnanette56@yahoo.com"), "Early Bird");
+assert.equal(missionAgain.product_name, "Early Bird");
 
 console.log("Dashboard payment totals passed.");
