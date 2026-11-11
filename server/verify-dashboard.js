@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { openDatabase } from "./db.js";
-import { cancelRegistration, createRegistration, recordPayment } from "./registrations.js";
+import { cancelRegistration, createRegistration, deleteCancelledRegistrations, recordPayment } from "./registrations.js";
 import { dashboardStats } from "./dashboard.js";
 import { savePaymentChannels } from "./payment-channels.js";
 
@@ -136,5 +136,13 @@ assert.deepEqual(renamed.find((row) => row.channel === "upay").methods.map((row)
   "Other banks",
   "Custom",
 ]);
+
+const kept = signup("first_mover", "kept@example.com", "09170000012");
+const removed = deleteCancelledRegistrations(db, [cancelled.reference, kept.reference, "IBMC27-NOPE"]);
+assert.deepEqual(removed, [cancelled.reference]);
+assert.equal(db.prepare("SELECT id FROM registrations WHERE id = ?").get(cancelled.id), undefined);
+assert.equal(db.prepare("SELECT COUNT(*) AS n FROM payments WHERE registration_id = ?").get(cancelled.id).n, 0);
+assert.equal(db.prepare("SELECT COUNT(*) AS n FROM registration_installments WHERE registration_id = ?").get(cancelled.id).n, 0);
+assert.ok(db.prepare("SELECT id FROM registrations WHERE id = ?").get(kept.id));
 
 console.log("Dashboard payment totals passed.");
