@@ -92,6 +92,73 @@ export function renderInstallmentReminder({ registration, installment, daysBefor
   return { subject, body: text, html, includesQr: false };
 }
 
+export function renderPaymentConfirmation({ registration, installment, amountCents, payUrl, manageUrl }) {
+  const amount = formatMoney(amountCents, registration.currency);
+  const paidTotal = registration.installments.reduce((sum, item) => sum + item.amount_paid_cents, 0);
+  const seatTotal = registration.installments.reduce((sum, item) => sum + item.amount_cents, 0);
+  const paidSoFar = formatMoney(paidTotal, registration.currency);
+  const seatTotalLabel = formatMoney(seatTotal, registration.currency);
+  const balance = formatMoney(registration.balance_cents, registration.currency);
+  const name = firstName(registration.full_name);
+  const paidCount = registration.installments.filter((item) => item.status === "paid").length;
+  const next = registration.installments.find((item) => item.status === "due");
+  const fullyPaid = registration.balance_cents === 0;
+  const installmentLine = registration.payment_plan === "installment" && registration.installment_count > 1
+    ? `Payment ${installment.sequence} of ${registration.installment_count}`
+    : "";
+  const subject = fullyPaid
+    ? `IBMC 2027 · Payment received · ${amount} · fully paid`
+    : installmentLine
+      ? `IBMC 2027 · Payment received · ${amount} · ${installment.sequence} of ${registration.installment_count}`
+      : `IBMC 2027 · Payment received · ${amount}`;
+  const headline = fullyPaid ? "You're all paid up." : "Payment received.";
+  const intro = fullyPaid
+    ? `Hi ${escapeHtml(name)}, we recorded ${escapeHtml(amount)} for your ${escapeHtml(registration.product_name)} seat. Your QR ticket is on its way by email and SMS.`
+    : `Hi ${escapeHtml(name)}, we recorded ${escapeHtml(amount)} for your ${escapeHtml(registration.product_name)} seat.${installmentLine ? ` ${escapeHtml(installmentLine)}.` : ""} Your QR ticket is sent only after the seat is fully paid.`;
+  const nextBlock = !fullyPaid && next
+    ? `<div style="margin-top:14px;padding-top:14px;border-top:1px solid #E4E1DC;font-size:15px;color:#3A3A40;">
+          <span style="color:#5C5C63;">Next payment</span><br>
+          <span style="font-size:18px;font-weight:800;">${escapeHtml(formatMoney(next.amount_cents - next.amount_paid_cents, registration.currency))}</span>
+          <span style="color:#5C5C63;"> · Due ${escapeHtml(formatLongDate(next.due_on))}</span>
+        </div>`
+    : "";
+  const text = [
+    "IBMC 2027",
+    fullyPaid
+      ? `Hi ${name}, we recorded ${amount} for your ${registration.product_name} seat. Your seat is fully paid.`
+      : `Hi ${name}, we recorded ${amount} for your ${registration.product_name} seat.${installmentLine ? ` ${installmentLine}.` : ""}`,
+    `Paid so far: ${paidSoFar} of ${seatTotalLabel}.`,
+    fullyPaid ? "Balance: ₱0." : `Balance: ${balance}.`,
+    !fullyPaid && next
+      ? `Next payment: ${formatMoney(next.amount_cents - next.amount_paid_cents, registration.currency)} due ${formatLongDate(next.due_on)}.`
+      : "",
+    fullyPaid
+      ? "Your QR ticket is on its way by email and SMS."
+      : "Reminders come by email and SMS. Your QR ticket unlocks when you're fully paid.",
+    `Ref ${registration.reference}`,
+    !fullyPaid && next ? payUrl : manageUrl,
+  ].filter(Boolean).join("\n");
+  const html = shell({
+    headline: escapeHtml(headline),
+    intro,
+    body: `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;background:#F6F4F1;border-radius:16px;">
+        <tr><td style="padding:20px 22px;">
+          <div style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#A8131F;">${escapeHtml(registration.product_name)}${installmentLine ? ` · ${escapeHtml(installmentLine)}` : ""}</div>
+          <div style="margin-top:8px;font-size:36px;font-weight:800;line-height:1;">${escapeHtml(amount)}</div>
+          <div style="margin-top:8px;font-size:16px;color:#3A3A40;">Paid so far <strong>${escapeHtml(paidSoFar)}</strong> of ${escapeHtml(seatTotalLabel)}</div>
+          <div style="margin-top:6px;font-size:14px;color:#5C5C63;">${paidCount} of ${registration.installment_count} payments made · Balance ${escapeHtml(balance)}</div>
+          ${nextBlock}
+          <div style="margin-top:14px;font-size:14px;color:#5C5C63;">Reference ${escapeHtml(registration.reference)}</div>
+        </td></tr>
+      </table>`,
+    action: fullyPaid
+      ? button(manageUrl, "Manage my registration")
+      : button(next ? payUrl : manageUrl, next ? "Pay next installment" : "Manage my registration"),
+  });
+  return { subject, body: text, html, includesQr: false };
+}
+
 export function entryQrPng(passUrl) {
   return QRCode.toBuffer(passUrl, {
     type: "png",
