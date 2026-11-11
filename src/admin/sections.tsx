@@ -130,7 +130,7 @@ function DataTable({ columns, children, empty }: { columns: string[]; children: 
 
 type DashboardData = {
   signups: { total: number; confirmed: number; cancelled: number; firstMovers: number; firstMoversCancelled: number; firstMoverPercent: number | null };
-  tickets: { code: string; name: string; currency: "PHP" | "USD"; signups: number; cancelled: number; fullyPaid: number; collectedCents: number; bookedCents: number }[];
+  tickets: { code: string; name: string; currency: "PHP" | "USD"; signups: number; cancelled: number; fullyPaid: number; fullyPaidCents: number; installmentSeats: number; installmentCents: number; collectedCents: number; bookedCents: number }[];
   plans: { payInFull: number; installment: number; fullyPaid: number; owing: number };
   money: { currency: "PHP" | "USD"; collectedCents: number; outstandingCents: number }[];
   byDay: { day: string; signups: number }[];
@@ -310,6 +310,46 @@ function Columns({ rows }: { rows: { label: string; value: number }[] }) {
   );
 }
 
+function seatLabel(count: number) {
+  return count === 1 ? "1 seat" : `${count} seats`;
+}
+
+function TicketAmount({ cents, currency }: { cents: number; currency: "PHP" | "USD" }) {
+  if (currency === "PHP") return <Peso cents={cents} />;
+  return <>{money(cents, currency)}</>;
+}
+
+function TicketSplit({ ticket }: { ticket: DashboardData["tickets"][number] }) {
+  if (!ticket.signups && !ticket.cancelled) {
+    return (
+      <div className="flex items-baseline justify-between gap-3 text-sm">
+        <span className="font-semibold">{ticket.name}</span>
+        <span className="text-[#5C5C63]">No seats yet</span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-baseline justify-between gap-3">
+        <h3 className="m-0 text-sm font-bold">{ticket.name}</h3>
+        <p className="m-0 text-right text-[13px] text-[#5C5C63]">{ticket.signups} confirmed</p>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-[10px] border border-[#E4E1DC] px-3 py-2">
+          <p className="m-0 text-[11px] font-semibold uppercase tracking-[0.04em] text-[#5C5C63]">Full paid</p>
+          <p className="m-0 mt-1 font-archivo text-[22px] font-extrabold leading-none"><TicketAmount cents={ticket.fullyPaidCents} currency={ticket.currency} /></p>
+          <p className="m-0 mt-1 text-[13px] text-[#5C5C63]">{seatLabel(ticket.fullyPaid)}</p>
+        </div>
+        <div className="rounded-[10px] border border-[#E4E1DC] px-3 py-2">
+          <p className="m-0 text-[11px] font-semibold uppercase tracking-[0.04em] text-[#5C5C63]">Installments</p>
+          <p className="m-0 mt-1 font-archivo text-[22px] font-extrabold leading-none"><TicketAmount cents={ticket.installmentCents} currency={ticket.currency} /></p>
+          <p className="m-0 mt-1 text-[13px] text-[#5C5C63]">{seatLabel(ticket.installmentSeats)}</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Dashboard({ onError }: { onError: (message: string) => void }) {
   const [data, setData] = useState<DashboardData | null>(null);
   useEffect(() => { api("/api/admin/dashboard").then(setData).catch((error) => onError(error.message)); }, []);
@@ -340,23 +380,10 @@ function Dashboard({ onError }: { onError: (message: string) => void }) {
         </Panel>
       </div>
       <Panel title="Signups by ticket">
-        <StackedBars rows={data.tickets.map((ticket) => {
-          const stillOwing = Math.max(0, ticket.signups - ticket.fullyPaid);
-          return {
-            label: ticket.name,
-            detail: `${ticket.signups} confirmed · ${ticket.fullyPaid} fully paid · ${ticket.cancelled} cancelled`,
-            parts: [
-              { value: ticket.fullyPaid, color: chartColors.updated, name: "fully paid" },
-              { value: stillOwing, color: chartColors.confirmed, name: "still owing" },
-              { value: ticket.cancelled, color: chartColors.cancelled, name: "cancelled" },
-            ],
-          };
-        })} />
-        <p className="m-0 flex flex-wrap gap-4 text-[13px] text-[#5C5C63]">
-          <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#141416]" />Fully paid</span>
-          <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#D0202E]" />Still owing</span>
-          <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#B7B3AD]" />Cancelled</span>
-        </p>
+        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Amount collected, then the number of seats. Installment seats are not fully paid yet.</p>
+        <div className="flex flex-col gap-4">
+          {data.tickets.filter((ticket) => !ticket.code.startsWith("test")).map((ticket) => <TicketSplit key={ticket.code} ticket={ticket} />)}
+        </div>
       </Panel>
       <Panel title="Payments by method">
         <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Recorded payments on confirmed registrations. A channel line is the sum of its methods. Bar lengths compare amounts in the same currency.</p>

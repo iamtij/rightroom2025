@@ -5,6 +5,7 @@ import { assessProductionLiveDeploymentIdentity } from "./deployment-identity.js
 import { sendEmail } from "./providers.js";
 import { reportError } from "./report-error.js";
 import { renderDailyReport } from "./daily-report-email.js";
+import { posterRecipients, renderRegistrationPoster } from "./registration-poster.js";
 import { addDays, formatMoney, manilaParts } from "./time.js";
 
 const TEST_PRODUCT = "test%";
@@ -48,13 +49,15 @@ function shortDate(iso, today) {
 }
 
 function blankTotals() {
-  return { seats: 0, paidFull: 0, installment: 0, collectedCents: 0, scheduledCents: 0 };
+  return { seats: 0, paidFull: 0, paidFullCents: 0, installment: 0, installmentCents: 0, collectedCents: 0, scheduledCents: 0 };
 }
 
 function addTotals(totals, ticket) {
   totals.seats += ticket.seats;
   totals.paidFull += ticket.paidFull;
+  totals.paidFullCents += ticket.paidFullCents;
   totals.installment += ticket.installment;
+  totals.installmentCents += ticket.installmentCents;
   totals.collectedCents += ticket.collectedCents;
   totals.scheduledCents += ticket.scheduledCents;
 }
@@ -186,7 +189,15 @@ export function buildDailyReport(db, asOf = new Date()) {
       p.code, p.name, p.currency, p.full_price_cents, p.installment_total_cents, p.sales_start, p.sales_end,
       SUM(CASE WHEN r.id IS NOT NULL AND r.status != 'cancelled' THEN 1 ELSE 0 END) AS seats,
       SUM(CASE WHEN r.status = 'confirmed' AND r.fully_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS paid_full,
+      COALESCE(SUM(CASE WHEN r.status = 'confirmed' AND r.fully_paid_at IS NOT NULL THEN (
+        SELECT COALESCE(SUM(pay.amount_cents), 0) FROM payments pay
+        WHERE pay.registration_id = r.id AND COALESCE(pay.method, '') != 'comp'
+      ) ELSE 0 END), 0) AS paid_full_cents,
       SUM(CASE WHEN r.status = 'confirmed' AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN 1 ELSE 0 END) AS installment,
+      COALESCE(SUM(CASE WHEN r.status = 'confirmed' AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN (
+        SELECT COALESCE(SUM(pay.amount_cents), 0) FROM payments pay
+        WHERE pay.registration_id = r.id AND COALESCE(pay.method, '') != 'comp'
+      ) ELSE 0 END), 0) AS installment_cents,
       COALESCE(SUM(CASE WHEN r.status != 'cancelled' THEN (
         SELECT COALESCE(SUM(pay.amount_cents), 0) FROM payments pay
         WHERE pay.registration_id = r.id AND COALESCE(pay.method, '') != 'comp'
@@ -207,7 +218,9 @@ export function buildDailyReport(db, asOf = new Date()) {
     const phase = phaseFor(row.sales_start, row.sales_end, today);
     const seats = Number(row.seats) || 0;
     const paidFull = Number(row.paid_full) || 0;
+    const paidFullCents = Number(row.paid_full_cents) || 0;
     const installment = Number(row.installment) || 0;
+    const installmentCents = Number(row.installment_cents) || 0;
     const collectedCents = Number(row.collected_cents) || 0;
     const scheduledCents = Number(row.scheduled_cents) || 0;
     return {
@@ -221,10 +234,12 @@ export function buildDailyReport(db, asOf = new Date()) {
       priceLabel: priceLabel(row),
       seats,
       paidFull,
+      paidFullCents,
       installment,
+      installmentCents,
       collectedCents,
       scheduledCents,
-      showDash: phase === "later" && !seats && !paidFull && !installment && !collectedCents && !scheduledCents,
+      showDash: phase === "later" && !seats && !paidFull && !paidFullCents && !installment && !installmentCents && !collectedCents && !scheduledCents,
     };
   });
 
@@ -370,6 +385,22 @@ export function buildDailyReport(db, asOf = new Date()) {
 
   const late15 = bandState.get("day15").count;
   const fullyPaid = tickets.reduce((sum, ticket) => sum + ticket.paidFull, 0);
+  const firstMovers = Number(db.prepare(`
+    SELECT COUNT(*) AS count FROM registrations r
+    JOIN ticket_products p ON p.id = r.product_id
+    WHERE r.status = 'confirmed' AND p.code = 'first_mover'
+  `).get().count) || 0;
+  const rosterCounts = { updated: 0, delayed: 0, cancelled: 0 };
+  for (const row of db.prepare("SELECT reg_status AS status, COUNT(*) AS count FROM members GROUP BY reg_status").all()) {
+    if (row.status in rosterCounts) rosterCounts[row.status] = row.count;
+  }
+  const roster = {
+    total: rosterCounts.updated + rosterCounts.delayed + rosterCounts.cancelled,
+    updated: rosterCounts.updated,
+    delayed: rosterCounts.delayed,
+    cancelled: rosterCounts.cancelled,
+    firstMovers: Number(db.prepare("SELECT COUNT(*) AS count FROM members WHERE lower(COALESCE(ticket_type, '')) LIKE '%first mover%'").get().count) || 0,
+  };
   const chapters = db.prepare(`
     SELECT TRIM(r.chapter) AS name, COUNT(*) AS count
     FROM registrations r
@@ -387,6 +418,8 @@ export function buildDailyReport(db, asOf = new Date()) {
     today,
     seatsConfirmed,
     fullyPaid,
+    firstMovers,
+    roster,
     cancelledToDate,
     collected,
     scheduled,
@@ -482,10 +515,66 @@ export async function runDailyReport(db, now = new Date(), options = {}) {
   return { status, date: reportOn, results };
 }
 
+export async function runRegistrationPoster(db, now = new Date(), options = {}) {
+  const force = options.force === true;
+  const clock = manilaParts(now);
+  if (!force && (clock.time < SEND_AFTER || clock.time >= SEND_BEFORE)) {
+    return { status: "waiting", date: clock.date };
+  }
+  if (!force && !Array.isArray(options.to) && !assessProductionLiveDeploymentIdentity().allowed) {
+    return { status: "skipped", reason: "not_production", date: clock.date };
+  }
+  const recipients = Array.isArray(options.to) ? options.to.flatMap((value) => reportRecipients(value)) : posterRecipients();
+  if (!recipients.length) return { status: "skipped", reason: "no_recipients", date: clock.date };
+
+  const asOf = force ? now : atManila(clock.date, 9, 0);
+  const reportOn = manilaParts(asOf).date;
+  const rendered = renderRegistrationPoster(buildDailyReport(db, asOf));
+  const results = [];
+  for (let index = 0; index < recipients.length; index += 1) {
+    const recipient = recipients[index];
+    if (index > 0) await pause(600);
+    if (!force) {
+      const existing = db.prepare("SELECT id, status FROM registration_poster_sends WHERE report_on = ? AND recipient = ?").get(reportOn, recipient);
+      if (existing?.status === "sent") {
+        results.push({ recipient, status: "sent", duplicate: true });
+        continue;
+      }
+      if (existing) db.prepare("DELETE FROM registration_poster_sends WHERE id = ?").run(existing.id);
+    }
+    const stamp = force ? `${reportOn}T${manilaParts(asOf).time}` : reportOn;
+    const outcome = await sendEmail({
+      to: recipient,
+      subject: rendered.subject,
+      html: rendered.html,
+      text: rendered.text,
+      idempotencyKey: `registration-poster/${force ? "manual" : "scheduled"}/${stamp}/${recipient}`,
+      deliveryKind: "daily_report",
+      bypassSafeMode: force,
+    });
+    if (!force) {
+      db.prepare(`
+        INSERT INTO registration_poster_sends (report_on, recipient, status, provider_id, error)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(reportOn, recipient, outcome.status, outcome.providerId || null, outcome.error || null);
+    }
+    results.push({ recipient, status: outcome.status, providerId: outcome.providerId || null, error: outcome.error || null });
+  }
+  const status = results.every((row) => row.duplicate) ? "already_sent" : "sent";
+  if (!force && results.some((row) => row.status === "sent" && !row.duplicate)) {
+    console.log(`Registration poster ${reportOn} sent to ${results.filter((row) => row.status === "sent").length} recipient(s)`);
+  }
+  return { status, date: reportOn, results };
+}
+
 export function startDailyReportLoop(db) {
   const tick = () => {
     runDailyReport(db).catch((error) => {
       console.error("Daily report failed:", error.message);
+      reportError(error);
+    });
+    runRegistrationPoster(db).catch((error) => {
+      console.error("Registration poster failed:", error.message);
       reportError(error);
     });
   };

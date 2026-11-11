@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { openDatabase } from "./db.js";
 import { cancelRegistration, createRegistration, recordPayment } from "./registrations.js";
-import { buildDailyReport, runDailyReport } from "./daily-report.js";
+import { buildDailyReport, runDailyReport, runRegistrationPoster } from "./daily-report.js";
 import { renderDailyReport } from "./daily-report-email.js";
+import { renderRegistrationPoster } from "./registration-poster.js";
 
 const asOf = new Date("2026-11-11T01:00:00.000Z");
 const db = openDatabase(":memory:");
@@ -119,9 +120,15 @@ assert.deepEqual(report.health.bands.map((band) => [band.key, band.count]), [
   ["day15", 1],
 ]);
 assert.equal(report.health.atRisk.length, 1);
-assert.equal(report.tickets.find((ticket) => ticket.code === "first_mover").paidFull, 1);
+const firstMover = report.tickets.find((ticket) => ticket.code === "first_mover");
+assert.equal(firstMover.paidFull, 1);
+assert.equal(firstMover.paidFullCents, 1_200_000);
+assert.equal(firstMover.installment, 7);
+assert.equal(firstMover.installmentCents, 530_000);
 assert.equal(report.fullyPaid, 1);
 assert.equal(report.totals.PHP.paidFull, 1);
+assert.equal(report.totals.PHP.paidFullCents, 1_200_000);
+assert.equal(report.totals.PHP.installmentCents, 530_000);
 assert.deepEqual(report.chapters, [{ name: "BNI Legacy", count: 1 }]);
 assert.equal(report.health.atRisk[0].name, "Joy Dizon");
 assert.equal(report.health.atRisk[0].chapter, "BNI Legacy");
@@ -154,7 +161,42 @@ assert.equal(mail.html.includes("height:5px;background:#CF2030"), false);
 assert.equal(mail.html.includes("Complimentary"), false);
 assert.equal(mail.html.includes("No peso payments yet"), false);
 assert.match(mail.text, /Joy Dizon, BNI Legacy/);
+assert.match(mail.html, /Full paid/);
+assert.match(mail.html, /Installments/);
+assert.match(mail.html, /₱12,000 · 1/);
+assert.match(mail.html, /₱5,300 · 7/);
+assert.match(mail.text, /full paid ₱12,000 · 1/);
 assert.match(mail.text, /Total \(PHP\): 8 seats/);
+const countMail = renderDailyReport({
+  ...report,
+  omitSales: true,
+  firstMovers: 8,
+  notes: ["Seat counts only."],
+  healthHint: "Installment health.",
+  roster: { total: 3, updated: "2", delayed: 1, firstMovers: 1 },
+});
+assert.match(countMail.html, /IBMC 2027 Report/);
+assert.equal(countMail.html.includes("₱"), false);
+assert.equal(countMail.html.includes("USD "), false);
+assert.match(countMail.text, /full paid 1 · installments 7/);
+const poster = renderRegistrationPoster(report);
+assert.equal(poster.subject, "IBMC 2027 Registrations · November 11, 2026");
+assert.match(poster.html, /IBMC/);
+assert.match(poster.html, /Total registrations/);
+assert.match(poster.html, /First Mover/);
+assert.match(poster.html, /Full paid/);
+assert.match(poster.html, /Installments/);
+assert.match(poster.html, /BNI Legacy/);
+assert.match(poster.html, />Total</);
+assert.match(poster.html, /Extracted Wednesday, November 11, 2026 · 9:00 AM PHT/);
+assert.equal(poster.total, 8);
+assert.equal(poster.firstMovers, 8);
+assert.equal(poster.fullPaid, 1);
+assert.equal(poster.installments, 7);
+assert.equal(poster.html.includes("₱"), false);
+assert.equal(poster.html.includes("USD "), false);
+assert.match(poster.text, /First Mover: 8/);
+assert.match(poster.text, /BNI Legacy: 1/);
 
 const previousKey = process.env.RESEND_API_KEY;
 delete process.env.RESEND_API_KEY;

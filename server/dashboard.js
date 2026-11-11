@@ -249,6 +249,17 @@ export function dashboardStats(db) {
       SUM(CASE WHEN r.status != 'cancelled' THEN 1 ELSE 0 END) AS signups,
       SUM(CASE WHEN r.status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
       SUM(CASE WHEN r.status != 'cancelled' AND r.fully_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS fully_paid,
+      COALESCE(SUM(CASE WHEN r.status != 'cancelled' AND r.fully_paid_at IS NOT NULL THEN (
+        SELECT COALESCE(SUM(i.amount_paid_cents), 0)
+        FROM registration_installments i
+        WHERE i.registration_id = r.id
+      ) ELSE 0 END), 0) AS fully_paid_cents,
+      SUM(CASE WHEN r.status != 'cancelled' AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN 1 ELSE 0 END) AS installment_seats,
+      COALESCE(SUM(CASE WHEN r.status != 'cancelled' AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN (
+        SELECT COALESCE(SUM(i.amount_paid_cents), 0)
+        FROM registration_installments i
+        WHERE i.registration_id = r.id
+      ) ELSE 0 END), 0) AS installment_cents,
       SUM(CASE WHEN r.status != 'cancelled' AND r.payment_plan = 'full' THEN 1 ELSE 0 END) AS pay_in_full,
       SUM(CASE WHEN r.status != 'cancelled' AND r.payment_plan = 'installment' THEN 1 ELSE 0 END) AS installment,
       COALESCE(SUM(CASE WHEN r.status != 'cancelled' THEN r.amount_due_cents ELSE 0 END), 0) AS booked_cents,
@@ -328,6 +339,9 @@ export function dashboardStats(db) {
       signups: ticket.signups,
       cancelled: ticket.cancelled,
       fullyPaid: ticket.fully_paid,
+      fullyPaidCents: ticket.fully_paid_cents,
+      installmentSeats: ticket.installment_seats,
+      installmentCents: ticket.installment_cents,
       collectedCents: ticket.collected_cents,
       bookedCents: ticket.booked_cents,
     })),

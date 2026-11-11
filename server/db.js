@@ -175,6 +175,17 @@ CREATE TABLE IF NOT EXISTS daily_report_sends (
   UNIQUE (report_on, recipient)
 );
 
+CREATE TABLE IF NOT EXISTS registration_poster_sends (
+  id INTEGER PRIMARY KEY,
+  report_on TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  status TEXT NOT NULL,
+  provider_id TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (report_on, recipient)
+);
+
 CREATE TABLE IF NOT EXISTS coupons (
   id INTEGER PRIMARY KEY,
   code TEXT NOT NULL UNIQUE,
