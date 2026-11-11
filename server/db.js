@@ -164,6 +164,17 @@ CREATE TABLE IF NOT EXISTS reminder_dispatches (
 CREATE INDEX IF NOT EXISTS idx_installments_due ON registration_installments(status, due_on);
 CREATE INDEX IF NOT EXISTS idx_dispatches_registration ON reminder_dispatches(registration_id);
 
+CREATE TABLE IF NOT EXISTS daily_report_sends (
+  id INTEGER PRIMARY KEY,
+  report_on TEXT NOT NULL,
+  recipient TEXT NOT NULL,
+  status TEXT NOT NULL,
+  provider_id TEXT,
+  error TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (report_on, recipient)
+);
+
 CREATE TABLE IF NOT EXISTS coupons (
   id INTEGER PRIMARY KEY,
   code TEXT NOT NULL UNIQUE,

@@ -93,6 +93,10 @@ try {
     const { startReminderLoop } = await import('./server/reminders.js');
     startReminderLoop(db);
   }
+  if (process.env.DAILY_REPORT_ENABLED !== 'false') {
+    const { startDailyReportLoop } = await import('./server/daily-report.js');
+    startDailyReportLoop(db);
+  }
 } catch (error) {
   console.error('Reminder database was not started:', error.message);
   const { reportError } = await import('./server/report-error.js');

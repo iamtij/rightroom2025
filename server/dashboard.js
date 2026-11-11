@@ -224,6 +224,10 @@ function paymentMethodTotals(db) {
   }));
 }
 
+export function collectPaymentMethods(db) {
+  return paymentMethodTotals(db);
+}
+
 export function dashboardStats(db) {
   const today = manilaParts().date;
   const through = addDays(today, 30);
