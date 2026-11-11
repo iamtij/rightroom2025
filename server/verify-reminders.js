@@ -272,14 +272,14 @@ const customEmail = previewTemplate({
   body: "Hi {{first_name}}, {{amount}} is due {{due_date}}. Pay: {{pay_url}}",
   systemKey: "",
 });
-assert.match(customEmail.html, /amplify-logo-white\.png/);
+assert.match(customEmail.html, /ibmc-2027-logo\.png/);
 assert.match(customEmail.html, /IBMC 2027 payment reminder/);
 assert.match(customEmail.html, /Hi Maria, ₱2,000 is due Mar 15, 2027\. Pay: https:\/\/ibmcph\.com\/pay\/IBMC-2048/);
 assert.match(customEmail.html, /Pay this installment/);
 assert.match(customEmail.html, /Amplify others\. Get amplified\./);
 assert.equal(customEmail.html.includes("Open my QR ticket"), false);
 const plainEmail = previewTemplate({ channel: "email", subject: "Hello", body: "Hi {{first_name}}", systemKey: "" });
-assert.match(plainEmail.html, /amplify-logo-white\.png/);
+assert.match(plainEmail.html, /ibmc-2027-logo\.png/);
 assert.equal(plainEmail.html.includes("Pay this installment"), false);
 const firstMoverReminder = renderInstallmentReminder({
   registration: { full_name: "Maria Santos", product_name: "First Mover", product_code: "first_mover", currency: "PHP", reference: "IBMC-2048", payment_plan: "installment", installment_count: 7 },

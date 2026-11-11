@@ -2,12 +2,11 @@ import QRCode from "qrcode";
 import { daysLabel, formatLongDate, formatMoney } from "./time.js";
 
 const EVENT = "June 16–17, 2027 · Newport Performing Arts Theater, Pasay City";
-const AMPLIFY_LOGO = "https://ibmcph.com/assets/amplify-logo-white.png";
+const EVENT_LOGO = "https://ibmcph.com/assets/ibmc-2027-logo.png?v=3";
 
 function brandHeader() {
   return `<tr><td style="background:#0E0E10;padding:22px 32px 18px;">
-          <div style="font-family:Arial,sans-serif;font-size:13px;font-weight:700;letter-spacing:0.16em;color:#FFFFFF;">IBMC 2027</div>
-          <img src="${AMPLIFY_LOGO}" width="240" height="35" alt="AMPLIFY" style="display:block;margin-top:10px;border:0;width:240px;max-width:100%;height:auto;">
+          <img src="${EVENT_LOGO}" width="320" height="89" alt="IBMC 2027" style="display:block;border:0;width:320px;max-width:100%;height:auto;">
         </td></tr>
         <tr><td style="height:4px;background:#D0202E;font-size:0;line-height:0;">&nbsp;</td></tr>`;
 }

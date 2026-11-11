@@ -471,6 +471,7 @@ function BeforeAfter() {
   );
 }
 
+const SHOW_MOVING_AMPLIFY = false;
 const AMPLIFY_LINES = ["Your Impact", "Relationships", "Your Business", "Your Influence", "as a Team", "Together"];
 
 function AmplifyCycle() {
@@ -564,15 +565,16 @@ export default function AmplifyHome() {
             IBMC 2027 · International Business Matching Conference · BNI Philippines
           </p>
           <h1 className="m-0 w-full py-6">
+            {/* Temporary lockup until the AMPLIFY logo launches in January. */}
             <img
-              src="/assets/amplify-logo-white.png"
-              alt="AMPLIFY"
-              width={904}
-              height={132}
-              className="mx-auto block h-auto w-full max-w-[900px]"
+              src="/assets/ibmc-2027-logo.png?v=3"
+              alt="IBMC 2027"
+              width={944}
+              height={263}
+              className="mx-auto block h-auto w-full max-w-[780px]"
             />
           </h1>
-          <AmplifyCycle />
+          {SHOW_MOVING_AMPLIFY && <AmplifyCycle />}
           <p className="m-0 text-[clamp(16px,1.6vw,20px)] text-[#C8C8C8]">
             June 16–17, 2027 · Newport Performing Arts Theater, Pasay City
           </p>
