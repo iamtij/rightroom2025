@@ -73,6 +73,7 @@ pay(cancelled, 99_000, "upay:instapay");
 cancelRegistration(db, cancelled.id);
 
 const stats = dashboardStats(db);
+assert.equal(stats.plans.fullyPaid, stats.tickets.reduce((sum, ticket) => sum + ticket.fullyPaid, 0));
 const methods = stats.paymentMethods;
 const byChannel = (channel, currency) => methods.find((row) => row.channel === channel && row.currency === currency);
 const method = (channel, currency, code) => byChannel(channel, currency).methods.find((row) => row.code === code);

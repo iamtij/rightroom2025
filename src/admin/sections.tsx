@@ -323,6 +323,7 @@ function Dashboard({ onError }: { onError: (message: string) => void }) {
       <h1 className="m-0 font-archivo text-[28px] font-extrabold">Dashboard</h1>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
         <Kpi label="Total signups" value={data.signups.total} note={`${data.signups.confirmed} confirmed · ${data.signups.cancelled} cancelled`} />
+        <Kpi label="Fully paid" value={data.plans.fullyPaid} note={data.signups.confirmed ? `${Math.round((data.plans.fullyPaid / data.signups.confirmed) * 100)}% of confirmed` : "No confirmed signups yet"} />
         <Kpi label="First movers" value={data.signups.firstMovers} note={firstMoverNote} />
         <Kpi label="Updated" value={share(data.roster.updatedPercent)} note={`${data.roster.updated} of ${data.roster.total} on the roster`} />
         <Kpi label="Delayed" value={share(data.roster.delayedPercent)} note={`${data.roster.delayed} of ${data.roster.total} on the roster`} accent />
@@ -339,16 +340,21 @@ function Dashboard({ onError }: { onError: (message: string) => void }) {
         </Panel>
       </div>
       <Panel title="Signups by ticket">
-        <StackedBars rows={data.tickets.map((ticket) => ({
-          label: ticket.name,
-          detail: `${ticket.signups} confirmed · ${ticket.cancelled} cancelled`,
-          parts: [
-            { value: ticket.signups, color: chartColors.confirmed, name: "confirmed" },
-            { value: ticket.cancelled, color: chartColors.cancelled, name: "cancelled" },
-          ],
-        }))} />
+        <StackedBars rows={data.tickets.map((ticket) => {
+          const stillOwing = Math.max(0, ticket.signups - ticket.fullyPaid);
+          return {
+            label: ticket.name,
+            detail: `${ticket.signups} confirmed · ${ticket.fullyPaid} fully paid · ${ticket.cancelled} cancelled`,
+            parts: [
+              { value: ticket.fullyPaid, color: chartColors.updated, name: "fully paid" },
+              { value: stillOwing, color: chartColors.confirmed, name: "still owing" },
+              { value: ticket.cancelled, color: chartColors.cancelled, name: "cancelled" },
+            ],
+          };
+        })} />
         <p className="m-0 flex flex-wrap gap-4 text-[13px] text-[#5C5C63]">
-          <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#D0202E]" />Confirmed</span>
+          <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#141416]" />Fully paid</span>
+          <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#D0202E]" />Still owing</span>
           <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#B7B3AD]" />Cancelled</span>
         </p>
       </Panel>
