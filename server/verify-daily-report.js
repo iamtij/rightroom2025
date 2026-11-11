@@ -141,7 +141,7 @@ assert.match(mail.html, /3 registrations behind · 1 moved to the Regular price/
 assert.match(mail.html, /Joy Dizon/);
 assert.match(mail.html, /By chapter/);
 assert.match(mail.html, /BNI Legacy/);
-assert.match(mail.html, /Cancellations are not included/);
+assert.equal(mail.html.includes("Cancellations are not included"), false);
 assert.match(mail.html, />Total</);
 assert.match(mail.html, /14 days/);
 assert.match(mail.html, /Nov 13/);

@@ -248,7 +248,7 @@ function chapterSection(chapters) {
     <td align="right" style="${TD}text-align:right;">${chapter.count.toLocaleString("en-US")}</td>
   </tr>`).join("");
   return `<tr><td style="padding-bottom:16px;">
-    ${card("By chapter", "Confirmed registrations only, highest first. Cancellations are not included.", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border-collapse:collapse;">
+    ${card("By chapter", "Confirmed seats only, highest first.", `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:12px;border-collapse:collapse;">
       <thead><tr>
         <th align="left" style="${TH}">Chapter</th>
         <th align="right" style="${TH}text-align:right;">Seats</th>

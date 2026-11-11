@@ -373,7 +373,8 @@ export function buildDailyReport(db, asOf = new Date()) {
     SELECT TRIM(r.chapter) AS name, COUNT(*) AS count
     FROM registrations r
     JOIN ticket_products p ON p.id = r.product_id
-    WHERE r.status = 'confirmed'
+    WHERE lower(r.status) = 'confirmed'
+      AND r.payment_hold_cancelled_at IS NULL
       AND p.code NOT LIKE ?
       AND TRIM(COALESCE(r.chapter, '')) != ''
     GROUP BY TRIM(r.chapter)
