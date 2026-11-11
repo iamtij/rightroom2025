@@ -83,6 +83,8 @@ try {
   const { openDatabase } = await import('./server/db.js');
   const { startBackupLoop } = await import('./server/backup.js');
   const db = openDatabase();
+  const { repairHitpayMismatches } = await import('./server/hitpay.js');
+  await repairHitpayMismatches(db);
   startBackupLoop(db);
   if (process.env.REMINDERS_ENABLED !== 'false') {
     const { startReminderLoop } = await import('./server/reminders.js');

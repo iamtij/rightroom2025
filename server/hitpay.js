@@ -35,7 +35,9 @@ export function allowedHitpayUrl(value) {
 }
 
 export function hitpayCentavos(amount) {
-  const value = Number(amount);
+  const text = String(amount ?? "").trim().replace(/,/g, "");
+  if (!text) return null;
+  const value = Number(text);
   if (!Number.isFinite(value)) return null;
   return Math.round(value * 100);
 }
@@ -233,12 +235,13 @@ function settleHitpay(db, row) {
 
 async function applyHitpayPayload(db, payload) {
   const row = findSession(db, payload);
-  if (!row || row.status === "paid" || row.gateway_status === "mismatch") return row;
+  if (!row || row.status === "paid") return row;
   const gatewayRef = String(payload?.id || "") || null;
   if (paymentAccepted(payload, row)) {
     settleHitpay(db, row);
     return db.prepare("SELECT * FROM hitpay_payments WHERE id = ?").get(row.id);
   }
+  if (row.gateway_status === "mismatch") return row;
   const remote = String(payload?.status || "").toLowerCase();
   if (completedMismatch(payload, row)) return saveHitpay(db, row, { status: "failed", gatewayStatus: "mismatch", gatewayRef });
   if (remote === "expired") return saveHitpay(db, row, { status: "expired", gatewayStatus: remote, gatewayRef });
@@ -490,6 +493,32 @@ export async function refreshHitpayQr(db, sessionId) {
   } finally {
     release(lock);
   }
+}
+
+export async function repairHitpayMismatches(db) {
+  const rows = db.prepare(`
+    SELECT id FROM hitpay_payments
+    WHERE status = 'failed' AND gateway_status = 'mismatch' AND gateway_ref IS NOT NULL
+  `).all();
+  let recorded = 0;
+  for (const item of rows) {
+    const row = db.prepare("SELECT * FROM hitpay_payments WHERE id = ?").get(item.id);
+    if (!row || row.status !== "failed" || row.gateway_status !== "mismatch" || !row.gateway_ref) continue;
+    try {
+      const remote = await hitpayFetch(`/v1/payment-requests/${encodeURIComponent(row.gateway_ref)}`);
+      if (!remote.ok) continue;
+      await applyHitpayPayload(db, remote.body);
+      const after = db.prepare("SELECT status FROM hitpay_payments WHERE id = ?").get(row.id);
+      if (after?.status === "paid") {
+        recorded += 1;
+        const registration = getRegistration(db, row.registration_id);
+        console.log(`HitPay payment recorded for ${registration?.reference || row.registration_id}`);
+      }
+    } catch (error) {
+      console.error(error instanceof Error ? error.message : error);
+    }
+  }
+  return recorded;
 }
 
 export async function handleHitpayWebhook(db, rawBody, signature, headers = {}) {

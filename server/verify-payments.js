@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9,6 +10,7 @@ import { createRegistration, getEntryPass, recordPayment, resumeTokenMatches } f
 import { upayPublicCheckoutInfo, upaySettlement } from "./upay.js";
 import { buyerPaymentChannels, listPaymentChannels, savePaymentChannels, savePaynamicsMethods } from "./payment-channels.js";
 import { convenienceFeeCents, paymentCharge, settlementBaseCents } from "./convenience-fee.js";
+import { handleHitpayWebhook, hitpayCentavos, paymentAccepted, repairHitpayMismatches } from "./hitpay.js";
 
 delete process.env.ALLOW_TEST_TICKET;
 
@@ -67,6 +69,117 @@ assert.equal(convenienceFeeCents(1_500_000, null, 2000), 2_000);
 assert.equal(convenienceFeeCents(1_500_000, null, null), 0);
 assert.equal(settlementBaseCents({ amount_cents: 1_515_000, fee_cents: 15_000 }), 1_500_000);
 assert.equal(settlementBaseCents({ amount_cents: 1_500_000 }), 1_500_000);
+assert.equal(hitpayCentavos("1,023.00"), 102_300);
+assert.equal(hitpayCentavos("1023.00"), 102_300);
+assert.equal(hitpayCentavos(1023), 102_300);
+assert.equal(hitpayCentavos("15.00"), 1_500);
+assert.equal(hitpayCentavos(""), null);
+assert.equal(hitpayCentavos("nope"), null);
+const commaCharge = { session_id: "sess-1023", amount_cents: 102_300 };
+assert.equal(paymentAccepted({
+  status: "completed",
+  reference_number: "sess-1023",
+  currency: "PHP",
+  amount: "1,023.00",
+  payments: [{ status: "succeeded", currency: "php", amount: "1,023.00" }],
+}, commaCharge), true);
+assert.equal(paymentAccepted({
+  status: "completed",
+  reference_number: "sess-1023",
+  currency: "PHP",
+  amount: "1,000.00",
+  payments: [{ status: "succeeded", currency: "php", amount: "1,000.00" }],
+}, commaCharge), false);
+
+function groupedAmount(cents) {
+  const [whole, frac] = (cents / 100).toFixed(2).split(".");
+  return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",")}.${frac}`;
+}
+
+function insertMismatch(registration, sessionId, gatewayRef) {
+  const due = registration.installments.find((item) => item.status === "due");
+  db.prepare(`
+    INSERT INTO hitpay_payments (
+      registration_id, installment_id, session_id, gateway_ref, amount_cents, fee_cents, currency, channel, status, gateway_status
+    ) VALUES (?, ?, ?, ?, ?, 0, 'PHP', 'qr', 'failed', 'mismatch')
+  `).run(registration.id, due.id, sessionId, gatewayRef, due.amount_cents);
+  return due;
+}
+
+const commaRegistration = createRegistration(db, {
+  productCode: "first_mover",
+  paymentPlan: "full",
+  fullName: "Comma Payer",
+  email: "comma-payer@example.com",
+  mobile: "09170000102",
+  registeredOn: "2026-11-12",
+});
+const commaDue = insertMismatch(commaRegistration, "sess-comma", "gw-comma");
+const commaPayload = {
+  id: "gw-comma",
+  status: "completed",
+  reference_number: "sess-comma",
+  currency: "PHP",
+  amount: groupedAmount(commaDue.amount_cents),
+  payments: [{ status: "succeeded", currency: "php", amount: groupedAmount(commaDue.amount_cents) }],
+};
+assert.match(commaPayload.amount, /,/);
+const commaRaw = JSON.stringify(commaPayload);
+process.env.HITPAY_SALT = "hitpay-comma-salt";
+const commaSignature = crypto.createHmac("sha256", process.env.HITPAY_SALT).update(commaRaw, "utf8").digest("hex");
+const commaWebhook = await handleHitpayWebhook(db, commaRaw, commaSignature, { eventType: "completed", eventObject: "payment_request" });
+assert.equal(commaWebhook.status, 200);
+assert.deepEqual(db.prepare("SELECT status, gateway_status FROM hitpay_payments WHERE session_id = 'sess-comma'").get(), { status: "paid", gateway_status: "completed" });
+assert.deepEqual(db.prepare("SELECT amount_cents, method FROM payments WHERE external_reference = 'sess-comma'").get(), { amount_cents: commaDue.amount_cents, method: "hitpay:qr" });
+
+const repairRegistration = createRegistration(db, {
+  productCode: "first_mover",
+  paymentPlan: "full",
+  fullName: "Repair Payer",
+  email: "repair-payer@example.com",
+  mobile: "09170000103",
+  registeredOn: "2026-11-12",
+});
+const repairDue = insertMismatch(repairRegistration, "sess-repair", "gw-repair");
+const refusedRegistration = createRegistration(db, {
+  productCode: "first_mover",
+  paymentPlan: "full",
+  fullName: "Refused Payer",
+  email: "refused-payer@example.com",
+  mobile: "09170000104",
+  registeredOn: "2026-11-12",
+});
+insertMismatch(refusedRegistration, "sess-refused", "gw-refused");
+const originalFetch = global.fetch;
+const savedHitpayKey = process.env.HITPAY_API_KEY;
+const savedHitpayBase = process.env.HITPAY_API_BASE_URL;
+process.env.HITPAY_API_KEY = "test-key";
+process.env.HITPAY_API_BASE_URL = "https://api.hit-pay.com";
+global.fetch = async (url) => {
+  const id = String(url).split("/").pop();
+  const accepted = id === "gw-repair";
+  const amount = accepted ? groupedAmount(repairDue.amount_cents) : "1.00";
+  const reference = accepted ? "sess-repair" : "sess-refused";
+  return new Response(JSON.stringify({
+    id,
+    status: "completed",
+    reference_number: reference,
+    currency: "PHP",
+    amount,
+    payments: [{ status: "succeeded", currency: "php", amount }],
+  }), { status: 200, headers: { "content-type": "application/json" } });
+};
+assert.equal(await repairHitpayMismatches(db), 1);
+assert.equal(db.prepare("SELECT status FROM hitpay_payments WHERE session_id = 'sess-repair'").get().status, "paid");
+assert.equal(db.prepare("SELECT amount_cents FROM payments WHERE external_reference = 'sess-repair'").get().amount_cents, repairDue.amount_cents);
+assert.deepEqual(db.prepare("SELECT status, gateway_status FROM hitpay_payments WHERE session_id = 'sess-refused'").get(), { status: "failed", gateway_status: "mismatch" });
+global.fetch = originalFetch;
+if (savedHitpayKey === undefined) delete process.env.HITPAY_API_KEY;
+else process.env.HITPAY_API_KEY = savedHitpayKey;
+if (savedHitpayBase === undefined) delete process.env.HITPAY_API_BASE_URL;
+else process.env.HITPAY_API_BASE_URL = savedHitpayBase;
+delete process.env.HITPAY_SALT;
+
 savePaymentChannels(db, { hitpay_qr: { feePercent: "1", feeFixed: "20", enabled: true } });
 assert.equal(qrChannel().feePercentBps, 1000);
 assert.equal(qrChannel().feeFixedCents, 2000);
