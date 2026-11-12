@@ -50,3 +50,21 @@ export function daysLabel(daysBefore) {
   if (daysBefore === 1) return "due tomorrow";
   return `due in ${daysBefore} days`;
 }
+
+export function formatDateTimeManila(value) {
+  if (!value) return "";
+  const raw = String(value).trim();
+  const date = raw.includes("T") ? new Date(raw) : new Date(`${raw.replace(" ", "T")}Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    timeZone: MANILA,
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
+  return `${formatted} (PHT)`;
+}

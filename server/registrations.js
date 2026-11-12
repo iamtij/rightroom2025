@@ -342,7 +342,7 @@ export function recordPayment(db, input) {
     if (input.amountCents <= 0 || input.amountCents > remaining) {
       throw new Error("Payment does not match the amount still due");
     }
-    db.prepare(`
+    const paymentInsert = db.prepare(`
       INSERT INTO payments (registration_id, installment_id, amount_cents, currency, method, external_reference, admin_user_id)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -354,6 +354,7 @@ export function recordPayment(db, input) {
       input.externalReference || null,
       input.adminUserId || null,
     );
+    const paymentId = paymentInsert.lastInsertRowid;
     if (input.adminUserId) {
       const action = input.method === "comp" ? "registration.comp" : "registration.payment";
       db.prepare(`
@@ -385,13 +386,16 @@ export function recordPayment(db, input) {
         WHERE id = ?
       `).run(token(), new Date().toISOString(), registration.id);
     }
-    return registration.id;
+    return { registrationId: registration.id, paymentId };
   });
-  const registrationId = run();
+  const { registrationId, paymentId } = run();
   const updated = getRegistration(db, registrationId);
-  if (updated.balance_cents === 0 && updated.fully_paid_at && updated.qr_token) {
-    import("./reminders.js").then(({ queueEntryPassAfterPayment }) => queueEntryPassAfterPayment(db, registrationId));
-  }
+  import("./reminders.js").then(({ queuePaymentConfirmationAfterPayment, queueEntryPassAfterPayment }) => {
+    queuePaymentConfirmationAfterPayment(db, registrationId, paymentId);
+    if (updated.balance_cents === 0 && updated.fully_paid_at && updated.qr_token) {
+      queueEntryPassAfterPayment(db, registrationId);
+    }
+  });
   return updated;
 }
 

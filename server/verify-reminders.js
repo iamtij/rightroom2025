@@ -46,13 +46,23 @@ assert.equal(partial.qr_token, null);
 recordPayment(db, { registrationId: partial.id, amountCents: 100_000, method: "manual" });
 const stillOpen = db.prepare("SELECT qr_token FROM registrations WHERE id = ?").get(partial.id);
 assert.equal(stillOpen.qr_token, null);
+await new Promise((resolve) => setTimeout(resolve, 150));
+const confirmDispatch = db.prepare(`
+  SELECT template_key, subject, includes_qr, status
+  FROM reminder_dispatches WHERE registration_id = ? AND template_key = 'payment_confirmation'
+  ORDER BY id DESC LIMIT 1
+`).get(partial.id);
+assert.ok(confirmDispatch);
+assert.equal(confirmDispatch.includes_qr, 0);
+assert.match(confirmDispatch.subject, /Payment received/);
+assert.equal(confirmDispatch.status, "skipped");
 
 const nextDue = db.prepare("SELECT id FROM registration_installments WHERE registration_id = ? AND status = 'due' ORDER BY sequence").get(partial.id);
 db.prepare("UPDATE registration_installments SET due_on = ? WHERE id = ?").run(addDays(today, 3), nextDue.id);
 db.prepare("UPDATE reminder_rules SET send_time = '00:00' WHERE trigger = 'before_due'").run();
 
 await runReminders(db, new Date());
-const reminderRows = db.prepare("SELECT channel, body, html, includes_qr, status FROM reminder_dispatches WHERE registration_id = ?").all(partial.id);
+const reminderRows = db.prepare("SELECT channel, body, html, includes_qr, status FROM reminder_dispatches WHERE registration_id = ? AND template_key = 'installment_reminder'").all(partial.id);
 assert.equal(reminderRows.length, 2);
 assert.deepEqual(reminderRows.map((row) => row.channel).sort(), ["email", "sms"]);
 for (const row of reminderRows) {
@@ -68,7 +78,7 @@ assert.equal(philippineMobile("123"), null);
 
 const again = await runReminders(db, new Date());
 assert.equal(again, 0);
-assert.equal(db.prepare("SELECT COUNT(*) AS count FROM reminder_dispatches WHERE registration_id = ?").get(partial.id).count, 2);
+assert.equal(db.prepare("SELECT COUNT(*) AS count FROM reminder_dispatches WHERE registration_id = ? AND template_key = 'installment_reminder'").get(partial.id).count, 2);
 
 const reminded = db.prepare("SELECT installment_id FROM reminder_dispatches WHERE registration_id = ? AND template_key = 'installment_reminder'").get(partial.id);
 recordPayment(db, { registrationId: partial.id, installmentId: reminded.installment_id, amountCents: 200_000 });
@@ -183,7 +193,7 @@ assert.equal(anchored.installments[1].due_on, addDays(today, 2));
 assert.equal(anchored.installments[2].due_on, addDays(today, 3));
 
 await runReminders(db, manilaClock(addDays(today, 1)));
-const firstReminder = db.prepare("SELECT channel, subject, body, html, includes_qr, status FROM reminder_dispatches WHERE registration_id = ?").all(testPlanReg.id);
+const firstReminder = db.prepare("SELECT channel, subject, body, html, includes_qr, status FROM reminder_dispatches WHERE registration_id = ? AND template_key = 'installment_reminder'").all(testPlanReg.id);
 assert.equal(firstReminder.length, 1);
 assert.equal(firstReminder[0].channel, "email");
 assert.equal(firstReminder[0].includes_qr, 0);
@@ -193,7 +203,7 @@ assert.match(firstReminder[0].body, /Day 0 ₱100, Day 2 ₱50, Day 3 ₱50/);
 assert.equal(`${firstReminder[0].body}\n${firstReminder[0].html}`.includes("/pass/"), false);
 
 await runReminders(db, manilaClock(addDays(today, 2)));
-const bothReminders = db.prepare("SELECT channel, subject FROM reminder_dispatches WHERE registration_id = ? ORDER BY id").all(testPlanReg.id);
+const bothReminders = db.prepare("SELECT channel, subject FROM reminder_dispatches WHERE registration_id = ? AND template_key = 'installment_reminder' ORDER BY id").all(testPlanReg.id);
 assert.deepEqual(bothReminders, [
   { channel: "email", subject: firstReminder[0].subject },
   { channel: "email", subject: "IBMC 2027 · ₱50 due tomorrow · 3 of 3" },
@@ -212,7 +222,7 @@ const restarted = recordPayment(db, { registrationId: shifted.id, amountCents: 1
 assert.equal(restarted.installments[1].due_on, addDays(today, 2));
 assert.equal(restarted.installments[2].due_on, addDays(today, 3));
 await runReminders(db, manilaClock(addDays(today, 1)));
-const shiftedMail = db.prepare("SELECT subject FROM reminder_dispatches WHERE registration_id = ?").all(shifted.id);
+const shiftedMail = db.prepare("SELECT subject FROM reminder_dispatches WHERE registration_id = ? AND template_key = 'installment_reminder'").all(shifted.id);
 assert.deepEqual(shiftedMail.map((row) => row.subject), ["IBMC 2027 · ₱50 due tomorrow · 2 of 3"]);
 
 const builtinSchedules = db.prepare(`
