@@ -251,6 +251,10 @@ CREATE TABLE IF NOT EXISTS members (
   reg_status TEXT NOT NULL DEFAULT 'updated' CHECK (reg_status IN ('updated', 'delayed', 'cancelled')),
   country TEXT,
   gold_club INTEGER NOT NULL DEFAULT 0 CHECK (gold_club IN (0, 1)),
+  sponsors_2026 INTEGER,
+  sponsors_aug_dec_2026 INTEGER,
+  sponsor_data_as_of TEXT,
+  gold_reward TEXT,
   registered_at TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -553,6 +557,10 @@ function migrate(db) {
   if (!registrationColumns.has("phone_key")) db.exec("ALTER TABLE registrations ADD COLUMN phone_key TEXT");
   const memberColumns = new Set(db.prepare("PRAGMA table_info(members)").all().map((column) => column.name));
   if (!memberColumns.has("phone_key")) db.exec("ALTER TABLE members ADD COLUMN phone_key TEXT");
+  if (!memberColumns.has("sponsors_2026")) db.exec("ALTER TABLE members ADD COLUMN sponsors_2026 INTEGER");
+  if (!memberColumns.has("sponsors_aug_dec_2026")) db.exec("ALTER TABLE members ADD COLUMN sponsors_aug_dec_2026 INTEGER");
+  if (!memberColumns.has("sponsor_data_as_of")) db.exec("ALTER TABLE members ADD COLUMN sponsor_data_as_of TEXT");
+  if (!memberColumns.has("gold_reward")) db.exec("ALTER TABLE members ADD COLUMN gold_reward TEXT");
   backfillPhoneKeys(db);
   db.exec("CREATE INDEX IF NOT EXISTS idx_members_phone ON members(phone_key)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_registrations_phone ON registrations(phone_key)");

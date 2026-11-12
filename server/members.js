@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "crypto";
 
 const STATUSES = new Set(["updated", "delayed", "cancelled"]);
+const GOLD_REWARDS = new Set(["GOLD_FREE", "GOLD_50", "GOLD_3000"]);
 const PROOF_WINDOW = 2 * 60 * 60 * 1000;
 
 function proofSecret() {
@@ -129,8 +130,9 @@ export function saveMember(db, input) {
   db.prepare(`
     INSERT INTO members (
       full_name, email, mobile, phone_key, chapter, category, business_name, ticket_type,
-      reg_status, country, gold_club, registered_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      reg_status, country, gold_club, sponsors_2026, sponsors_aug_dec_2026, sponsor_data_as_of, gold_reward,
+      registered_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(email) DO UPDATE SET
       full_name = excluded.full_name,
       mobile = excluded.mobile,
@@ -142,6 +144,10 @@ export function saveMember(db, input) {
       reg_status = excluded.reg_status,
       country = excluded.country,
       gold_club = excluded.gold_club,
+      sponsors_2026 = COALESCE(excluded.sponsors_2026, members.sponsors_2026),
+      sponsors_aug_dec_2026 = COALESCE(excluded.sponsors_aug_dec_2026, members.sponsors_aug_dec_2026),
+      sponsor_data_as_of = COALESCE(excluded.sponsor_data_as_of, members.sponsor_data_as_of),
+      gold_reward = COALESCE(excluded.gold_reward, members.gold_reward),
       registered_at = excluded.registered_at,
       updated_at = datetime('now')
   `).run(
@@ -156,6 +162,10 @@ export function saveMember(db, input) {
     status,
     blank(input.country),
     input.goldClub ? 1 : 0,
+    countOrNull(input.sponsors2026),
+    countOrNull(input.sponsorsAugDec2026),
+    blank(input.sponsorDataAsOf),
+    rewardOrNull(input.goldReward),
     "",
   );
   syncRosterTickets(db, { email: input.email, mobile: input.mobile });
@@ -189,7 +199,8 @@ export function updateMemberRecord(db, id, input) {
   db.prepare(`
     UPDATE members SET
       full_name = ?, email = ?, mobile = ?, phone_key = ?, chapter = ?, category = ?, business_name = ?,
-      ticket_type = ?, reg_status = ?, country = ?, gold_club = ?, registered_at = ?, updated_at = datetime('now')
+      ticket_type = ?, reg_status = ?, country = ?, gold_club = ?, sponsors_2026 = ?, sponsors_aug_dec_2026 = ?,
+      sponsor_data_as_of = ?, gold_reward = ?, registered_at = ?, updated_at = datetime('now')
     WHERE id = ?
   `).run(
     fullName,
@@ -203,6 +214,10 @@ export function updateMemberRecord(db, id, input) {
     status,
     blank(input.country),
     input.goldClub ? 1 : 0,
+    countOrNull(input.sponsors2026),
+    countOrNull(input.sponsorsAugDec2026),
+    blank(input.sponsorDataAsOf),
+    rewardOrNull(input.goldReward),
     "",
     existing.id,
   );
@@ -312,8 +327,24 @@ function presentMember(row) {
     regStatus: row.reg_status,
     country: row.country || "",
     goldClub: Boolean(row.gold_club),
+    sponsors2026: row.sponsors_2026 == null ? null : Number(row.sponsors_2026),
+    sponsorsAugDec2026: row.sponsors_aug_dec_2026 == null ? null : Number(row.sponsors_aug_dec_2026),
+    sponsorDataAsOf: row.sponsor_data_as_of || "",
+    goldReward: row.gold_reward || "",
     registeredAt: row.registered_at,
   };
+}
+
+function countOrNull(value) {
+  if (value === "" || value == null) return null;
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return null;
+  return Math.trunc(number);
+}
+
+function rewardOrNull(value) {
+  const text = String(value || "").trim();
+  return GOLD_REWARDS.has(text) ? text : null;
 }
 
 function blank(value) {
