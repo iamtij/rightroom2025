@@ -64,6 +64,14 @@ CREATE TABLE IF NOT EXISTS registrations (
   fully_paid_at TEXT,
   payment_hold_until TEXT,
   payment_hold_cancelled_at TEXT,
+  gold_club INTEGER NOT NULL DEFAULT 0 CHECK (gold_club IN (0, 1)),
+  gold_reward_at TEXT,
+  gold_reward_current TEXT,
+  gold_reward_status TEXT,
+  gold_list_cents INTEGER,
+  gold_discount_cents INTEGER,
+  refund_due INTEGER NOT NULL DEFAULT 0 CHECK (refund_due IN (0, 1)),
+  refund_amount_cents INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -92,6 +100,7 @@ CREATE TABLE IF NOT EXISTS registration_installments (
   due_on TEXT NOT NULL,
   days_after INTEGER,
   amount_cents INTEGER NOT NULL,
+  list_amount_cents INTEGER,
   amount_paid_cents INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'due' CHECK (status IN ('due', 'paid', 'waived')),
   paid_at TEXT,
@@ -561,6 +570,21 @@ function migrate(db) {
   if (!memberColumns.has("sponsors_aug_dec_2026")) db.exec("ALTER TABLE members ADD COLUMN sponsors_aug_dec_2026 INTEGER");
   if (!memberColumns.has("sponsor_data_as_of")) db.exec("ALTER TABLE members ADD COLUMN sponsor_data_as_of TEXT");
   if (!memberColumns.has("gold_reward")) db.exec("ALTER TABLE members ADD COLUMN gold_reward TEXT");
+  const registrationRewardColumns = [
+    ["gold_club", "INTEGER NOT NULL DEFAULT 0"],
+    ["gold_reward_at", "TEXT"],
+    ["gold_reward_current", "TEXT"],
+    ["gold_reward_status", "TEXT"],
+    ["gold_list_cents", "INTEGER"],
+    ["gold_discount_cents", "INTEGER"],
+    ["refund_due", "INTEGER NOT NULL DEFAULT 0"],
+    ["refund_amount_cents", "INTEGER NOT NULL DEFAULT 0"],
+  ];
+  for (const [name, type] of registrationRewardColumns) {
+    if (!registrationColumns.has(name)) db.exec(`ALTER TABLE registrations ADD COLUMN ${name} ${type}`);
+  }
+  const installmentColumns = new Set(db.prepare("PRAGMA table_info(registration_installments)").all().map((column) => column.name));
+  if (!installmentColumns.has("list_amount_cents")) db.exec("ALTER TABLE registration_installments ADD COLUMN list_amount_cents INTEGER");
   backfillPhoneKeys(db);
   db.exec("CREATE INDEX IF NOT EXISTS idx_members_phone ON members(phone_key)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_registrations_phone ON registrations(phone_key)");
@@ -953,7 +977,7 @@ function seed(db) {
 
 export function registrationBalance(db, registrationId) {
   const row = db.prepare(`
-    SELECT COALESCE(SUM(amount_cents - amount_paid_cents), 0) AS balance
+    SELECT COALESCE(SUM(MAX(0, amount_cents - amount_paid_cents)), 0) AS balance
     FROM registration_installments
     WHERE registration_id = ? AND status != 'waived'
   `).get(registrationId);

@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import QRCode from "qrcode";
-import { getRegistration } from "./registrations.js";
+import { getRegistration, hitpayRewardPurpose } from "./registrations.js";
 import { HOLD_EXPIRED_MESSAGE, expireRegistrationHold, refreshHeldRegistration, sessionStartedBeforeHold, settleOpeningPayment } from "./payment-hold.js";
 import { isChannelEnabled } from "./payment-channels.js";
 import { paymentCharge, settlementBaseCents } from "./convenience-fee.js";
@@ -259,7 +259,7 @@ function requestBody(registration, sessionId, amountCents, channel) {
     reference_number: sessionId,
     email: registration.email,
     name: String(registration.full_name || "").slice(0, 255),
-    purpose: `IBMC 2027 ${registration.reference}`.slice(0, 255),
+    purpose: hitpayRewardPurpose(registration),
     expires_after: `${ttlMinutes()} mins`,
     allow_repeated_payments: "false",
     send_email: "false",

@@ -21,6 +21,7 @@
     "verify:registration-lookup": "node server/verify-registration-lookup.js",
     "verify:dashboard": "node server/verify-dashboard.js",
     "verify:daily-report": "node server/verify-daily-report.js",
+    "verify:gold-club": "node server/verify-gold-club.js",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"

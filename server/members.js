@@ -1,4 +1,5 @@
 import { createHmac, timingSafeEqual } from "crypto";
+import { memberGoldOffer, syncMemberRewards } from "./gold-club.js";
 
 const STATUSES = new Set(["updated", "delayed", "cancelled"]);
 const GOLD_REWARDS = new Set(["GOLD_FREE", "GOLD_50", "GOLD_3000"]);
@@ -169,6 +170,8 @@ export function saveMember(db, input) {
     "",
   );
   syncRosterTickets(db, { email: input.email, mobile: input.mobile });
+  const saved = db.prepare("SELECT * FROM members WHERE email = ?").get(input.email.trim().toLowerCase());
+  if (saved) syncMemberRewards(db, saved);
 }
 
 export function memberContactClash(db, { email, mobile, excludeId = 0 }) {
@@ -222,6 +225,8 @@ export function updateMemberRecord(db, id, input) {
     existing.id,
   );
   syncRosterTickets(db, { email, mobile });
+  const saved = db.prepare("SELECT * FROM members WHERE id = ?").get(existing.id);
+  if (saved) syncMemberRewards(db, saved);
   return { member: listMembers(db).find((member) => member.id === existing.id) };
 }
 
@@ -297,6 +302,8 @@ export function lookupMember(db, query) {
     mobileMasked: last4 ? `+63 ••• ${last4}` : "",
     profileReady: missing.length === 0,
     missing,
+    goldClub: Boolean(row.gold_club),
+    gold: memberGoldOffer(db, row),
   };
 }
 
