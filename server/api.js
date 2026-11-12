@@ -8,7 +8,8 @@ import {
 } from "./staging-early-payments.js";
 import { beginMfaSetup, clearSessionCookie, cookieValue, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
 import { admitPass, cancelRegistration, compRegistration, createRegistration, discardUnopenedRegistration, ensureResumeToken, entryPassEligible, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
-import { sendEntryPassForRegistration } from "./reminders.js";
+import { listFirstPaymentBackfillTargets } from "./backfill-payment-confirmations.js";
+import { sendEntryPassForRegistration, sendPaymentConfirmation } from "./reminders.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
 import { listMembers, lookupMember, memberContactClash, memberFromProof, memberPreview, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
@@ -1024,6 +1025,43 @@ export function createApi() {
     } catch (error) {
       res.status(error.status || 400).json({ error: clientError(error, "The complimentary ticket was not saved") });
     }
+  });
+
+  router.get("/admin/backfill/payment-confirmations", requireAdmin, (_req, res) => {
+    const targets = listFirstPaymentBackfillTargets(db());
+    res.json({
+      count: targets.length,
+      targets: targets.map((row) => ({
+        reference: row.reference,
+        email: row.email,
+        fullName: row.fullName,
+        paymentId: row.paymentId,
+      })),
+    });
+  });
+
+  router.post("/admin/backfill/payment-confirmations", requireAdmin, async (req, res) => {
+    const limit = Number(req.body?.limit);
+    const sendAll = req.body?.confirm === true;
+    if (!sendAll) {
+      res.status(400).json({ error: "Set confirm: true to send backfill emails." });
+      return;
+    }
+    let targets = listFirstPaymentBackfillTargets(db());
+    const total = targets.length;
+    if (Number.isFinite(limit) && limit > 0) targets = targets.slice(0, limit);
+    const results = { sent: 0, failed: 0, skipped: 0, errors: [] };
+    for (const target of targets) {
+      const outcome = await sendPaymentConfirmation(db(), target.registrationId, target.paymentId);
+      if (outcome.ok && outcome.skipped) results.skipped += 1;
+      else if (outcome.ok) results.sent += 1;
+      else {
+        results.failed += 1;
+        results.errors.push({ reference: target.reference, error: outcome.error || outcome.status });
+      }
+    }
+    writeAudit(db(), req.admin.id, "backfill.payment_confirmation", `count:${total}`);
+    res.json({ eligible: total, attempted: targets.length, results });
   });
 
   router.post("/admin/registrations/:reference/resend-entry-pass", requireAdmin, async (req, res) => {
