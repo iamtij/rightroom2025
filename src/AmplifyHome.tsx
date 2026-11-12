@@ -471,7 +471,6 @@ function BeforeAfter() {
   );
 }
 
-const SHOW_MOVING_AMPLIFY = false;
 const AMPLIFY_LINES = ["Your Impact", "Relationships", "Your Business", "Your Influence", "as a Team", "Together"];
 
 function AmplifyCycle() {
@@ -573,7 +572,7 @@ export default function AmplifyHome() {
               className="mx-auto block h-auto w-full max-w-[900px]"
             />
           </h1>
-          {SHOW_MOVING_AMPLIFY && <AmplifyCycle />}
+          <AmplifyCycle />
           <p className="m-0 text-[clamp(16px,1.6vw,20px)] text-[#C8C8C8]">
             June 16–17, 2027 · Newport Performing Arts Theater, Pasay City
           </p>
