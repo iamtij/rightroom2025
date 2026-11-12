@@ -565,13 +565,12 @@ export default function AmplifyHome() {
             IBMC 2027 · International Business Matching Conference · BNI Philippines
           </p>
           <h1 className="m-0 w-full py-6">
-            {/* Temporary lockup until the AMPLIFY logo launches in January. */}
             <img
-              src="/assets/ibmc-2027-logo.png?v=3"
-              alt="IBMC 2027"
-              width={944}
-              height={263}
-              className="mx-auto block h-auto w-full max-w-[780px]"
+              src="/assets/amplify-logo-white.png"
+              alt="AMPLIFY"
+              width={904}
+              height={132}
+              className="mx-auto block h-auto w-full max-w-[900px]"
             />
           </h1>
           {SHOW_MOVING_AMPLIFY && <AmplifyCycle />}
