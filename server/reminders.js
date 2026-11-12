@@ -2,7 +2,8 @@ import { pathToFileURL } from "url";
 import { openDatabase, registrationBalance } from "./db.js";
 import { createRegistration, getRegistration, recordPayment } from "./registrations.js";
 import { sendEmail, sendSms } from "./providers.js";
-import { renderEntryPass, renderInstallmentReminder } from "./templates.js";
+import { paymentChannelLabel } from "./labels.js";
+import { renderEntryPass, renderInstallmentReminder, renderPaymentConfirmation } from "./templates.js";
 import { addDays, formatLongDate, manilaParts } from "./time.js";
 
 export { createRegistration, getRegistration, recordPayment };
@@ -138,6 +139,75 @@ export async function sendEntryPassForRegistration(db, registrationId, { force =
 export function queueEntryPassAfterPayment(db, registrationId) {
   void sendEntryPassForRegistration(db, registrationId).catch((error) => {
     console.error("Entry pass email failed:", error.message);
+  });
+}
+
+function gatewayChannelForPayment(db, payment) {
+  const reference = String(payment.external_reference || "").trim();
+  if (!reference) return null;
+  const method = String(payment.method || "");
+  if (method === "paynamics") {
+    const row = db.prepare("SELECT payment_channel FROM paynamics_payments WHERE request_id = ?").get(reference);
+    return row?.payment_channel || null;
+  }
+  if (method.startsWith("hitpay:")) return method.slice("hitpay:".length);
+  if (method.startsWith("upay:")) return method.slice("upay:".length);
+  return null;
+}
+
+export async function sendPaymentConfirmation(db, registrationId, paymentId) {
+  const payment = db.prepare(`
+    SELECT id, installment_id, amount_cents, method, external_reference, recorded_at
+    FROM payments WHERE id = ? AND registration_id = ?
+  `).get(paymentId, registrationId);
+  if (!payment) return { ok: false, error: "payment_not_found" };
+  const registration = getRegistration(db, registrationId);
+  if (!registration?.email || registration.status !== "confirmed") {
+    return { ok: false, error: "registration_not_emailable" };
+  }
+  const installment = registration.installments.find((item) => item.id === payment.installment_id);
+  if (!installment) return { ok: false, error: "installment_not_found" };
+  const payUrl = `${siteUrl()}/pay/${registration.reference}`;
+  const manageUrl = `${siteUrl()}/register`;
+  const rendered = renderPaymentConfirmation({
+    registration,
+    installment,
+    amountCents: payment.amount_cents,
+    payUrl,
+    manageUrl,
+    paymentChannel: paymentChannelLabel(payment.method, gatewayChannelForPayment(db, payment)),
+    paidAt: payment.recorded_at,
+    paymentReference: payment.external_reference || "",
+  });
+  const dispatchKey = `payment:${payment.id}`;
+  const existing = db.prepare("SELECT id, status FROM reminder_dispatches WHERE dispatch_key = ?").get(dispatchKey);
+  if (existing?.status === "sent") return { ok: true, status: "sent", skipped: true };
+  if (existing) db.prepare("DELETE FROM reminder_dispatches WHERE id = ?").run(existing.id);
+  const rule = db.prepare(`
+    SELECT id FROM reminder_rules
+    WHERE enabled = 1 AND trigger = 'fully_paid' AND channel = 'email'
+    LIMIT 1
+  `).get();
+  const result = await deliver("email", registration.email, rendered, `payment_confirmation/${dispatchKey}`, "payment_confirmation");
+  if (!rule?.id) return { ok: result.status === "sent", status: result.status, error: result.error };
+  const row = {
+    dispatchKey,
+    registrationId: registration.id,
+    installmentId: installment.id,
+    ruleId: rule.id,
+    channel: "email",
+    templateKey: "payment_confirmation",
+    recipient: registration.email,
+    ...rendered,
+    includesQr: false,
+  };
+  insertDispatch(db, row, result);
+  return { ok: result.status === "sent", status: result.status, error: result.error };
+}
+
+export function queuePaymentConfirmationAfterPayment(db, registrationId, paymentId) {
+  void sendPaymentConfirmation(db, registrationId, paymentId).catch((error) => {
+    console.error("Payment confirmation email failed:", error.message);
   });
 }
 
