@@ -296,6 +296,12 @@ function collectedSub(report) {
   return `${pill(`+${peso(added)} today`, added > 0)}${extra ? ` ${esc(extra.trim())}` : ""}`;
 }
 
+function unpaidSub(report) {
+  const count = report.unpaidRegistrations || 0;
+  if (!count) return esc("No pay-in-full seats waiting");
+  return esc(count === 1 ? "1 pay-in-full seat" : `${count.toLocaleString("en-US")} pay-in-full seats`);
+}
+
 function overdueSub(report) {
   const behind = report.overdueRegistrations === 0
     ? "No one is behind"
@@ -510,6 +516,7 @@ export function renderDailyReport(report) {
             ${tile("Scheduled", peso(report.scheduled.PHP), esc(report.scheduledNote || `Future installments, not late${scheduledUsd}`), false)}
           </tr>
           <tr>
+            ${tile("Not yet paid", peso(report.unpaid?.PHP || 0), unpaidSub(report), false)}
             ${tile("Overdue", peso(report.overdue.PHP), overdueSub(report), report.overdueAlert)}
           </tr>`}
         </table>
@@ -592,6 +599,7 @@ function renderText(report, clock, covers) {
     `Fully paid: ${(report.fullyPaid ?? 0).toLocaleString("en-US")}`,
     `Collected: ${peso(report.collected.PHP)} (+${peso(report.activity.collected.PHP || 0)} today)${report.collected.USD ? `, plus ${formatMoney(report.collected.USD, "USD")}` : ""}`,
     `Scheduled: ${peso(report.scheduled.PHP)}`,
+    `Not yet paid: ${peso(report.unpaid?.PHP || 0)} · ${unpaidSub(report)}`,
     `Overdue: ${peso(report.overdue.PHP)} · ${overdueSub(report)}`,
     "",
     "Last 24 hours",

@@ -13,6 +13,7 @@ assert.deepEqual(empty.map((row) => [row.channel, row.currency, row.cents, row.c
   ["upay", "PHP", 0, 0, ["InstaPay", "UnionBank Online", "Other banks"]],
   ["hitpay_qr", "PHP", 0, 0, []],
   ["hitpay_online", "PHP", 0, 0, []],
+  ["hitpay_card", "PHP", 0, 0, []],
   ["paynamics", "PHP", 0, 0, []],
 ]);
 
@@ -111,6 +112,7 @@ assert.deepEqual(methods.map((row) => [row.channel, row.currency]), [
   ["upay", "PHP"],
   ["hitpay_qr", "PHP"],
   ["hitpay_online", "PHP"],
+  ["hitpay_card", "PHP"],
   ["paynamics", "PHP"],
   ["admin", "PHP"],
   ["comp", "PHP"],

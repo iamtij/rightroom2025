@@ -97,6 +97,18 @@ try {
     const { startDailyReportLoop } = await import('./server/daily-report.js');
     startDailyReportLoop(db);
   }
+  if (process.env.IBMC_BACKFILL_PAYMENT_CONFIRMATIONS === 'send') {
+    const { sendFirstPaymentBackfill } = await import('./server/backfill-payment-confirmations.js');
+    sendFirstPaymentBackfill(db)
+      .then((payload) => {
+        console.log('Payment confirmation backfill:', JSON.stringify(payload));
+      })
+      .catch(async (error) => {
+        console.error('Payment confirmation backfill failed:', error.message);
+        const { reportError } = await import('./server/report-error.js');
+        reportError(error);
+      });
+  }
 } catch (error) {
   console.error('Reminder database was not started:', error.message);
   const { reportError } = await import('./server/report-error.js');

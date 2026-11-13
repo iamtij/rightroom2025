@@ -8,9 +8,10 @@ import {
   stagingTestRegistrationAllowed,
 } from "./staging-early-payments.js";
 import { beginMfaSetup, clearSessionCookie, cookieValue, createAdmin, listAdmins, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
-import { admitPass, cancelRegistration, compRegistration, createRegistration, discardUnopenedRegistration, ensureResumeToken, entryPassEligible, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, updateBadge, updateRegistration } from "./registrations.js";
+import { admitPass, cancelRegistration, compRegistration, createRegistration, discardUnopenedRegistration, ensureResumeToken, entryPassEligible, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, scheduleNoteFromInstallments, updateBadge, updateRegistration } from "./registrations.js";
 import { assignFirstPaymentHold, expireRegistrationHold, firstPaymentHoldEnabled, HOLD_EXPIRED_MESSAGE } from "./payment-hold.js";
-import { sendEntryPassForRegistration, syncBuiltinSchedule } from "./reminders.js";
+import { listFirstPaymentBackfillTargets } from "./backfill-payment-confirmations.js";
+import { sendEntryPassForRegistration, sendPaymentConfirmation, syncBuiltinSchedule } from "./reminders.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
 import { listMembers, lookupMember, memberContactClash, memberFromProof, memberPreview, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
@@ -20,7 +21,7 @@ import { maskEmail, readMemberEditToken, sendMemberOtp, sendRegistrationOtp, ver
 import { rateLimit } from "./limits.js";
 import { formatLongDate, manilaParts } from "./time.js";
 import { handleUpayCallback, refreshUpayPayment, startUpayPayment, upayPublicCheckoutInfo } from "./upay.js";
-import { handleHitpayWebhook, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
+import { handleHitpayWebhook, hitpayBuyerChannel, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
 import { handlePaynamicsNotification, paynamicsCheckoutChannel, paynamicsPublicCheckoutInfo, refreshPaynamicsPayment, startPaynamicsPayment } from "./paynamics.js";
 import { buyerPaymentChannels, buyerPaynamicsMethods, hitpayConfigured, listPaymentChannels, listPaynamicsMethods, paynamicsConfigured, paynamicsMethodByCode, savePaymentChannels, savePaynamicsMethods } from "./payment-channels.js";
 import { entryQrPng } from "./templates.js";
@@ -151,7 +152,8 @@ function present(registration, options = {}) {
   let opened = false;
   const payments = registration.installments.map((item) => {
     let status = "upcoming";
-    if (item.status === "paid") status = "paid";
+    if (item.status === "waived" || (item.amount_cents === 0 && (item.list_amount_cents || 0) > item.amount_cents)) status = "covered";
+    else if (item.status === "paid") status = "paid";
     else if (!opened) {
       status = "due";
       opened = true;
@@ -165,6 +167,7 @@ function present(registration, options = {}) {
       label: dayLabel || (slot ? "Today · secure your seat" : formatLongDate(item.due_on)),
       dueOn: item.due_on,
       amountCents: item.amount_cents,
+      listAmountCents: item.list_amount_cents ?? item.amount_cents,
       amountPaidCents: item.amount_paid_cents,
       status,
     };
@@ -187,6 +190,15 @@ function present(registration, options = {}) {
     currency: registration.currency,
     totalCents: registration.amount_due_cents,
     balanceCents: registration.balance_cents,
+    goldClub: Boolean(registration.gold_club),
+    goldReward: registration.gold_reward_current || "",
+    goldRewardAt: registration.gold_reward_at || "",
+    goldRewardStatus: registration.gold_reward_status || "",
+    goldListCents: registration.gold_list_cents || 0,
+    goldDiscountCents: registration.gold_discount_cents || 0,
+    refundDue: Boolean(registration.refund_due),
+    refundAmountCents: registration.refund_amount_cents || 0,
+    scheduleNote: scheduleNoteFromInstallments(registration.installments || []),
     status: registration.status,
     planStatus: registration.status === "cancelled" ? "cancelled" : registration.balance_cents === 0 ? "fully_paid" : registration.plan_status || "active",
     qrReady: entryPassEligible(registration),
@@ -762,7 +774,7 @@ export function createApi() {
 
   router.post("/registrations/hitpay", registerLimit, async (req, res) => {
     if (await rejectBot(req, res)) return;
-    const channel = req.body?.channel === "online" ? "online" : req.body?.channel === "qr" ? "qr" : "";
+    const channel = hitpayBuyerChannel(req.body?.channel);
     if (!channel) {
       res.status(400).json({ error: "Choose a payment option." });
       return;
@@ -779,7 +791,7 @@ export function createApi() {
   });
 
   router.post("/registrations/:reference/hitpay", registerLimit, async (req, res) => {
-    const channel = req.body?.channel === "online" ? "online" : req.body?.channel === "qr" ? "qr" : "";
+    const channel = hitpayBuyerChannel(req.body?.channel);
     if (!channel) {
       res.status(400).json({ error: "Choose a payment option." });
       return;
@@ -1191,6 +1203,43 @@ export function createApi() {
     } catch (error) {
       res.status(error.status || 400).json({ error: clientError(error, "The complimentary ticket was not saved") });
     }
+  });
+
+  router.get("/admin/backfill/payment-confirmations", requireAdmin, (_req, res) => {
+    const targets = listFirstPaymentBackfillTargets(db());
+    res.json({
+      count: targets.length,
+      targets: targets.map((row) => ({
+        reference: row.reference,
+        email: row.email,
+        fullName: row.fullName,
+        paymentId: row.paymentId,
+      })),
+    });
+  });
+
+  router.post("/admin/backfill/payment-confirmations", requireAdmin, async (req, res) => {
+    const limit = Number(req.body?.limit);
+    const sendAll = req.body?.confirm === true;
+    if (!sendAll) {
+      res.status(400).json({ error: "Set confirm: true to send backfill emails." });
+      return;
+    }
+    let targets = listFirstPaymentBackfillTargets(db());
+    const total = targets.length;
+    if (Number.isFinite(limit) && limit > 0) targets = targets.slice(0, limit);
+    const results = { sent: 0, failed: 0, skipped: 0, errors: [] };
+    for (const target of targets) {
+      const outcome = await sendPaymentConfirmation(db(), target.registrationId, target.paymentId);
+      if (outcome.ok && outcome.skipped) results.skipped += 1;
+      else if (outcome.ok) results.sent += 1;
+      else {
+        results.failed += 1;
+        results.errors.push({ reference: target.reference, error: outcome.error || outcome.status });
+      }
+    }
+    writeAudit(db(), req.admin.id, "backfill.payment_confirmation", `count:${total}`);
+    res.json({ eligible: total, attempted: targets.length, results });
   });
 
   router.post("/admin/registrations/:reference/resend-entry-pass", requireAdmin, async (req, res) => {

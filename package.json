@@ -13,6 +13,7 @@
     "verify:payment-hold": "node server/verify-payment-hold.js",
     "verify:paynamics": "node server/verify-paynamics.js",
     "verify:staging-safe": "node server/verify-staging-safe.js",
+    "verify:backup-upload": "node server/verify-backup-upload.js",
     "verify:staging-early-payments": "node server/verify-staging-early-payments.js",
     "verify:form-challenge": "node server/verify-form-challenge.js",
     "verify:turnstile-single-use": "node server/verify-turnstile-single-use.js",
@@ -20,6 +21,7 @@
     "verify:registration-lookup": "node server/verify-registration-lookup.js",
     "verify:dashboard": "node server/verify-dashboard.js",
     "verify:daily-report": "node server/verify-daily-report.js",
+    "verify:gold-club": "node server/verify-gold-club.js",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit"
@@ -30,6 +32,7 @@
     "@napi-rs/canvas": "^0.1.80",
     "@sentry/node": "^11.11.0",
     "@sentry/react": "^11.11.0",
+    "@smithy/node-http-handler": "4.14.2",
     "@tailwindcss/postcss": "^4.2.2",
     "@vitejs/plugin-react": "^5.0.4",
     "better-sqlite3": "^12.4.1",

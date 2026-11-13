@@ -1,6 +1,6 @@
 import crypto from "crypto";
 import QRCode from "qrcode";
-import { getRegistration } from "./registrations.js";
+import { getRegistration, hitpayRewardPurpose } from "./registrations.js";
 import { HOLD_EXPIRED_MESSAGE, expireRegistrationHold, refreshHeldRegistration, sessionStartedBeforeHold, settleOpeningPayment } from "./payment-hold.js";
 import { isChannelEnabled } from "./payment-channels.js";
 import { paymentCharge, settlementBaseCents } from "./convenience-fee.js";
@@ -13,7 +13,23 @@ const locks = new Set();
 const CHANNEL_CODE = {
   qr: "hitpay_qr",
   online: "hitpay_online",
+  card: "hitpay_card",
 };
+
+export function hitpayBuyerChannel(value) {
+  return value === "qr" || value === "online" || value === "card" ? value : "";
+}
+
+export function hitpayPaymentMethods(channel) {
+  if (channel === "qr") return ["qrph_netbank"];
+  if (channel === "card") return ["card_cybersource"];
+  if (channel === "online") return ["upay_online"];
+  return [];
+}
+
+function hostedCheckout(channel) {
+  return channel === "online" || channel === "card";
+}
 
 export function hitpaySignaturesMatch(rawBody, signature, salt) {
   const got = String(signature || "").trim().toLowerCase();
@@ -259,18 +275,19 @@ function requestBody(registration, sessionId, amountCents, channel) {
     reference_number: sessionId,
     email: registration.email,
     name: String(registration.full_name || "").slice(0, 255),
-    purpose: `IBMC 2027 ${registration.reference}`.slice(0, 255),
+    purpose: hitpayRewardPurpose(registration),
     expires_after: `${ttlMinutes()} mins`,
     allow_repeated_payments: "false",
     send_email: "false",
     send_sms: "false",
   };
+  const methods = hitpayPaymentMethods(channel);
+  if (!methods.length) return body;
+  body.payment_methods = methods;
   if (channel === "qr") {
-    body.payment_methods = ["qrph_netbank"];
     body.generate_qr = true;
     return body;
   }
-  body.payment_methods = ["upay_online"];
   body.redirect_url = redirectUrl(sessionId);
   return body;
 }
@@ -327,8 +344,8 @@ async function createHitpaySession(db, registration, due, amountCents, channel, 
   const gatewayRef = String(created.body?.id || "");
   if (!gatewayRef) return { error: "HitPay did not return a payment.", status: 502, registration };
   const qr = channel === "qr" ? qrPayload(created.body) : "";
-  const paymentUrl = channel === "online" ? allowedHitpayUrl(created.body?.url) : "";
-  const failed = (channel === "qr" && !qr) || (channel === "online" && !paymentUrl);
+  const paymentUrl = hostedCheckout(channel) ? allowedHitpayUrl(created.body?.url) : "";
+  const failed = (channel === "qr" && !qr) || (hostedCheckout(channel) && !paymentUrl);
   const expiresAt = new Date(Date.now() + (channel === "online" ? ONLINE_MS : ttlMinutes() * 60 * 1000)).toISOString();
   const insert = db.transaction(() => {
     if (previousId) {

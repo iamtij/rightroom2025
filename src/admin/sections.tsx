@@ -49,7 +49,17 @@ type Member = {
   regStatus: "updated" | "delayed" | "cancelled";
   country: string;
   goldClub: boolean;
+  sponsors2026: number | null;
+  sponsorsAugDec2026: number | null;
+  sponsorDataAsOf: string;
+  goldReward: string;
 };
+
+const goldRewards = [
+  { value: "GOLD_FREE", label: "Free" },
+  { value: "GOLD_50", label: "50" },
+  { value: "GOLD_3000", label: "3,000" },
+];
 type Payment = { label: string; dueOn: string; amountCents: number; amountPaidCents?: number; status: "paid" | "due" | "upcoming" };
 type LedgerTransaction = {
   at: string;
@@ -1250,7 +1260,7 @@ function Schedules({ onError }: { onError: (message: string) => void }) {
   );
 }
 
-const emptyMember = { fullName: "", email: "", mobile: "", chapter: "", category: "", businessName: "", ticketType: "", regStatus: "updated" as Member["regStatus"], country: "", goldClub: false };
+const emptyMember = { fullName: "", email: "", mobile: "", chapter: "", category: "", businessName: "", ticketType: "", regStatus: "updated" as Member["regStatus"], country: "", goldClub: false, sponsors2026: null as number | null, sponsorsAugDec2026: null as number | null, sponsorDataAsOf: "", goldReward: "" };
 
 type Chapter = { id: number; name: string };
 
@@ -1325,6 +1335,8 @@ function Members({ onError }: { onError: (message: string) => void }) {
   const [form, setForm] = useState(emptyMember);
   const [editor, setEditor] = useState<null | "add" | number>(null);
   const [query, setQuery] = useState("");
+  const [goldFilter, setGoldFilter] = useState("all");
+  const [rewardFilter, setRewardFilter] = useState("");
   const [page, setPage] = useState(1);
   async function load() {
     const [members, chapterRows] = await Promise.all([api("/api/admin/members"), api("/api/admin/chapters")]);
@@ -1356,7 +1368,11 @@ function Members({ onError }: { onError: (message: string) => void }) {
     }
   }
 
-  const visible = rows.filter((row) => matches(query, [row.fullName, row.email, row.mobile, row.chapter, row.category, row.businessName, row.ticketType, row.regStatus, row.country]));
+  const visible = rows.filter((row) => {
+    if (goldFilter === "gold" && !row.goldClub) return false;
+    if (rewardFilter && row.goldReward !== rewardFilter) return false;
+    return matches(query, [row.fullName, row.email, row.mobile, row.chapter, row.category, row.businessName, row.ticketType, row.regStatus, row.country]);
+  });
   const pageCount = Math.max(1, Math.ceil(visible.length / memberPageSize));
   const currentPage = Math.min(page, pageCount);
   const pageStart = (currentPage - 1) * memberPageSize;
@@ -1375,7 +1391,19 @@ function Members({ onError }: { onError: (message: string) => void }) {
           <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setForm(emptyMember); }}>Add</button>
         </div>
       </div>
-      <SearchBox value={query} onChange={(value) => { setQuery(value); setPage(1); }} placeholder="Search name, email, mobile, chapter, or business" />
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="min-w-0 flex-1">
+          <SearchBox value={query} onChange={(value) => { setQuery(value); setPage(1); }} placeholder="Search name, email, mobile, chapter, or business" />
+        </div>
+        <select className={`${field} sm:w-44`} value={goldFilter} onChange={(event) => { setGoldFilter(event.target.value); setPage(1); }}>
+          <option value="all">All members</option>
+          <option value="gold">Gold club</option>
+        </select>
+        <select className={`${field} sm:w-44`} value={rewardFilter} onChange={(event) => { setRewardFilter(event.target.value); setPage(1); }}>
+          <option value="">All rewards</option>
+          {goldRewards.map((reward) => <option key={reward.value} value={reward.value}>{reward.label}</option>)}
+        </select>
+      </div>
       {visible.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="m-0 text-sm text-[#5C5C63]">{pageStart + 1}–{pageStart + pageRows.length} of {visible.length}</p>
@@ -1413,6 +1441,16 @@ function Members({ onError }: { onError: (message: string) => void }) {
             <input type="checkbox" className="h-5 w-5 accent-[#D0202E]" checked={form.goldClub} onChange={(event) => setForm({ ...form, goldClub: event.target.checked })} />
             Gold club member
           </label>
+          <Field label="Sponsors 2026"><input className={field} type="number" min="0" value={form.sponsors2026 ?? ""} onChange={(event) => setForm({ ...form, sponsors2026: event.target.value === "" ? null : Number(event.target.value) })} /></Field>
+          <Field label="Sponsors Aug–Dec 2026"><input className={field} type="number" min="0" value={form.sponsorsAugDec2026 ?? ""} onChange={(event) => setForm({ ...form, sponsorsAugDec2026: event.target.value === "" ? null : Number(event.target.value) })} /></Field>
+          <Field label="Sponsor data as of"><input className={field} type="date" value={form.sponsorDataAsOf} onChange={(event) => setForm({ ...form, sponsorDataAsOf: event.target.value })} /></Field>
+          <Field label="Gold reward">
+            <select className={field} value={form.goldReward} onChange={(event) => setForm({ ...form, goldReward: event.target.value })}>
+              <option value="">None</option>
+              {goldRewards.map((reward) => <option key={reward.value} value={reward.value}>{reward.label}</option>)}
+              {form.goldReward && !goldRewards.some((reward) => reward.value === form.goldReward) ? <option value={form.goldReward}>{form.goldReward}</option> : null}
+            </select>
+          </Field>
           <p className="m-0 text-[13px] text-[#5C5C63] sm:col-span-2">CSV columns: name, email, mobile, chapter, category, business name, ticket type, reg status, country, gold club member.</p>
           <div className="flex gap-2 sm:col-span-2">
             <button type="submit" className={buttonClass}>{editor === "add" ? "Add member" : "Save member"}</button>

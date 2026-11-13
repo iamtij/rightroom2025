@@ -1,8 +1,11 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "crypto";
 import fs from "fs";
+import http from "node:http";
+import https from "node:https";
 import os from "os";
 import path from "path";
 import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 import { reportError } from "./report-error.js";
 import { automaticBackupsSuppressed } from "./staging-safe.js";
 
@@ -50,18 +53,82 @@ function bucketConfig() {
   };
 }
 
-function s3(config) {
+const CLOSED_UPLOAD = new Set(["EPIPE", "ECONNRESET", "ECONNABORTED"]);
+const closedPipeGuarded = Symbol("closedPipeGuarded");
+
+// Object storage can answer 502 and close the socket while the encrypted
+// database is still being written. Node completes that write from
+// WriteWrap.onWriteComplete, and with no remaining request error listener the
+// EPIPE/ECONNRESET exits the process. Finishing the write callback keeps the
+// failure on the S3 request so the backup job can catch it.
+function closedPipeCallback(callback) {
+  return (error) => {
+    if (typeof callback !== "function") return;
+    if (error && !CLOSED_UPLOAD.has(error.code)) {
+      callback(error);
+      return;
+    }
+    callback(null);
+  };
+}
+
+function guardClosedPipe(socket) {
+  if (!socket || socket[closedPipeGuarded]) return socket;
+  socket[closedPipeGuarded] = true;
+  const write = socket._write;
+  socket._write = function guardedWrite(data, encoding, callback) {
+    return write.call(socket, data, encoding, closedPipeCallback(callback));
+  };
+  const writev = socket._writev;
+  if (typeof writev === "function") {
+    socket._writev = function guardedWritev(chunks, callback) {
+      return writev.call(socket, chunks, closedPipeCallback(callback));
+    };
+  }
+  return socket;
+}
+
+class GuardedHttpAgent extends http.Agent {
+  createConnection(options, callback) {
+    return guardClosedPipe(super.createConnection(options, callback));
+  }
+}
+
+class GuardedHttpsAgent extends https.Agent {
+  createConnection(options, callback) {
+    return guardClosedPipe(super.createConnection(options, callback));
+  }
+}
+
+export function createBackupHttpAgents(tls = {}) {
+  return {
+    httpAgent: new GuardedHttpAgent({ keepAlive: true, maxSockets: 50 }),
+    httpsAgent: new GuardedHttpsAgent({ keepAlive: true, maxSockets: 50, ...tls }),
+  };
+}
+
+export function createBackupClient(config, options = {}) {
+  const agents = createBackupHttpAgents(options.tls);
   return new S3Client({
     region: config.region,
     endpoint: config.endpoint,
-    forcePathStyle: false,
+    forcePathStyle: options.forcePathStyle === true,
     credentials: {
       accessKeyId: config.accessKeyId,
       secretAccessKey: config.secretAccessKey,
     },
     requestChecksumCalculation: "WHEN_REQUIRED",
     responseChecksumValidation: "WHEN_REQUIRED",
+    ...(options.maxAttempts ? { maxAttempts: options.maxAttempts } : {}),
+    requestHandler: new NodeHttpHandler({
+      httpAgent: agents.httpAgent,
+      httpsAgent: agents.httpsAgent,
+    }),
   });
+}
+
+function s3(config) {
+  return createBackupClient(config);
 }
 
 async function pruneOldBackups(client, bucket) {
@@ -95,9 +162,10 @@ export async function createEncryptedBackup(db) {
   const stamp = new Date().toISOString().replaceAll(":", "-").replaceAll(".", "-");
   const objectKey = `nightly/ibmc-${stamp}.sqlite.enc`;
   const tempPath = path.join(os.tmpdir(), `ibmc-${stamp}.sqlite`);
+  let client;
   try {
     await db.backup(tempPath);
-    const client = s3(config);
+    client = s3(config);
     await client.send(new PutObjectCommand({
       Bucket: config.bucket,
       Key: objectKey,
@@ -108,6 +176,7 @@ export async function createEncryptedBackup(db) {
     console.log(`Database backup stored: ${objectKey}`);
     return objectKey;
   } finally {
+    client?.destroy();
     fs.rmSync(tempPath, { force: true });
   }
 }
@@ -156,6 +225,11 @@ export async function downloadBackup(objectKey, destination) {
   const key = encryptionKey();
   const config = bucketConfig();
   if (!key || !config) throw new Error("Backup settings are missing");
-  const response = await s3(config).send(new GetObjectCommand({ Bucket: config.bucket, Key: objectKey }));
-  fs.writeFileSync(destination, decryptBackup(Buffer.from(await response.Body.transformToByteArray()), key));
+  const client = s3(config);
+  try {
+    const response = await client.send(new GetObjectCommand({ Bucket: config.bucket, Key: objectKey }));
+    fs.writeFileSync(destination, decryptBackup(Buffer.from(await response.Body.transformToByteArray()), key));
+  } finally {
+    client.destroy();
+  }
 }

@@ -145,6 +145,16 @@ email = await sendEmail({
 assert.notEqual(email.error, "staging_safe_mode");
 assert.notEqual(email.status, "skipped");
 
+assert.equal(outboundEmailSuppressed({ deliveryKind: "payment_confirmation" }), false);
+email = await sendEmail({
+  to: "tj.tester@example.com",
+  subject: "IBMC 2027 · Payment received",
+  text: "Payment received",
+  deliveryKind: "payment_confirmation",
+});
+assert.notEqual(email.error, "staging_safe_mode");
+assert.notEqual(email.status, "skipped");
+
 delete process.env.RESEND_API_KEY;
 email = await sendEmail({
   to: "blocked@example.com",

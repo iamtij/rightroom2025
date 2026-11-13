@@ -25,6 +25,7 @@ const CHANNEL_LABELS = {
   upay: "U Pay · UnionBank",
   hitpay_qr: "HitPay QR",
   hitpay_online: "HitPay online banking",
+  hitpay_card: "HitPay card",
   paynamics: "Paynamics",
   admin: "Marked in admin",
   comp: "Complimentary",
@@ -32,8 +33,8 @@ const CHANNEL_LABELS = {
   other: "Other",
 };
 
-const CHANNEL_ORDER = ["upay", "hitpay_qr", "hitpay_online", "paynamics", "admin", "comp", "manual", "other"];
-const BUYER_CHANNELS = new Set(["upay", "hitpay_qr", "hitpay_online", "paynamics"]);
+const CHANNEL_ORDER = ["upay", "hitpay_qr", "hitpay_online", "hitpay_card", "paynamics", "admin", "comp", "manual", "other"];
+const BUYER_CHANNELS = new Set(["upay", "hitpay_qr", "hitpay_online", "hitpay_card", "paynamics"]);
 
 const KNOWN_METHODS = [
   { channel: "upay", code: "upay:instapay", label: "InstaPay" },
@@ -41,12 +42,14 @@ const KNOWN_METHODS = [
   { channel: "upay", code: "upay:paygate", label: "Other banks" },
   { channel: "hitpay_qr", code: "hitpay:qr", label: "HitPay QR" },
   { channel: "hitpay_online", code: "hitpay:online", label: "HitPay online banking" },
+  { channel: "hitpay_card", code: "hitpay:card", label: "HitPay card" },
   { channel: "paynamics", code: "paynamics", label: "Paynamics" },
 ];
 
 const DEFAULT_METHOD = {
   hitpay_qr: "hitpay:qr",
   hitpay_online: "hitpay:online",
+  hitpay_card: "hitpay:card",
   paynamics: "paynamics",
   admin: "admin",
   comp: "comp",
@@ -96,8 +99,8 @@ function classifyPayment(method, detail) {
       label: UPAY_LABELS[method] || titleLabel(method.slice(5)) || "U Pay",
     };
   }
-  if (method === "hitpay:qr" || method === "hitpay:online" || method === "admin" || method === "comp" || method === "manual") {
-    const channel = method === "hitpay:qr" ? "hitpay_qr" : method === "hitpay:online" ? "hitpay_online" : method;
+  if (method === "hitpay:qr" || method === "hitpay:online" || method === "hitpay:card" || method === "admin" || method === "comp" || method === "manual") {
+    const channel = method === "hitpay:qr" ? "hitpay_qr" : method === "hitpay:online" ? "hitpay_online" : method === "hitpay:card" ? "hitpay_card" : method;
     return { channel, code: method, label: CHANNEL_LABELS[channel] };
   }
   if (method === "paynamics") {

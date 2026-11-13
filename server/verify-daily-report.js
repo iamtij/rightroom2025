@@ -11,6 +11,8 @@ const db = openDatabase(":memory:");
 const empty = buildDailyReport(db, asOf);
 assert.equal(empty.seatsConfirmed, 0);
 assert.equal(empty.overdueAlert, false);
+assert.equal(empty.unpaid.PHP, 0);
+assert.equal(empty.unpaidRegistrations, 0);
 assert.equal(empty.health.total, 0);
 assert.equal(empty.tickets.length, 5);
 assert.equal(empty.tickets.find((ticket) => ticket.code === "first_mover").phaseLabel, "Open · ends Nov 30");
@@ -108,6 +110,8 @@ assert.equal(report.collected.PHP, 1_730_000);
 assert.equal(report.scheduled.PHP, 7_870_000);
 assert.equal(report.overdue.PHP, 600_000);
 assert.equal(report.overdueRegistrations, 3);
+assert.equal(report.unpaid.PHP, 0);
+assert.equal(report.unpaidRegistrations, 0);
 assert.equal(report.late15, 1);
 assert.equal(report.overdueAlert, true);
 assert.equal(report.health.total, 7);
@@ -179,6 +183,23 @@ assert.match(countMail.html, /IBMC 2027 Report/);
 assert.equal(countMail.html.includes("₱"), false);
 assert.equal(countMail.html.includes("USD "), false);
 assert.match(countMail.text, /full paid 1 · installments 7/);
+createRegistration(db, {
+  productCode: "first_mover",
+  paymentPlan: "full",
+  fullName: "Lara Cruz",
+  email: "lara@example.com",
+  mobile: "09171000010",
+  registeredOn: "2026-11-11",
+});
+const withUnpaid = buildDailyReport(db, asOf);
+assert.equal(withUnpaid.overdue.PHP, 600_000);
+assert.equal(withUnpaid.overdueRegistrations, 3);
+assert.equal(withUnpaid.unpaid.PHP, 1_200_000);
+assert.equal(withUnpaid.unpaidRegistrations, 1);
+const unpaidMail = renderDailyReport(withUnpaid);
+assert.match(unpaidMail.html, /Not yet paid/);
+assert.match(unpaidMail.html, /1 pay-in-full seat/);
+assert.match(unpaidMail.text, /Not yet paid: ₱12,000/);
 const posterModel = buildRegistrationPoster(db, asOf);
 assert.equal(posterModel.paid, 8);
 assert.equal(posterModel.fullPaid, 1);

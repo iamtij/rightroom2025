@@ -1,9 +1,12 @@
 import crypto from "crypto";
 import { claimCoupon, priceCoupon } from "./coupons.js";
 import { registrationBalance, testTicketEnabled } from "./db.js";
+import { hitpayRewardPurpose, pricePlan, resolveGoldReward, scheduleNoteFromInstallments } from "./gold-club.js";
 import { syncRosterTickets } from "./members.js";
 import { stagingTestRegistrationAllowed } from "./staging-early-payments.js";
 import { addDays, manilaParts } from "./time.js";
+
+export { hitpayRewardPurpose, scheduleNoteFromInstallments };
 
 function dueOnFor(item, registeredOn) {
   if (item.kind === "days_after") return addDays(registeredOn, Number(item.days_after) || 0);
@@ -146,6 +149,19 @@ export function getEntryPass(db, qrToken) {
   };
 }
 
+function memberForInput(db, input) {
+  if (input.member?.id) return input.member;
+  const email = String(input.email || "").trim().toLowerCase();
+  if (email) {
+    const byEmail = db.prepare("SELECT * FROM members WHERE email = ?").get(email);
+    if (byEmail) return byEmail;
+  }
+  const key = phoneKey(input.mobile);
+  if (!key) return null;
+  const byPhone = db.prepare("SELECT * FROM members WHERE phone_key = ?").all(key);
+  return byPhone.length === 1 ? byPhone[0] : null;
+}
+
 export function createRegistration(db, input) {
   const run = db.transaction(() => {
     if (input.productCode === "test" && !testTicketEnabled()) throw new Error("Unknown ticket");
@@ -172,27 +188,53 @@ export function createRegistration(db, input) {
     if (input.paymentPlan === "installment" && plan.length === 0) {
       throw new Error("This ticket has no installment schedule");
     }
-    const priced = input.couponCode
-      ? claimCoupon(db, {
-        code: input.couponCode,
+    const member = memberForInput(db, input);
+    const goldReward = member ? resolveGoldReward(member) : "GOLD_NONE";
+    const priced = goldReward !== "GOLD_NONE"
+      ? priceCoupon(db, {
         productCode: input.productCode,
         paymentPlan: input.paymentPlan,
-        email: input.email,
-        today: input.registeredOn,
         registeredOn: input.registeredOn,
       })
-      : priceCoupon(db, {
-        productCode: input.productCode,
-        paymentPlan: input.paymentPlan,
-        registeredOn: input.registeredOn,
-      });
+      : input.couponCode
+        ? claimCoupon(db, {
+          code: input.couponCode,
+          productCode: input.productCode,
+          paymentPlan: input.paymentPlan,
+          email: input.email,
+          today: input.registeredOn,
+          registeredOn: input.registeredOn,
+        })
+        : priceCoupon(db, {
+          productCode: input.productCode,
+          paymentPlan: input.paymentPlan,
+          registeredOn: input.registeredOn,
+        });
     if (priced.error) throw new Error(priced.error);
+    const gold = goldReward === "GOLD_NONE"
+      ? null
+      : pricePlan(priced.amounts, goldReward, product.currency);
+    const amounts = gold
+      ? gold.rows.map((row, index) => ({
+        ...priced.amounts[index],
+        amount_cents: row.amountCents,
+        list_amount_cents: row.listAmountCents,
+        covered: row.covered,
+      }))
+      : priced.amounts;
+    const totalCents = gold ? gold.totalCents : priced.totalCents;
+    if (totalCents === 0 && goldReward !== "GOLD_FREE") {
+      const error = new Error("That coupon can't cover the full ticket.");
+      error.status = 400;
+      throw error;
+    }
     const result = db.prepare(`
       INSERT INTO registrations (
         reference, product_id, payment_plan, full_name, email, mobile, phone_key,
         amount_due_cents, currency, status, registered_on,
-        attendee_type, business, industry, chapter, invited_by, plan_status, coupon_code, resume_token
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+        attendee_type, business, industry, chapter, invited_by, plan_status, coupon_code, resume_token,
+        gold_club, gold_reward_at, gold_reward_current, gold_reward_status, gold_list_cents, gold_discount_cents
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       reference(),
       product.id,
@@ -201,7 +243,7 @@ export function createRegistration(db, input) {
       input.email.trim().toLowerCase(),
       input.mobile.trim(),
       phoneKey(input.mobile) || null,
-      priced.totalCents,
+      totalCents,
       product.currency,
       input.registeredOn,
       input.attendeeType || "guest",
@@ -209,15 +251,23 @@ export function createRegistration(db, input) {
       input.industry?.trim() || null,
       input.chapter?.trim() || null,
       input.invitedBy?.trim() || null,
-      priced.code || null,
+      gold ? null : priced.code || null,
       token(),
+      member && Number(member.gold_club) ? 1 : 0,
+      member ? goldReward : null,
+      member ? goldReward : null,
+      member && Number(member.gold_club) ? "provisional" : null,
+      gold ? gold.listCents : null,
+      gold ? gold.discountCents : null,
     );
     const insertItem = db.prepare(`
-      INSERT INTO registration_installments (registration_id, sequence, kind, due_on, days_after, amount_cents)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO registration_installments (
+        registration_id, sequence, kind, due_on, days_after, amount_cents, list_amount_cents, status
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    priced.amounts.forEach((item, index) => {
-      if (item.amount_cents <= 0 && index > 0) return;
+    amounts.forEach((item, index) => {
+      const covered = Boolean(item.covered);
+      if (item.amount_cents <= 0 && index > 0 && !covered) return;
       insertItem.run(
         result.lastInsertRowid,
         index + 1,
@@ -225,17 +275,26 @@ export function createRegistration(db, input) {
         dueOnFor(item, input.registeredOn),
         item.kind === "days_after" ? Number(item.days_after) || 0 : null,
         item.amount_cents,
+        item.list_amount_cents ?? item.amount_cents,
+        covered ? "waived" : "due",
       );
     });
-    if (priced.totalCents === 0) {
-      const error = new Error("That coupon can't cover the full ticket.");
-      error.status = 400;
-      throw error;
+    if (goldReward === "GOLD_FREE") {
+      db.prepare(`
+        UPDATE registrations
+        SET qr_token = ?, fully_paid_at = ?, plan_status = 'fully_paid'
+        WHERE id = ?
+      `).run(token(), new Date().toISOString(), result.lastInsertRowid);
     }
     return result.lastInsertRowid;
   });
   const registration = getRegistration(db, run());
   syncRosterTickets(db, { email: registration.email, mobile: registration.mobile });
+  if (registration.gold_reward_current === "GOLD_FREE" && registration.qr_token && registration.balance_cents === 0) {
+    import("./reminders.js").then(({ queueEntryPassAfterPayment }) => {
+      queueEntryPassAfterPayment(db, registration.id);
+    });
+  }
   return registration;
 }
 
@@ -342,7 +401,7 @@ export function recordPayment(db, input) {
     if (input.amountCents <= 0 || input.amountCents > remaining) {
       throw new Error("Payment does not match the amount still due");
     }
-    db.prepare(`
+    const paymentInsert = db.prepare(`
       INSERT INTO payments (registration_id, installment_id, amount_cents, currency, method, external_reference, admin_user_id)
       VALUES (?, ?, ?, ?, ?, ?, ?)
     `).run(
@@ -354,6 +413,7 @@ export function recordPayment(db, input) {
       input.externalReference || null,
       input.adminUserId || null,
     );
+    const paymentId = paymentInsert.lastInsertRowid;
     if (input.adminUserId) {
       const action = input.method === "comp" ? "registration.comp" : "registration.payment";
       db.prepare(`
@@ -385,13 +445,16 @@ export function recordPayment(db, input) {
         WHERE id = ?
       `).run(token(), new Date().toISOString(), registration.id);
     }
-    return registration.id;
+    return { registrationId: registration.id, paymentId };
   });
-  const registrationId = run();
+  const { registrationId, paymentId } = run();
   const updated = getRegistration(db, registrationId);
-  if (updated.balance_cents === 0 && updated.fully_paid_at && updated.qr_token) {
-    import("./reminders.js").then(({ queueEntryPassAfterPayment }) => queueEntryPassAfterPayment(db, registrationId));
-  }
+  import("./reminders.js").then(({ queuePaymentConfirmationAfterPayment, queueEntryPassAfterPayment }) => {
+    queuePaymentConfirmationAfterPayment(db, registrationId, paymentId);
+    if (updated.balance_cents === 0 && updated.fully_paid_at && updated.qr_token) {
+      queueEntryPassAfterPayment(db, registrationId);
+    }
+  });
   return updated;
 }
 

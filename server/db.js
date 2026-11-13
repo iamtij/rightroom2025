@@ -64,6 +64,14 @@ CREATE TABLE IF NOT EXISTS registrations (
   fully_paid_at TEXT,
   payment_hold_until TEXT,
   payment_hold_cancelled_at TEXT,
+  gold_club INTEGER NOT NULL DEFAULT 0 CHECK (gold_club IN (0, 1)),
+  gold_reward_at TEXT,
+  gold_reward_current TEXT,
+  gold_reward_status TEXT,
+  gold_list_cents INTEGER,
+  gold_discount_cents INTEGER,
+  refund_due INTEGER NOT NULL DEFAULT 0 CHECK (refund_due IN (0, 1)),
+  refund_amount_cents INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -92,6 +100,7 @@ CREATE TABLE IF NOT EXISTS registration_installments (
   due_on TEXT NOT NULL,
   days_after INTEGER,
   amount_cents INTEGER NOT NULL,
+  list_amount_cents INTEGER,
   amount_paid_cents INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'due' CHECK (status IN ('due', 'paid', 'waived')),
   paid_at TEXT,
@@ -251,6 +260,10 @@ CREATE TABLE IF NOT EXISTS members (
   reg_status TEXT NOT NULL DEFAULT 'updated' CHECK (reg_status IN ('updated', 'delayed', 'cancelled')),
   country TEXT,
   gold_club INTEGER NOT NULL DEFAULT 0 CHECK (gold_club IN (0, 1)),
+  sponsors_2026 INTEGER,
+  sponsors_aug_dec_2026 INTEGER,
+  sponsor_data_as_of TEXT,
+  gold_reward TEXT,
   registered_at TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -309,7 +322,7 @@ CREATE TABLE IF NOT EXISTS hitpay_payments (
   amount_cents INTEGER NOT NULL,
   currency TEXT NOT NULL,
   fee_cents INTEGER NOT NULL DEFAULT 0,
-  channel TEXT NOT NULL CHECK (channel IN ('qr', 'online')),
+  channel TEXT NOT NULL CHECK (channel IN ('qr', 'online', 'card')),
   status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed', 'expired')),
   gateway_status TEXT,
   qr_code TEXT,
@@ -470,6 +483,49 @@ const PRODUCTS = [
 const EMAIL_BEFORE = [7, 3, 1, 0];
 const SMS_BEFORE = [3, 1, 0];
 
+export function migrateHitpayCardChannel(db) {
+  const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'hitpay_payments'").get()?.sql || "";
+  if (!sql || sql.includes("'card'")) return;
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec(`
+      DROP TABLE IF EXISTS hitpay_payments_next;
+      CREATE TABLE hitpay_payments_next (
+        id INTEGER PRIMARY KEY,
+        registration_id INTEGER NOT NULL REFERENCES registrations(id),
+        installment_id INTEGER NOT NULL REFERENCES registration_installments(id),
+        session_id TEXT NOT NULL UNIQUE,
+        gateway_ref TEXT,
+        amount_cents INTEGER NOT NULL,
+        currency TEXT NOT NULL,
+        fee_cents INTEGER NOT NULL DEFAULT 0,
+        channel TEXT NOT NULL CHECK (channel IN ('qr', 'online', 'card')),
+        status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed', 'expired')),
+        gateway_status TEXT,
+        qr_code TEXT,
+        payment_url TEXT,
+        expires_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO hitpay_payments_next (
+        id, registration_id, installment_id, session_id, gateway_ref, amount_cents, currency, fee_cents,
+        channel, status, gateway_status, qr_code, payment_url, expires_at, created_at, updated_at
+      )
+      SELECT
+        id, registration_id, installment_id, session_id, gateway_ref, amount_cents, currency, fee_cents,
+        channel, status, gateway_status, qr_code, payment_url, expires_at, created_at, updated_at
+      FROM hitpay_payments;
+      DROP TABLE hitpay_payments;
+      ALTER TABLE hitpay_payments_next RENAME TO hitpay_payments;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_hitpay_gateway ON hitpay_payments(gateway_ref) WHERE gateway_ref IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_hitpay_installment ON hitpay_payments(installment_id, channel, status);
+    `);
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
+
 export function openDatabase(file = process.env.IBMC_DB_PATH) {
   const volume = process.env.RAILWAY_VOLUME_MOUNT_PATH;
   const dbPath = file || (volume ? path.join(volume, "ibmc.sqlite") : path.join(root, "data", "ibmc.sqlite"));
@@ -553,6 +609,25 @@ function migrate(db) {
   if (!registrationColumns.has("phone_key")) db.exec("ALTER TABLE registrations ADD COLUMN phone_key TEXT");
   const memberColumns = new Set(db.prepare("PRAGMA table_info(members)").all().map((column) => column.name));
   if (!memberColumns.has("phone_key")) db.exec("ALTER TABLE members ADD COLUMN phone_key TEXT");
+  if (!memberColumns.has("sponsors_2026")) db.exec("ALTER TABLE members ADD COLUMN sponsors_2026 INTEGER");
+  if (!memberColumns.has("sponsors_aug_dec_2026")) db.exec("ALTER TABLE members ADD COLUMN sponsors_aug_dec_2026 INTEGER");
+  if (!memberColumns.has("sponsor_data_as_of")) db.exec("ALTER TABLE members ADD COLUMN sponsor_data_as_of TEXT");
+  if (!memberColumns.has("gold_reward")) db.exec("ALTER TABLE members ADD COLUMN gold_reward TEXT");
+  const registrationRewardColumns = [
+    ["gold_club", "INTEGER NOT NULL DEFAULT 0"],
+    ["gold_reward_at", "TEXT"],
+    ["gold_reward_current", "TEXT"],
+    ["gold_reward_status", "TEXT"],
+    ["gold_list_cents", "INTEGER"],
+    ["gold_discount_cents", "INTEGER"],
+    ["refund_due", "INTEGER NOT NULL DEFAULT 0"],
+    ["refund_amount_cents", "INTEGER NOT NULL DEFAULT 0"],
+  ];
+  for (const [name, type] of registrationRewardColumns) {
+    if (!registrationColumns.has(name)) db.exec(`ALTER TABLE registrations ADD COLUMN ${name} ${type}`);
+  }
+  const installmentColumns = new Set(db.prepare("PRAGMA table_info(registration_installments)").all().map((column) => column.name));
+  if (!installmentColumns.has("list_amount_cents")) db.exec("ALTER TABLE registration_installments ADD COLUMN list_amount_cents INTEGER");
   backfillPhoneKeys(db);
   db.exec("CREATE INDEX IF NOT EXISTS idx_members_phone ON members(phone_key)");
   db.exec("CREATE INDEX IF NOT EXISTS idx_registrations_phone ON registrations(phone_key)");
@@ -622,6 +697,7 @@ function migrate(db) {
     const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
     if (columns.size && !columns.has("fee_cents")) db.exec(`ALTER TABLE ${table} ADD COLUMN fee_cents INTEGER NOT NULL DEFAULT 0`);
   }
+  migrateHitpayCardChannel(db);
   const paynamicsColumns = new Set(
     db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'paynamics_payments'").get()
       ? db.prepare("PRAGMA table_info(paynamics_payments)").all().map((column) => column.name)
@@ -945,7 +1021,7 @@ function seed(db) {
 
 export function registrationBalance(db, registrationId) {
   const row = db.prepare(`
-    SELECT COALESCE(SUM(amount_cents - amount_paid_cents), 0) AS balance
+    SELECT COALESCE(SUM(MAX(0, amount_cents - amount_paid_cents)), 0) AS balance
     FROM registration_installments
     WHERE registration_id = ? AND status != 'waived'
   `).get(registrationId);

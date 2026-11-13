@@ -128,7 +128,7 @@ function Turnstile({
 
 type Audience = "member" | "guest" | "international";
 type CheckoutPlan = PayPlan | "test";
-type Step = "start" | "member" | "guest" | "confirm" | "ticket" | "pay" | "paying" | "done" | "manage";
+type Step = "start" | "member" | "guest" | "confirm" | "reward" | "ticket" | "pay" | "paying" | "done" | "manage";
 type UpayMethod = "instapay" | "paygate" | "UB Online";
 
 type UpaySession = {
@@ -192,7 +192,7 @@ function readPaynamicsMethods(value: unknown): PaynamicsMethodOption[] {
   });
 }
 
-type PayChannelCode = "upay" | "hitpay_qr" | "hitpay_online" | "paynamics";
+type PayChannelCode = "upay" | "hitpay_qr" | "hitpay_online" | "hitpay_card" | "paynamics";
 
 type PayChannel = {
   code: PayChannelCode;
@@ -207,7 +207,7 @@ type FeeBearer = "pass" | "shoulder";
 
 type HitpaySession = {
   sessionId: string;
-  channel: "qr" | "online";
+  channel: "qr" | "online" | "card";
   status: "pending" | "paid" | "failed" | "expired";
   amountCents?: number;
   feeCents?: number;
@@ -230,7 +230,7 @@ type PaynamicsSession = {
 };
 
 function isPayChannel(value: string): value is PayChannelCode {
-  return value === "upay" || value === "hitpay_qr" || value === "hitpay_online" || value === "paynamics";
+  return value === "upay" || value === "hitpay_qr" || value === "hitpay_online" || value === "hitpay_card" || value === "paynamics";
 }
 
 function safeHitpayUrl(value: string) {
@@ -248,7 +248,12 @@ function safeHitpayUrl(value: string) {
 function hitpayApiChannel(code: PayChannelCode) {
   if (code === "hitpay_qr") return "qr";
   if (code === "hitpay_online") return "online";
+  if (code === "hitpay_card") return "card";
   return "";
+}
+
+function hitpayHosted(channel: string) {
+  return channel === "online" || channel === "card";
 }
 
 function safePaynamicsUrl(value: string) {
@@ -265,6 +270,7 @@ function payActionLabel(channel: PayChannelCode | "", amount: string, busy: bool
   if (busy) return channel === "upay" || !channel ? "Opening UnionBank" : "Opening payment";
   if (channel === "hitpay_qr") return `Pay with QR · ${amount}`;
   if (channel === "hitpay_online") return `Pay with online banking · ${amount}`;
+  if (channel === "hitpay_card") return `Pay with card · ${amount}`;
   if (channel === "paynamics") return `Pay with ${paynamicsLabel || "Paynamics"} · ${amount}`;
   return `Pay with UnionBank · ${amount}`;
 }
@@ -358,14 +364,36 @@ type FoundMember = {
   profileReady?: boolean;
   missing?: string[];
   memberToken?: string;
+  goldClub?: boolean;
+  gold?: GoldOffer;
+};
+
+type GoldTierCheck = { code: string; label: string; met: boolean; applied: boolean; progress: string };
+type GoldPlanQuote = {
+  listCents: number;
+  totalCents: number;
+  discountCents: number;
+  scheduleNote: string;
+  rows: { label: string; amountCents: number; listAmountCents: number; covered: boolean; kind: string; dueOn: string | null }[];
+};
+type GoldOffer = {
+  club: boolean;
+  code: string;
+  label: string;
+  shortLabel: string;
+  reason: string;
+  moreForFree: number;
+  tiers: GoldTierCheck[];
+  products: Record<string, { full: GoldPlanQuote; installment: GoldPlanQuote | null }>;
 };
 
 type StoredPayment = {
   label: string;
   dueOn: string;
   amountCents: number;
+  listAmountCents?: number;
   amountPaidCents?: number;
-  status: "paid" | "due" | "upcoming";
+  status: "paid" | "due" | "upcoming" | "covered";
 };
 
 type AppliedCoupon = {
@@ -397,6 +425,13 @@ type StoredRegistration = {
   paymentHoldUntil?: string | null;
   qrReady?: boolean;
   qrToken?: string;
+  goldClub?: boolean;
+  goldReward?: string;
+  goldListCents?: number;
+  goldDiscountCents?: number;
+  refundDue?: boolean;
+  refundAmountCents?: number;
+  scheduleNote?: string;
 };
 
 function formatHoldDeadline(iso: string) {
@@ -480,7 +515,7 @@ function MoneyText({ text, className = "" }: { text: string; className?: string 
   );
 }
 
-function EventHeader({ onManage }: { onManage?: () => void }) {
+function EventHeader({ onManage, goldClub = false }: { onManage?: () => void; goldClub?: boolean }) {
   return (
     <header className="border-b border-[#C8C8C8] bg-white">
       <div className="mx-auto flex w-full max-w-[480px] items-center justify-between gap-2 px-5 py-3">
@@ -505,8 +540,19 @@ function EventHeader({ onManage }: { onManage?: () => void }) {
           </button>
         ) : null}
       </div>
+      {goldClub ? (
+        <div className="border-t border-[#F0EDE8]">
+          <div className="mx-auto w-full max-w-[480px] px-5 py-2">
+            <GoldClubBadge />
+          </div>
+        </div>
+      ) : null}
     </header>
   );
+}
+
+function GoldClubBadge() {
+  return <span className="inline-flex items-center rounded-full bg-[#141416] px-2.5 py-1 text-[11px] font-bold tracking-[0.08em] text-white">★ Gold Club</span>;
 }
 
 function HelpIcon({ children }: { children: ReactNode }) {
@@ -558,6 +604,7 @@ function Frame({
   footer,
   onManage,
   hideManage = false,
+  goldClub = false,
 }: {
   label?: string;
   step?: number;
@@ -565,11 +612,12 @@ function Frame({
   footer?: ReactNode;
   onManage?: () => void;
   hideManage?: boolean;
+  goldClub?: boolean;
 }) {
   return (
     <div className="scroll-wrapper bg-[#F2F2F2] font-sans text-black">
       <div className="flex min-h-full flex-col">
-        <EventHeader onManage={hideManage ? undefined : onManage} />
+        <EventHeader onManage={hideManage ? undefined : onManage} goldClub={goldClub} />
         <div className="mx-auto flex w-full max-w-[480px] flex-1 flex-col px-5 py-6">
           {step ? <Steps step={step} /> : null}
           <div className="flex flex-col gap-4">{children}</div>
@@ -933,12 +981,20 @@ function RegistrationWizard() {
     openMemberDetails(member);
   }
 
+  function openMemberTicket() {
+    if (member?.gold?.club && member.gold.code && member.gold.code !== "GOLD_NONE") {
+      setStep("reward");
+      return;
+    }
+    setStep("ticket");
+  }
+
   function continueVerifiedMember() {
     if (!member?.profileReady) return;
     setMemberProof(member.memberToken || "");
     setAttendee(memberCheckoutAttendee(member));
     setPlan(memberTest ? "test" : "full");
-    setStep("ticket");
+    openMemberTicket();
   }
 
   async function sendOtp() {
@@ -1182,7 +1238,8 @@ function RegistrationWizard() {
       setMember(payload);
       setAttendee(memberAttendee(payload));
       setPlan("full");
-      setStep("ticket");
+      if (payload.gold?.club && payload.gold.code && payload.gold.code !== "GOLD_NONE") setStep("reward");
+      else setStep("ticket");
     } catch (error) {
       setGuestError(error instanceof Error ? error.message : "Details were not saved");
     } finally {
@@ -1198,6 +1255,45 @@ function RegistrationWizard() {
     }
     setTicketError("");
     setStep("pay");
+  }
+
+  async function claimFreeTicket() {
+    const charging = checkoutTier();
+    if (!attendee || !charging || saving || !charging.onSale) return;
+    setSaving(true);
+    setTicketError("");
+    try {
+      const challengeToken = await mintFormChallenge();
+      setChallenge(challengeToken);
+      const response = await fetch("/api/registrations", {
+        method: "POST",
+        headers: resumeHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({
+          productCode: charging.code,
+          paymentPlan: "full",
+          fullName: attendee.fullName,
+          email: attendee.email,
+          mobile: attendee.mobile,
+          business: attendee.business,
+          industry: attendee.industry,
+          chapter: attendee.chapter,
+          attendeeType: attendee.audience,
+          memberToken: memberProof || undefined,
+          challenge: challengeToken,
+          companyWebsite,
+          turnstileToken,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "Could not claim this ticket");
+      rememberRegistration(payload);
+      setSaved(payload);
+      setStep("done");
+    } catch (error) {
+      setTicketError(error instanceof Error ? error.message : "Could not claim this ticket");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function pay() {
@@ -1327,7 +1423,7 @@ function RegistrationWizard() {
         setPaynamicsSession(null);
         setHitpaySession(payload.hitpay);
         setStep("paying");
-        const url = payload.hitpay.channel === "online" ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
+        const url = hitpayHosted(payload.hitpay.channel) ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
         if (url) window.location.assign(url);
         return;
       }
@@ -1353,6 +1449,18 @@ function RegistrationWizard() {
   function openManage() {
     setLookup("");
     setManagedRecord(null);
+    setResumePay(false);
+    setStep("manage");
+  }
+
+  function openMyRegistration(registration: StoredRegistration) {
+    rememberRegistration(registration);
+    setSaved(registration);
+    setManagedRecord(registration);
+    setResumePay(false);
+    setUpaySession(null);
+    setHitpaySession(null);
+    setPaynamicsSession(null);
     setStep("manage");
   }
 
@@ -1413,6 +1521,7 @@ function RegistrationWizard() {
     return (
       <Frame
         step={1}
+        goldClub={Boolean(member?.gold?.club)}
         onManage={openManage}
         footer={member?.registered ? (
           <button type="button" className="block w-full text-center text-base font-bold text-[#A8131F]" onClick={() => setStep("manage")}>
@@ -1558,7 +1667,7 @@ function RegistrationWizard() {
             ? "Joining from outside the Philippines. Your ticket is priced in USD."
             : "New to BNI? You're welcome here.";
     return (
-      <Frame step={1} onManage={openManage} footer={<PrimaryButton disabled={!detailsReady(attendee)} onClick={continueGuest}>Continue</PrimaryButton>}>
+      <Frame step={1} goldClub={Boolean(member?.gold?.club)} onManage={openManage} footer={<PrimaryButton disabled={!detailsReady(attendee)} onClick={continueGuest}>Continue</PrimaryButton>}>
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => { if (!memberPath) { setTestMode(false); setInstallmentTest(false); } setStep(memberPath ? "member" : "start"); }}>← Back</button>
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Your details</h1>
         <LevNote pose="smile" label="Lev smiling">{guestLine}</LevNote>
@@ -1619,6 +1728,7 @@ function RegistrationWizard() {
     return (
       <Frame
         step={1}
+        goldClub={Boolean(member?.gold?.club)}
         onManage={openManage}
         footer={<PrimaryButton disabled={saving} onClick={saveConfirmedDetails}>{saving ? "Saving" : "Save and continue"}</PrimaryButton>}
       >
@@ -1640,21 +1750,77 @@ function RegistrationWizard() {
     );
   }
 
+  if (step === "reward" && attendee && member?.gold?.club && member.gold.code !== "GOLD_NONE") {
+    const first = attendee.fullName.trim().split(/\s+/)[0] || "there";
+    const gold = member.gold;
+    return (
+      <Frame
+        step={2}
+        goldClub
+        onManage={openManage}
+        footer={<PrimaryButton onClick={() => setStep("ticket")}>Choose how to pay</PrimaryButton>}
+      >
+        <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep(member.profileReady ? "member" : "confirm")}>← Back</button>
+        <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Thank you, {first}.</h1>
+        <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">Thanks for sponsoring members into your chapter. Here's the reward on your IBMC 2027 ticket.</p>
+        <div className="flex flex-col gap-1 rounded-[14px] bg-[#141416] p-4 text-white">
+          <span className="text-[11px] font-bold tracking-[0.12em] text-[#E7E4DE] uppercase">Gold Club reward</span>
+          <span className="font-archivo text-[28px] leading-none font-extrabold">{gold.label}</span>
+          {gold.reason ? <span className="text-sm leading-snug text-[#E7E4DE]">{gold.reason}</span> : null}
+        </div>
+        <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-1">
+          {gold.tiers.map((tierCheck) => (
+            <div key={tierCheck.code} className="flex items-start justify-between gap-3 border-t border-[#F0EDE8] py-2.5 first:border-t-0">
+              <span className="min-w-0 text-sm leading-snug text-[#2A2A2E]">{tierCheck.label}</span>
+              <span className={`shrink-0 text-[12px] font-bold ${tierCheck.applied ? "text-[#A8131F]" : "text-[#5C5C63]"}`}>
+                {tierCheck.applied ? "Applied" : tierCheck.met ? "Met" : tierCheck.progress}
+              </span>
+            </div>
+          ))}
+        </div>
+        {gold.moreForFree > 0 ? (
+          <p className="m-0 text-sm leading-snug text-[#2A2A2E]">Sponsor {gold.moreForFree} more by Dec 31 and your ticket is free.</p>
+        ) : null}
+        <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">We apply your biggest reward automatically.</p>
+      </Frame>
+    );
+  }
+
   if (step === "ticket" && attendee && tier) {
     const charging = checkoutTier();
-    const dueToday = plan === "installment" && tier.rows[0] ? tier.rows[0].amountCents : charging ? charging.fullCents : tier.fullCents;
+    const goldQuote = member?.gold?.products?.[tier.code];
+    const goldOn = Boolean(member?.gold?.club && member.gold.code && member.gold.code !== "GOLD_NONE" && goldQuote);
+    const goldFull = goldOn ? goldQuote?.full : null;
+    const goldInstallment = goldOn ? goldQuote?.installment : null;
+    const dueToday = goldOn
+      ? plan === "installment" && goldInstallment?.rows[0]
+        ? goldInstallment.rows[0].amountCents
+        : goldFull?.totalCents || 0
+      : plan === "installment" && tier.rows[0] ? tier.rows[0].amountCents : charging ? charging.fullCents : tier.fullCents;
     const premium = tier.installmentCents && tier.installmentCents > tier.fullCents ? tier.installmentCents - tier.fullCents : 0;
     const realTier = tier.code !== "test" && tier.code !== "test_50" && tier.code !== "test_100" && tier.code !== "test_200";
     return (
       <Frame
         step={2}
+        goldClub={Boolean(member?.gold?.club)}
         onManage={openManage}
-        footer={<PrimaryButton onClick={continueTicket}>Continue to payment · {money(dueToday, charging?.currency || tier.currency)} today</PrimaryButton>}
+        footer={goldOn && member?.gold?.code === "GOLD_FREE" ? (
+          <div className="flex flex-col gap-3">
+            {turnstileSiteKey ? (
+              <Turnstile key={turnstileMountKey} siteKey={turnstileSiteKey} onToken={applyTurnstileToken} onBlocked={setTurnstileBlocked} />
+            ) : null}
+            <PrimaryButton disabled={saving || !charging?.onSale || Boolean(turnstileSiteKey && !turnstileToken)} onClick={claimFreeTicket}>{saving ? "Claiming" : "Claim your free ticket"}</PrimaryButton>
+          </div>
+        ) : (
+          <PrimaryButton onClick={continueTicket}>Continue to payment · {money(dueToday, charging?.currency || tier.currency)} today</PrimaryButton>
+        )}
       >
-        <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep(attendee.audience === "member" ? "member" : "guest")}>← Back</button>
+        <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep(goldOn ? "reward" : attendee.audience === "member" ? "member" : "guest")}>← Back</button>
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Your ticket</h1>
         <LevNote pose="wink" label="Lev with a tip">
-          {premium > 0 ? (
+          {goldOn && member?.gold?.code === "GOLD_FREE" ? (
+            <>Your Gold Club reward covers this ticket.</>
+          ) : premium > 0 ? (
             <>Pay in full and save <MoneyText text={money(premium, tier.currency)} />.</>
           ) : plan === "installment" ? (
             <>Tip: <MoneyText text={money(dueToday, charging?.currency || tier.currency)} /> today locks your slot.</>
@@ -1669,12 +1835,18 @@ function RegistrationWizard() {
           </div>
           <span className="text-sm text-[#C9C7C2]">{charging ? paymentStatus(charging).line : ""}</span>
         </div>
+        {goldOn && member?.gold?.code === "GOLD_FREE" ? (
+          <p className="m-0 text-[15px] leading-snug text-[#2A2A2E]">Your Gold Club reward covers this ticket. Claim it and your QR ticket is ready.</p>
+        ) : (
+        <>
         <h2 className="m-0 mt-1 text-[17px] font-bold">How would you like to pay?</h2>
         <PayChoice
           selected={plan === "full"}
           onSelect={() => { setPlan("full"); clearCoupon(); }}
           title="Pay in full"
-          amount={money(tier.fullCents, tier.currency)}
+          amount={money(goldFull ? goldFull.totalCents : tier.fullCents, tier.currency)}
+          listAmount={goldFull && goldFull.listCents > goldFull.totalCents ? money(goldFull.listCents, tier.currency) : ""}
+          tag={goldOn ? `★ ${member?.gold?.label} Gold Club reward` : ""}
           body={realTier ? "One payment today." : tier.saveLabel || "One payment today."}
         />
         {memberTest ? (
@@ -1691,8 +1863,10 @@ function RegistrationWizard() {
             selected={plan === "installment"}
             onSelect={() => { setPlan("installment"); clearCoupon(); }}
             title="Installment"
-            amount={money(tier.installmentCents, tier.currency)}
-            body={tier.installmentSummary || ""}
+            amount={money(goldInstallment ? goldInstallment.totalCents : tier.installmentCents || 0, tier.currency)}
+            listAmount={goldInstallment && goldInstallment.listCents > goldInstallment.totalCents ? money(goldInstallment.listCents, tier.currency) : ""}
+            tag={goldOn ? `★ ${member?.gold?.label} Gold Club reward` : ""}
+            body={goldInstallment?.scheduleNote || tier.installmentSummary || ""}
           >
             <button
               type="button"
@@ -1707,23 +1881,37 @@ function RegistrationWizard() {
             </button>
             {datesOpen ? (
               <div className="flex flex-col text-[13px]">
-                {tier.rows.map((row) => (
-                  <span key={row.label} className="flex justify-between border-t border-[#F0EDE8] py-1.5 first:border-t-0">
+                {(goldInstallment ? goldInstallment.rows : tier.rows).map((row) => (
+                  <span key={`${row.label}-${row.kind}`} className="flex items-center justify-between gap-3 border-t border-[#F0EDE8] py-1.5 first:border-t-0">
                     <span className={row.kind === "on_registration" ? "font-bold text-[#A8131F]" : "text-[#3A3A40]"}>{row.label}</span>
-                    <span className={row.kind === "on_registration" ? "font-bold text-[#A8131F]" : ""}>{money(row.amountCents, tier.currency)}</span>
+                    {"covered" in row && row.covered ? (
+                      <span className="flex items-center gap-2">
+                        <span className="text-[#8A8680] line-through">{money(row.listAmountCents, tier.currency)}</span>
+                        <span className="font-bold text-[#A8131F]">★ Covered</span>
+                      </span>
+                    ) : "listAmountCents" in row && row.listAmountCents > row.amountCents ? (
+                      <span className="flex items-center gap-2">
+                        <span className="text-[#8A8680] line-through">{money(row.listAmountCents, tier.currency)}</span>
+                        <span className="font-bold">{money(row.amountCents, tier.currency)}</span>
+                      </span>
+                    ) : (
+                      <span className={row.kind === "on_registration" ? "font-bold text-[#A8131F]" : ""}>{money(row.amountCents, tier.currency)}</span>
+                    )}
                   </span>
                 ))}
               </div>
             ) : null}
-            {tier.note ? <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">{tier.note}</p> : null}
+            {goldInstallment?.scheduleNote ? null : tier.note ? <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">{tier.note}</p> : null}
           </PayChoice>
         ) : null}
-        {plan === "installment" && installmentTest ? (
+        </>
+        )}
+        {plan === "installment" && installmentTest && !(goldOn && member?.gold?.code === "GOLD_FREE") ? (
           <p className="m-0 rounded-xl bg-[#F6F4F1] p-3.5 text-[13px] leading-normal text-[#2A2A2E]">
             Day 0 is ₱100, due when you pay. Day 2 and day 3 are ₱50 each, counted from that payment. We'll email you one day before each of those due dates, at 9:00am Manila time.
           </p>
         ) : null}
-        {plan === "installment" && !installmentTest ? (
+        {plan === "installment" && !installmentTest && !(goldOn && member?.gold?.code === "GOLD_FREE") ? (
           <label className="flex items-start gap-2.5 rounded-xl bg-[#FBE9EA] p-3.5 text-[13px] leading-normal text-[#2A2A2E]">
             <input type="checkbox" className="mt-0.5 h-5 w-5 accent-[#D0202E]" checked={agreed} onChange={(event) => { setAgreed(event.target.checked); setTicketError(""); }} />
             <span>
@@ -1776,11 +1964,19 @@ function RegistrationWizard() {
   if (step === "pay" && attendee && tier) {
     const charging = checkoutTier() || tier;
     const applied = plan === "full" ? coupon : null;
-    const listTotal = plan === "installment" && tier.installmentCents ? tier.installmentCents : charging.fullCents;
-    const dueToday = applied ? applied.dueTodayCents : plan === "installment" && tier.rows[0] ? tier.rows[0].amountCents : charging.fullCents;
-    const later = plan === "installment" ? tier.rows.slice(1) : [];
+    const goldQuote = member?.gold?.products?.[tier.code];
+    const goldOn = Boolean(member?.gold?.club && member.gold.code && member.gold.code !== "GOLD_NONE" && goldQuote);
+    const goldSelected = goldOn ? (plan === "installment" ? goldQuote?.installment : goldQuote?.full) : null;
+    const listTotal = goldSelected ? goldSelected.listCents : plan === "installment" && tier.installmentCents ? tier.installmentCents : charging.fullCents;
+    const rewardTotal = goldSelected ? goldSelected.totalCents : listTotal;
+    const dueToday = applied
+      ? applied.dueTodayCents
+      : goldSelected
+        ? plan === "installment" ? goldSelected.rows[0]?.amountCents || 0 : goldSelected.totalCents
+        : plan === "installment" && tier.rows[0] ? tier.rows[0].amountCents : charging.fullCents;
+    const later = plan === "installment" ? (goldSelected ? goldSelected.rows.slice(1).filter((row) => row.amountCents > 0) : tier.rows.slice(1)) : [];
     const laterCount = applied ? applied.laterCount : later.length;
-    const laterEach = applied ? applied.laterEachCents : later[0]?.amountCents ?? null;
+    const laterEach = applied ? applied.laterEachCents : later.length > 0 && later.every((row) => row.amountCents === later[0].amountCents) ? later[0].amountCents : null;
     const laterCents = applied ? applied.laterCents : later.reduce((sum, row) => sum + row.amountCents, 0);
     const bearer = feeBearers[charging.code] || "shoulder";
     const rate = selectedFeeRate(channel, channels, paynamicsChannel, paynamicsMethods);
@@ -1791,6 +1987,7 @@ function RegistrationWizard() {
     return (
       <Frame
         step={3}
+        goldClub={Boolean(member?.gold?.club)}
         onManage={openManage}
         footer={
           <div className="flex flex-col gap-3">
@@ -1894,7 +2091,10 @@ function RegistrationWizard() {
         ) : null}
         <div className="flex flex-col rounded-[14px] border border-[#E4E1DC] bg-white px-4 py-2">
           <Row label="Attendee" value={attendee.fullName} />
-          <Row label={`${charging.name} · ${plan === "installment" ? "installment" : "one payment"}`} value={`${money(listTotal, charging.currency)} total`} />
+          <Row label={`${charging.name} · ${plan === "installment" ? "installment" : "one payment"}`} value={`${money(goldSelected ? rewardTotal : listTotal, charging.currency)} total`} />
+          {goldSelected && goldSelected.discountCents > 0 ? (
+            <Row label={`★ Gold Club reward · ${member?.gold?.shortLabel}`} value={`− ${money(goldSelected.discountCents, charging.currency)}`} />
+          ) : null}
           {laterCount > 0 ? <Row label={`Then, ${laterCount} payments`} value={laterEach ? `${laterCount} × ${money(laterEach, tier.currency)}` : money(laterCents, tier.currency)} /> : null}
           {applied ? <Row label={`Coupon ${applied.code}`} value={`${applied.label} · −${money(applied.discountCents, charging.currency)}`} /> : null}
           {fee.shown ? (
@@ -1925,7 +2125,7 @@ function RegistrationWizard() {
         onUpdate={(registration, session) => {
           setSaved(registration);
           setPaynamicsSession(session);
-          if (session.status === "paid") setStep("done");
+          if (session.status === "paid") openMyRegistration(registration);
         }}
         onLater={() => {
           setPaynamicsSession(null);
@@ -1948,7 +2148,7 @@ function RegistrationWizard() {
         onUpdate={(registration, session) => {
           setSaved(registration);
           setHitpaySession(session);
-          if (session.status === "paid") setStep("done");
+          if (session.status === "paid") openMyRegistration(registration);
         }}
         onLater={() => setStep("done")}
         onBack={() => setStep("pay")}
@@ -1965,7 +2165,7 @@ function RegistrationWizard() {
         onUpdate={(registration, session) => {
           setSaved(registration);
           setUpaySession(session);
-          if (session.status === "paid") setStep("done");
+          if (session.status === "paid") openMyRegistration(registration);
         }}
         onLater={() => setStep("done")}
         onBack={() => setStep("pay")}
@@ -2422,6 +2622,22 @@ function useCountdown(expiresAt: string) {
   };
 }
 
+function ValidatingPayment({ amount }: { amount?: string }) {
+  return (
+    <div className="flex flex-col items-center gap-5 py-10 text-center" role="status" aria-live="polite">
+      <span className="relative flex h-16 w-16 items-center justify-center" aria-hidden="true">
+        <span className="payment-glow absolute inset-1 rounded-full bg-[#F6D5D8]" />
+        <span className="absolute inset-0 rounded-full border-2 border-[#F3D2D5]" />
+        <span className="payment-spin absolute inset-0 rounded-full border-2 border-transparent border-t-[#D0202E]" />
+      </span>
+      <div className="flex flex-col gap-2">
+        <h1 className="m-0 font-archivo text-[28px] leading-[1.05] font-extrabold">Validating payment</h1>
+        <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">{amount ? `${amount} · please wait` : "Please wait"}</p>
+      </div>
+    </div>
+  );
+}
+
 function HitpayPending({
   record,
   session,
@@ -2430,6 +2646,7 @@ function HitpayPending({
   onBack,
   onManage,
   hideManage = false,
+  returned = false,
 }: {
   record: StoredRegistration;
   session: HitpaySession;
@@ -2438,6 +2655,7 @@ function HitpayPending({
   onBack: () => void;
   onManage?: () => void;
   hideManage?: boolean;
+  returned?: boolean;
 }) {
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
@@ -2458,7 +2676,7 @@ function HitpayPending({
       if (payload.registration && payload.hitpay) onUpdate(mergeStored(record, payload.registration), payload.hitpay);
       if (!response.ok && !payload.hitpay) throw new Error(payload.error || "HitPay has not confirmed the payment yet.");
       if (payload.hitpay?.status === "failed") setError("This payment can't continue. Nothing was charged.");
-      else if (payload.error && payload.hitpay?.status === "pending") setError(payload.error);
+      else if (!returned && payload.error && payload.hitpay?.status === "pending") setError(payload.error);
       else setError("");
     } catch (statusError) {
       setError(statusError instanceof Error ? statusError.message : "HitPay has not confirmed the payment yet.");
@@ -2494,8 +2712,27 @@ function HitpayPending({
   const chargedCents = session.amountCents && session.amountCents > 0 ? session.amountCents : due?.amountCents || 0;
   const feeCents = session.feeCents && session.feeCents > 0 ? session.feeCents : 0;
   const feeNote = feeCents > 0 ? `Includes a ${payFigure(feeCents, record.currency)} convenience fee. ` : "";
-  const title = session.channel === "qr" ? "Pay with QR Ph" : "Pay with online banking";
+  const title = session.channel === "qr" ? "Pay with QR Ph" : session.channel === "card" ? "Pay with card" : "Pay with online banking";
   const qrClosed = session.channel === "qr" && clock.expired && !showRefresh && session.status !== "paid";
+  const amountLabel = chargedCents > 0 ? payFigure(chargedCents, record.currency) : "";
+  if (returned && session.status === "pending") {
+    return (
+      <Frame hideManage>
+        <ValidatingPayment amount={amountLabel} />
+      </Frame>
+    );
+  }
+  if (returned && (session.status === "failed" || session.status === "expired")) {
+    return (
+      <Frame hideManage>
+        <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Payment not completed</h1>
+        <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">Nothing was charged.</p>
+        <button type="button" className="rounded-full bg-[#D0202E] px-4 py-4 text-base font-bold text-white" onClick={onBack}>
+          Back to registration
+        </button>
+      </Frame>
+    );
+  }
   return (
     <Frame
       step={3}
@@ -2503,9 +2740,9 @@ function HitpayPending({
       hideManage={hideManage}
       footer={
         <div className="flex flex-col gap-2.5">
-          {session.channel === "online" && checkoutUrl && !clock.expired ? (
+          {hitpayHosted(session.channel) && checkoutUrl && !clock.expired ? (
             <a href={checkoutUrl} className="block w-full rounded-full bg-[#D0202E] px-4 py-4 text-center text-base font-bold text-white no-underline">
-              Continue to online banking
+              {session.channel === "card" ? "Continue to card payment" : "Continue to online banking"}
             </a>
           ) : null}
           <button type="button" className="text-center text-sm font-semibold text-[#A8131F]" onClick={onLater}>I'll finish this later</button>
@@ -2515,8 +2752,8 @@ function HitpayPending({
       <button type="button" className="self-start text-sm text-[#A8131F]" onClick={onBack}>← Back</button>
       <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">{title}</h1>
       <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">
-        {session.channel === "online" ? "Checking payment status. " : ""}
-        {session.channel === "online" && chargedCents > 0 ? `${payFigure(chargedCents, record.currency)} for IBMC 2027. ` : ""}
+        {hitpayHosted(session.channel) ? "Checking payment status. " : ""}
+        {hitpayHosted(session.channel) && chargedCents > 0 ? `${payFigure(chargedCents, record.currency)} for IBMC 2027. ` : ""}
         {feeNote}
         {record.attendee.email ? `The receipt goes to ${record.attendee.email}. ` : ""}Coming back to this page does not by itself confirm the payment.
       </p>
@@ -2545,7 +2782,7 @@ function HitpayPending({
           ) : null}
         </div>
       ) : null}
-      {session.channel === "online" ? (
+      {hitpayHosted(session.channel) ? (
         <div className="rounded-[14px] border border-[#E4E1DC] bg-white p-4 text-sm leading-normal text-[#3A3A40]">
           {clock.expired
             ? "The payment was not completed. Nothing was charged. Stay on this page if you already paid."
@@ -2624,9 +2861,7 @@ function PaynamicsPending({
     }
   }
 
-  if (current.status === "paid") {
-    return <Confirmed record={record} onManage={onManage || onBack} hideManage={hideManage} />;
-  }
+  if (current.status === "paid") return null;
 
   return (
     <Frame onManage={onManage} hideManage={hideManage}>
@@ -2694,8 +2929,23 @@ function PaynamicsReturn({ requestId }: { requestId: string }) {
     };
   }, [requestId]);
 
+  useEffect(() => {
+    if (!record || session?.status !== "paid") return;
+    rememberRegistration(record);
+    if (window.location.search.includes("paynamicsRequest=")) {
+      window.history.replaceState({}, "", "/register?manage=1");
+    }
+  }, [record, session?.status]);
+
   if (record && session?.status === "paid") {
-    return <Confirmed record={record} onManage={() => { window.location.assign("/register?manage=1"); }} />;
+    return (
+      <Manage
+        initialRecord={record}
+        onStart={() => {
+          window.location.assign("/register");
+        }}
+      />
+    );
   }
   if (record && session) {
     return (
@@ -2746,8 +2996,23 @@ function HitpayReturn({ sessionId }: { sessionId: string }) {
     };
   }, [sessionId]);
 
+  useEffect(() => {
+    if (!record || session?.status !== "paid") return;
+    rememberRegistration(record);
+    if (window.location.search.includes("paySession=")) {
+      window.history.replaceState({}, "", "/register?manage=1");
+    }
+  }, [record, session?.status]);
+
   if (record && session?.status === "paid") {
-    return <Confirmed record={record} onManage={() => { window.location.assign("/register?manage=1"); }} />;
+    return (
+      <Manage
+        initialRecord={record}
+        onStart={() => {
+          window.location.assign("/register");
+        }}
+      />
+    );
   }
   if (record && session) {
     return (
@@ -2761,14 +3026,14 @@ function HitpayReturn({ sessionId }: { sessionId: string }) {
         onLater={() => { window.location.href = "/register"; }}
         onBack={() => { window.location.href = "/register"; }}
         onManage={() => { window.location.assign("/register?manage=1"); }}
+        returned
       />
     );
   }
   return (
-    <Frame onManage={() => { window.location.assign("/register?manage=1"); }}>
-      <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Checking payment status</h1>
-      <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">This page checks with HitPay. Opening the return link does not confirm the payment.</p>
-      {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
+    <Frame hideManage>
+      <ValidatingPayment />
+      {error ? <p className="m-0 text-center text-sm text-[#A8131F]">{error}</p> : null}
     </Frame>
   );
 }
@@ -2778,6 +3043,8 @@ function PayChoice({
   onSelect,
   title,
   amount,
+  listAmount = "",
+  tag = "",
   body,
   children,
 }: {
@@ -2785,18 +3052,24 @@ function PayChoice({
   onSelect: () => void;
   title: string;
   amount: string;
+  listAmount?: string;
+  tag?: string;
   body: string;
   children?: ReactNode;
 }) {
   return (
     <label className={`flex cursor-pointer items-start gap-3 rounded-[14px] bg-white p-4 ${selected ? "border-2 border-[#D0202E]" : "border border-[#D9D5CF]"}`}>
       <input type="radio" name="plan" className="mt-0.5 h-5 w-5 accent-[#D0202E]" checked={selected} onChange={onSelect} />
-      <span className="flex flex-1 flex-col gap-2.5">
+      <span className="flex min-w-0 flex-1 flex-col gap-2.5">
         <span className="flex flex-col gap-1">
-          <span className="flex justify-between gap-2">
+          <span className="flex items-start justify-between gap-2">
             <span className="text-base font-bold">{title}</span>
-            <MoneyText text={amount} className="font-archivo text-lg font-extrabold" />
+            <span className="flex shrink-0 items-baseline gap-2">
+              {listAmount ? <span className="text-sm font-semibold text-[#8A8680] line-through">{listAmount}</span> : null}
+              <MoneyText text={amount} className="font-archivo text-lg font-extrabold" />
+            </span>
           </span>
+          {tag ? <span className="text-[12px] font-bold leading-snug text-[#A8131F]">{tag}</span> : null}
           <span className="text-sm leading-snug text-[#5C5C63]">{body}</span>
         </span>
         {selected ? children : null}
@@ -2814,7 +3087,7 @@ function Confirmed({ record, onManage, onPay, hideManage = false }: { record: St
   const awaitingFirstPayment = !fullyPaid && paidCount === 0;
   const openCents = next ? Math.max(0, next.amountCents - (next.amountPaidCents || 0)) : Math.max(0, record.totalCents - paid);
   return (
-    <Frame step={4} onManage={onManage} hideManage={hideManage}>
+    <Frame step={4} goldClub={Boolean(record.goldClub)} onManage={onManage} hideManage={hideManage}>
       <div className="flex flex-col gap-2 rounded-2xl bg-[#D0202E] px-5 py-[22px] text-white">
         <span className="text-xs font-bold tracking-[0.14em] text-[#FFE3E5] uppercase">{fullyPaid ? "Payment received" : "Registration saved"}</span>
         <h1 className="m-0 font-archivo text-[30px] leading-[1.05] font-black">
@@ -2848,7 +3121,11 @@ function Confirmed({ record, onManage, onPay, hideManage = false }: { record: St
             <b className="font-archivo text-xl">{money(paid, record.currency)}</b> of {money(record.totalCents, record.currency)}
           </span>
         </div>
+        {record.goldDiscountCents ? <p className="m-0 text-sm font-bold text-[#A8131F]">You saved {money(record.goldDiscountCents, record.currency)}</p> : null}
+        {record.refundDue && record.refundAmountCents ? <p className="m-0 text-sm text-[#2A2A2E]">Refund due {money(record.refundAmountCents, record.currency)}</p> : null}
+        {record.scheduleNote ? <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">{record.scheduleNote}</p> : null}
         <Progress payments={record.payments} label={`${paidCount} of ${record.payments.length} payments made`} />
+        {record.goldDiscountCents ? <RewardSchedule payments={record.payments} currency={record.currency} /> : null}
         {next ? (
           <div className="flex justify-between gap-3 border-t border-[#F0EDE8] pt-2.5">
             <span className="text-sm text-[#5C5C63]">Next payment</span>
@@ -3209,7 +3486,7 @@ function Manage({
         setPaynamicsSession(null);
         setHitpaySession(payload.hitpay);
         setPayingInstallment(false);
-        const url = payload.hitpay.channel === "online" ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
+        const url = hitpayHosted(payload.hitpay.channel) ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
         if (url) window.location.assign(url);
       }
       if (payload.paynamics?.requestId) {
@@ -3305,7 +3582,7 @@ function Manage({
   const shownBadgeName = badgeName.trim() || "Your name";
   const shownBadgeCompany = badgeCompany.trim() || "Your company";
   return (
-    <Frame hideManage>
+    <Frame hideManage goldClub={Boolean(record.goldClub)}>
       <div className="flex flex-col gap-1">
         <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Hi {first}</h1>
         <p className="m-0 text-[15px] text-[#5C5C63]">{record.tierName} · {record.plan === "installment" ? "installment plan" : "one payment"}</p>
@@ -3337,6 +3614,9 @@ function Manage({
           <span className="text-[15px]"><b className="font-archivo text-[22px]">{money(paidCents, record.currency)}</b> paid</span>
           <span className="text-sm text-[#5C5C63]">of {money(record.totalCents, record.currency)}</span>
         </div>
+        {record.goldDiscountCents ? <p className="m-0 text-sm font-bold text-[#A8131F]">You saved {money(record.goldDiscountCents, record.currency)}</p> : null}
+        {record.refundDue && record.refundAmountCents ? <p className="m-0 text-sm text-[#2A2A2E]">Refund due {money(record.refundAmountCents, record.currency)}</p> : null}
+        {record.scheduleNote ? <p className="m-0 text-[13px] leading-snug text-[#5C5C63]">{record.scheduleNote}</p> : null}
         <Progress payments={record.payments} label={`${paid.length} of ${record.payments.length} payments made${due ? `, payment ${record.payments.indexOf(due) + 1} due` : ""}`} />
         <span className="text-[13px] text-[#5C5C63]">{paid.length} of {record.payments.length} payments made · {money(remaining, record.currency)} remaining</span>
       </div>
@@ -3544,13 +3824,38 @@ export default function Registration() {
   return <RegistrationWizard />;
 }
 
+function RewardSchedule({ payments, currency }: { payments: StoredPayment[]; currency: Currency }) {
+  return (
+    <div className="flex flex-col text-[13px]">
+      {payments.map((item) => (
+        <span key={`${item.label}-${item.dueOn}`} className="flex items-center justify-between gap-3 border-t border-[#F0EDE8] py-1.5 first:border-t-0">
+          <span className="min-w-0 text-[#3A3A40]">{item.label}</span>
+          {item.status === "covered" ? (
+            <span className="flex shrink-0 items-center gap-2">
+              <span className="text-[#8A8680] line-through">{money(item.listAmountCents || item.amountCents, currency)}</span>
+              <span className="font-bold text-[#A8131F]">★ Covered</span>
+            </span>
+          ) : item.listAmountCents && item.listAmountCents > item.amountCents ? (
+            <span className="flex shrink-0 items-center gap-2">
+              <span className="text-[#8A8680] line-through">{money(item.listAmountCents, currency)}</span>
+              <span className="font-bold">{money(item.amountCents, currency)}</span>
+            </span>
+          ) : (
+            <span className="shrink-0 font-bold">{money(item.amountCents, currency)}</span>
+          )}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function Progress({ payments, label }: { payments: StoredPayment[]; label: string }) {
   return (
     <div aria-label={label} className="flex gap-1">
       {payments.map((item, index) => (
         <span
           key={index}
-          className={`h-2.5 flex-1 rounded-sm ${item.status === "paid" ? "bg-[#D0202E]" : item.status === "due" ? "border-2 border-[#D0202E] bg-white" : "bg-[#E4E1DC]"}`}
+          className={`h-2.5 flex-1 rounded-sm ${item.status === "paid" || item.status === "covered" ? "bg-[#D0202E]" : item.status === "due" ? "border-2 border-[#D0202E] bg-white" : "bg-[#E4E1DC]"}`}
         />
       ))}
     </div>

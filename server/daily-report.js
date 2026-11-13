@@ -260,6 +260,7 @@ export function buildDailyReport(db, asOf = new Date()) {
     JOIN registrations r ON r.id = i.registration_id
     JOIN ticket_products p ON p.id = r.product_id
     WHERE r.status = 'confirmed' AND p.code NOT LIKE ?
+      AND r.payment_plan = 'installment' AND i.kind = 'fixed_date'
       AND i.status = 'due' AND i.due_on < ? AND i.amount_cents > i.amount_paid_cents
     GROUP BY r.currency
   `).all(TEST_PRODUCT, today);
@@ -268,6 +269,24 @@ export function buildDailyReport(db, asOf = new Date()) {
   for (const row of overdueRows) {
     addMoney(overdue, row.currency, Number(row.cents) || 0);
     overdueRegistrations += Number(row.registrations) || 0;
+  }
+
+  const unpaidRows = db.prepare(`
+    SELECT r.currency AS currency, COUNT(DISTINCT r.id) AS registrations,
+      COALESCE(SUM(i.amount_cents - i.amount_paid_cents), 0) AS cents
+    FROM registration_installments i
+    JOIN registrations r ON r.id = i.registration_id
+    JOIN ticket_products p ON p.id = r.product_id
+    WHERE r.status = 'confirmed' AND p.code NOT LIKE ?
+      AND r.payment_plan = 'full'
+      AND i.status = 'due' AND i.amount_cents > i.amount_paid_cents
+    GROUP BY r.currency
+  `).all(TEST_PRODUCT);
+  const unpaid = moneyBucket();
+  let unpaidRegistrations = 0;
+  for (const row of unpaidRows) {
+    addMoney(unpaid, row.currency, Number(row.cents) || 0);
+    unpaidRegistrations += Number(row.registrations) || 0;
   }
 
   const seatsConfirmed = Number(db.prepare(`
@@ -426,6 +445,8 @@ export function buildDailyReport(db, asOf = new Date()) {
     overdue,
     overdueRegistrations,
     overdueAlert: overdueRegistrations > 0 || Object.values(overdue).some((cents) => cents > 0),
+    unpaid,
+    unpaidRegistrations,
     late15,
     activity: {
       registrations: activityRegistrations,
