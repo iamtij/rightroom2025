@@ -21,7 +21,7 @@ import { maskEmail, readMemberEditToken, sendMemberOtp, sendRegistrationOtp, ver
 import { rateLimit } from "./limits.js";
 import { formatLongDate, manilaParts } from "./time.js";
 import { handleUpayCallback, refreshUpayPayment, startUpayPayment, upayPublicCheckoutInfo } from "./upay.js";
-import { handleHitpayWebhook, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
+import { handleHitpayWebhook, hitpayBuyerChannel, refreshHitpayPayment, refreshHitpayQr, startHitpayPayment } from "./hitpay.js";
 import { handlePaynamicsNotification, paynamicsCheckoutChannel, paynamicsPublicCheckoutInfo, refreshPaynamicsPayment, startPaynamicsPayment } from "./paynamics.js";
 import { buyerPaymentChannels, buyerPaynamicsMethods, hitpayConfigured, listPaymentChannels, listPaynamicsMethods, paynamicsConfigured, paynamicsMethodByCode, savePaymentChannels, savePaynamicsMethods } from "./payment-channels.js";
 import { entryQrPng } from "./templates.js";
@@ -774,7 +774,7 @@ export function createApi() {
 
   router.post("/registrations/hitpay", registerLimit, async (req, res) => {
     if (await rejectBot(req, res)) return;
-    const channel = req.body?.channel === "online" ? "online" : req.body?.channel === "qr" ? "qr" : "";
+    const channel = hitpayBuyerChannel(req.body?.channel);
     if (!channel) {
       res.status(400).json({ error: "Choose a payment option." });
       return;
@@ -791,7 +791,7 @@ export function createApi() {
   });
 
   router.post("/registrations/:reference/hitpay", registerLimit, async (req, res) => {
-    const channel = req.body?.channel === "online" ? "online" : req.body?.channel === "qr" ? "qr" : "";
+    const channel = hitpayBuyerChannel(req.body?.channel);
     if (!channel) {
       res.status(400).json({ error: "Choose a payment option." });
       return;

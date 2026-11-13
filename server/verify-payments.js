@@ -8,9 +8,9 @@ import { openDatabase } from "./db.js";
 import { currentTotp } from "./auth.js";
 import { createRegistration, getEntryPass, recordPayment, resumeTokenMatches } from "./registrations.js";
 import { upayPublicCheckoutInfo, upaySettlement } from "./upay.js";
-import { buyerPaymentChannels, listPaymentChannels, savePaymentChannels, savePaynamicsMethods } from "./payment-channels.js";
+import { buyerPaymentChannels, listPaymentChannels, savePaymentChannels, savePaynamicsMethods, seedPaymentChannels } from "./payment-channels.js";
 import { convenienceFeeCents, paymentCharge, settlementBaseCents } from "./convenience-fee.js";
-import { handleHitpayWebhook, hitpayCentavos, paymentAccepted, repairHitpayMismatches } from "./hitpay.js";
+import { handleHitpayWebhook, hitpayCentavos, hitpayPaymentMethods, paymentAccepted, repairHitpayMismatches } from "./hitpay.js";
 
 delete process.env.ALLOW_TEST_TICKET;
 
@@ -24,6 +24,13 @@ assert.equal(qrChannel().customLabel, "");
 assert.equal(qrChannel().customNote, "");
 assert.equal(qrChannel().note, qrNote);
 assert.equal(qrChannel().enabled, false);
+assert.equal(listPaymentChannels(db).find((item) => item.code === "hitpay_card").enabled, false);
+assert.deepEqual(hitpayPaymentMethods("card"), ["card_cybersource"]);
+process.env.IBMC_ENABLE_HITPAY_CARD = "true";
+seedPaymentChannels(db);
+assert.equal(buyerPaymentChannels(db).find((item) => item.code === "hitpay_card").label, "HitPay card");
+delete process.env.IBMC_ENABLE_HITPAY_CARD;
+savePaymentChannels(db, { hitpay_card: false });
 assert.equal(
   buyerPaymentChannels(db).find((item) => item.code === "upay").note,
   "UnionBank collects this for GLOBAL REFERRAL MARKETING INC.",

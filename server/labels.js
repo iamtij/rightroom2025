@@ -7,6 +7,7 @@ const CHANNEL_LABELS = {
   gc: "GCash",
   qr: "QR Ph",
   online: "Online banking",
+  card: "Credit or debit card",
   instapay: "InstaPay",
   paygate: "Other banks",
   "UB Online": "UnionBank Online",

@@ -192,7 +192,7 @@ function readPaynamicsMethods(value: unknown): PaynamicsMethodOption[] {
   });
 }
 
-type PayChannelCode = "upay" | "hitpay_qr" | "hitpay_online" | "paynamics";
+type PayChannelCode = "upay" | "hitpay_qr" | "hitpay_online" | "hitpay_card" | "paynamics";
 
 type PayChannel = {
   code: PayChannelCode;
@@ -207,7 +207,7 @@ type FeeBearer = "pass" | "shoulder";
 
 type HitpaySession = {
   sessionId: string;
-  channel: "qr" | "online";
+  channel: "qr" | "online" | "card";
   status: "pending" | "paid" | "failed" | "expired";
   amountCents?: number;
   feeCents?: number;
@@ -230,7 +230,7 @@ type PaynamicsSession = {
 };
 
 function isPayChannel(value: string): value is PayChannelCode {
-  return value === "upay" || value === "hitpay_qr" || value === "hitpay_online" || value === "paynamics";
+  return value === "upay" || value === "hitpay_qr" || value === "hitpay_online" || value === "hitpay_card" || value === "paynamics";
 }
 
 function safeHitpayUrl(value: string) {
@@ -248,7 +248,12 @@ function safeHitpayUrl(value: string) {
 function hitpayApiChannel(code: PayChannelCode) {
   if (code === "hitpay_qr") return "qr";
   if (code === "hitpay_online") return "online";
+  if (code === "hitpay_card") return "card";
   return "";
+}
+
+function hitpayHosted(channel: string) {
+  return channel === "online" || channel === "card";
 }
 
 function safePaynamicsUrl(value: string) {
@@ -265,6 +270,7 @@ function payActionLabel(channel: PayChannelCode | "", amount: string, busy: bool
   if (busy) return channel === "upay" || !channel ? "Opening UnionBank" : "Opening payment";
   if (channel === "hitpay_qr") return `Pay with QR · ${amount}`;
   if (channel === "hitpay_online") return `Pay with online banking · ${amount}`;
+  if (channel === "hitpay_card") return `Pay with card · ${amount}`;
   if (channel === "paynamics") return `Pay with ${paynamicsLabel || "Paynamics"} · ${amount}`;
   return `Pay with UnionBank · ${amount}`;
 }
@@ -1417,7 +1423,7 @@ function RegistrationWizard() {
         setPaynamicsSession(null);
         setHitpaySession(payload.hitpay);
         setStep("paying");
-        const url = payload.hitpay.channel === "online" ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
+        const url = hitpayHosted(payload.hitpay.channel) ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
         if (url) window.location.assign(url);
         return;
       }
@@ -2676,7 +2682,7 @@ function HitpayPending({
   const chargedCents = session.amountCents && session.amountCents > 0 ? session.amountCents : due?.amountCents || 0;
   const feeCents = session.feeCents && session.feeCents > 0 ? session.feeCents : 0;
   const feeNote = feeCents > 0 ? `Includes a ${payFigure(feeCents, record.currency)} convenience fee. ` : "";
-  const title = session.channel === "qr" ? "Pay with QR Ph" : "Pay with online banking";
+  const title = session.channel === "qr" ? "Pay with QR Ph" : session.channel === "card" ? "Pay with card" : "Pay with online banking";
   const qrClosed = session.channel === "qr" && clock.expired && !showRefresh && session.status !== "paid";
   return (
     <Frame
@@ -2685,9 +2691,9 @@ function HitpayPending({
       hideManage={hideManage}
       footer={
         <div className="flex flex-col gap-2.5">
-          {session.channel === "online" && checkoutUrl && !clock.expired ? (
+          {hitpayHosted(session.channel) && checkoutUrl && !clock.expired ? (
             <a href={checkoutUrl} className="block w-full rounded-full bg-[#D0202E] px-4 py-4 text-center text-base font-bold text-white no-underline">
-              Continue to online banking
+              {session.channel === "card" ? "Continue to card payment" : "Continue to online banking"}
             </a>
           ) : null}
           <button type="button" className="text-center text-sm font-semibold text-[#A8131F]" onClick={onLater}>I'll finish this later</button>
@@ -2697,8 +2703,8 @@ function HitpayPending({
       <button type="button" className="self-start text-sm text-[#A8131F]" onClick={onBack}>← Back</button>
       <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">{title}</h1>
       <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">
-        {session.channel === "online" ? "Checking payment status. " : ""}
-        {session.channel === "online" && chargedCents > 0 ? `${payFigure(chargedCents, record.currency)} for IBMC 2027. ` : ""}
+        {hitpayHosted(session.channel) ? "Checking payment status. " : ""}
+        {hitpayHosted(session.channel) && chargedCents > 0 ? `${payFigure(chargedCents, record.currency)} for IBMC 2027. ` : ""}
         {feeNote}
         {record.attendee.email ? `The receipt goes to ${record.attendee.email}. ` : ""}Coming back to this page does not by itself confirm the payment.
       </p>
@@ -2727,7 +2733,7 @@ function HitpayPending({
           ) : null}
         </div>
       ) : null}
-      {session.channel === "online" ? (
+      {hitpayHosted(session.channel) ? (
         <div className="rounded-[14px] border border-[#E4E1DC] bg-white p-4 text-sm leading-normal text-[#3A3A40]">
           {clock.expired
             ? "The payment was not completed. Nothing was charged. Stay on this page if you already paid."
@@ -3403,7 +3409,7 @@ function Manage({
         setPaynamicsSession(null);
         setHitpaySession(payload.hitpay);
         setPayingInstallment(false);
-        const url = payload.hitpay.channel === "online" ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
+        const url = hitpayHosted(payload.hitpay.channel) ? safeHitpayUrl(payload.hitpay.paymentUrl) : "";
         if (url) window.location.assign(url);
       }
       if (payload.paynamics?.requestId) {

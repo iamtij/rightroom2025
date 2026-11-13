@@ -20,6 +20,12 @@ export const PAYMENT_CHANNELS = [
     note: "You'll continue to HitPay to pay with UnionBank Online. That page closes after 5 minutes. Coming back here does not by itself mean the payment went through.",
   },
   {
+    code: "hitpay_card",
+    label: "HitPay card",
+    detail: "Credit or debit card on HitPay's secure page.",
+    note: "You'll continue to HitPay to pay with a credit or debit card. Coming back here does not by itself mean the payment went through.",
+  },
+  {
     code: "paynamics",
     label: "Paynamics",
     detail: "Pay on Paynamics' secure page with one of the options below.",
@@ -31,6 +37,7 @@ const DEFAULTS = {
   upay: 1,
   hitpay_qr: 0,
   hitpay_online: 0,
+  hitpay_card: 0,
   paynamics: 0,
 };
 
@@ -87,6 +94,9 @@ function readFeePatch(value, patch, label = "") {
 export function seedPaymentChannels(db) {
   const insert = db.prepare("INSERT OR IGNORE INTO payment_channels (code, enabled) VALUES (?, ?)");
   for (const channel of PAYMENT_CHANNELS) insert.run(channel.code, DEFAULTS[channel.code]);
+  if (process.env.IBMC_ENABLE_HITPAY_CARD === "true") {
+    db.prepare("UPDATE payment_channels SET enabled = 1 WHERE code = 'hitpay_card'").run();
+  }
   seedPaynamicsMethods(db);
 }
 
