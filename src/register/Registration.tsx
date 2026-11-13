@@ -1449,6 +1449,18 @@ function RegistrationWizard() {
   function openManage() {
     setLookup("");
     setManagedRecord(null);
+    setResumePay(false);
+    setStep("manage");
+  }
+
+  function openMyRegistration(registration: StoredRegistration) {
+    rememberRegistration(registration);
+    setSaved(registration);
+    setManagedRecord(registration);
+    setResumePay(false);
+    setUpaySession(null);
+    setHitpaySession(null);
+    setPaynamicsSession(null);
     setStep("manage");
   }
 
@@ -2113,7 +2125,7 @@ function RegistrationWizard() {
         onUpdate={(registration, session) => {
           setSaved(registration);
           setPaynamicsSession(session);
-          if (session.status === "paid") setStep("done");
+          if (session.status === "paid") openMyRegistration(registration);
         }}
         onLater={() => {
           setPaynamicsSession(null);
@@ -2136,7 +2148,7 @@ function RegistrationWizard() {
         onUpdate={(registration, session) => {
           setSaved(registration);
           setHitpaySession(session);
-          if (session.status === "paid") setStep("done");
+          if (session.status === "paid") openMyRegistration(registration);
         }}
         onLater={() => setStep("done")}
         onBack={() => setStep("pay")}
@@ -2153,7 +2165,7 @@ function RegistrationWizard() {
         onUpdate={(registration, session) => {
           setSaved(registration);
           setUpaySession(session);
-          if (session.status === "paid") setStep("done");
+          if (session.status === "paid") openMyRegistration(registration);
         }}
         onLater={() => setStep("done")}
         onBack={() => setStep("pay")}
@@ -2849,9 +2861,7 @@ function PaynamicsPending({
     }
   }
 
-  if (current.status === "paid") {
-    return <Confirmed record={record} onManage={onManage || onBack} hideManage={hideManage} />;
-  }
+  if (current.status === "paid") return null;
 
   return (
     <Frame onManage={onManage} hideManage={hideManage}>
@@ -2919,8 +2929,23 @@ function PaynamicsReturn({ requestId }: { requestId: string }) {
     };
   }, [requestId]);
 
+  useEffect(() => {
+    if (!record || session?.status !== "paid") return;
+    rememberRegistration(record);
+    if (window.location.search.includes("paynamicsRequest=")) {
+      window.history.replaceState({}, "", "/register?manage=1");
+    }
+  }, [record, session?.status]);
+
   if (record && session?.status === "paid") {
-    return <Confirmed record={record} onManage={() => { window.location.assign("/register?manage=1"); }} />;
+    return (
+      <Manage
+        initialRecord={record}
+        onStart={() => {
+          window.location.assign("/register");
+        }}
+      />
+    );
   }
   if (record && session) {
     return (
@@ -2971,8 +2996,23 @@ function HitpayReturn({ sessionId }: { sessionId: string }) {
     };
   }, [sessionId]);
 
+  useEffect(() => {
+    if (!record || session?.status !== "paid") return;
+    rememberRegistration(record);
+    if (window.location.search.includes("paySession=")) {
+      window.history.replaceState({}, "", "/register?manage=1");
+    }
+  }, [record, session?.status]);
+
   if (record && session?.status === "paid") {
-    return <Confirmed record={record} onManage={() => { window.location.assign("/register?manage=1"); }} />;
+    return (
+      <Manage
+        initialRecord={record}
+        onStart={() => {
+          window.location.assign("/register");
+        }}
+      />
+    );
   }
   if (record && session) {
     return (
