@@ -93,6 +93,9 @@ export function seedPaymentChannels(db) {
 export function seedPaynamicsMethods(db) {
   const insert = db.prepare("INSERT OR IGNORE INTO paynamics_methods (code, enabled) VALUES (?, ?)");
   for (const method of PAYNAMICS_METHODS) insert.run(method.code, method.preset === "available" ? 1 : 0);
+  if (process.env.IBMC_ENABLE_PAYNAMICS_CREDIT_CARD === "true") {
+    db.prepare("UPDATE paynamics_methods SET enabled = 1 WHERE code = 'creditcard'").run();
+  }
 }
 
 export function paynamicsMethodByCode(code) {

@@ -34,7 +34,7 @@ import {
   startPaynamicsPayment,
   workflowResponseSignatureValid,
 } from "./paynamics.js";
-import { buyerPaynamicsMethods, listPaymentChannels, listPaynamicsMethods, savePaynamicsMethods } from "./payment-channels.js";
+import { buyerPaynamicsMethods, listPaymentChannels, listPaynamicsMethods, savePaynamicsMethods, seedPaynamicsMethods } from "./payment-channels.js";
 
 const TEST_KEY = "test_merchant_key_only_for_ci";
 const TEST_MID = "TESTMID";
@@ -158,6 +158,12 @@ for (const code of enabledByDefault) {
   assert.equal(listPaynamicsMethods(db).find((item) => item.code === code).enabled, true, code);
 }
 assert.equal(listPaynamicsMethods(db).find((item) => item.code === "gc").enabled, false);
+assert.equal(listPaynamicsMethods(db).find((item) => item.code === "creditcard").enabled, false);
+process.env.IBMC_ENABLE_PAYNAMICS_CREDIT_CARD = "true";
+seedPaynamicsMethods(db);
+assert.equal(buyerPaynamicsMethods(db).some((item) => item.code === "creditcard"), true);
+delete process.env.IBMC_ENABLE_PAYNAMICS_CREDIT_CARD;
+savePaynamicsMethods(db, { creditcard: false });
 assert.equal(listPaynamicsMethods(db).find((item) => item.code === "creditcard").enabled, false);
 assert.equal(buyerPaynamicsMethods(db).some((item) => item.code === "gc"), false);
 savePaynamicsMethods(db, { gc: true, alipay: false, nope: true });
