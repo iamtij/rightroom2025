@@ -2610,6 +2610,22 @@ function useCountdown(expiresAt: string) {
   };
 }
 
+function ValidatingPayment({ amount }: { amount?: string }) {
+  return (
+    <div className="flex flex-col items-center gap-5 py-10 text-center" role="status" aria-live="polite">
+      <span className="relative flex h-16 w-16 items-center justify-center" aria-hidden="true">
+        <span className="payment-glow absolute inset-1 rounded-full bg-[#F6D5D8]" />
+        <span className="absolute inset-0 rounded-full border-2 border-[#F3D2D5]" />
+        <span className="payment-spin absolute inset-0 rounded-full border-2 border-transparent border-t-[#D0202E]" />
+      </span>
+      <div className="flex flex-col gap-2">
+        <h1 className="m-0 font-archivo text-[28px] leading-[1.05] font-extrabold">Validating payment</h1>
+        <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">{amount ? `${amount} · please wait` : "Please wait"}</p>
+      </div>
+    </div>
+  );
+}
+
 function HitpayPending({
   record,
   session,
@@ -2618,6 +2634,7 @@ function HitpayPending({
   onBack,
   onManage,
   hideManage = false,
+  returned = false,
 }: {
   record: StoredRegistration;
   session: HitpaySession;
@@ -2626,6 +2643,7 @@ function HitpayPending({
   onBack: () => void;
   onManage?: () => void;
   hideManage?: boolean;
+  returned?: boolean;
 }) {
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
@@ -2646,7 +2664,7 @@ function HitpayPending({
       if (payload.registration && payload.hitpay) onUpdate(mergeStored(record, payload.registration), payload.hitpay);
       if (!response.ok && !payload.hitpay) throw new Error(payload.error || "HitPay has not confirmed the payment yet.");
       if (payload.hitpay?.status === "failed") setError("This payment can't continue. Nothing was charged.");
-      else if (payload.error && payload.hitpay?.status === "pending") setError(payload.error);
+      else if (!returned && payload.error && payload.hitpay?.status === "pending") setError(payload.error);
       else setError("");
     } catch (statusError) {
       setError(statusError instanceof Error ? statusError.message : "HitPay has not confirmed the payment yet.");
@@ -2684,6 +2702,25 @@ function HitpayPending({
   const feeNote = feeCents > 0 ? `Includes a ${payFigure(feeCents, record.currency)} convenience fee. ` : "";
   const title = session.channel === "qr" ? "Pay with QR Ph" : session.channel === "card" ? "Pay with card" : "Pay with online banking";
   const qrClosed = session.channel === "qr" && clock.expired && !showRefresh && session.status !== "paid";
+  const amountLabel = chargedCents > 0 ? payFigure(chargedCents, record.currency) : "";
+  if (returned && session.status === "pending") {
+    return (
+      <Frame hideManage>
+        <ValidatingPayment amount={amountLabel} />
+      </Frame>
+    );
+  }
+  if (returned && (session.status === "failed" || session.status === "expired")) {
+    return (
+      <Frame hideManage>
+        <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Payment not completed</h1>
+        <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">Nothing was charged.</p>
+        <button type="button" className="rounded-full bg-[#D0202E] px-4 py-4 text-base font-bold text-white" onClick={onBack}>
+          Back to registration
+        </button>
+      </Frame>
+    );
+  }
   return (
     <Frame
       step={3}
@@ -2949,14 +2986,14 @@ function HitpayReturn({ sessionId }: { sessionId: string }) {
         onLater={() => { window.location.href = "/register"; }}
         onBack={() => { window.location.href = "/register"; }}
         onManage={() => { window.location.assign("/register?manage=1"); }}
+        returned
       />
     );
   }
   return (
-    <Frame onManage={() => { window.location.assign("/register?manage=1"); }}>
-      <h1 className="m-0 font-archivo text-[26px] leading-[1.1] font-extrabold">Checking payment status</h1>
-      <p className="m-0 text-[15px] leading-snug text-[#5C5C63]">This page checks with HitPay. Opening the return link does not confirm the payment.</p>
-      {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
+    <Frame hideManage>
+      <ValidatingPayment />
+      {error ? <p className="m-0 text-center text-sm text-[#A8131F]">{error}</p> : null}
     </Frame>
   );
 }
