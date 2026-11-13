@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { openDatabase } from "./db.js";
+import { migrateHitpayCardChannel, openDatabase } from "./db.js";
 import { currentTotp } from "./auth.js";
 import { createRegistration, getEntryPass, recordPayment, resumeTokenMatches } from "./registrations.js";
 import { upayPublicCheckoutInfo, upaySettlement } from "./upay.js";
@@ -26,6 +26,44 @@ assert.equal(qrChannel().note, qrNote);
 assert.equal(qrChannel().enabled, false);
 assert.equal(listPaymentChannels(db).find((item) => item.code === "hitpay_card").enabled, false);
 assert.deepEqual(hitpayPaymentMethods("card"), ["card_cybersource"]);
+const legacyHitpay = new Database(":memory:");
+legacyHitpay.exec(`
+  CREATE TABLE registrations (id INTEGER PRIMARY KEY);
+  CREATE TABLE registration_installments (id INTEGER PRIMARY KEY);
+  INSERT INTO registrations (id) VALUES (1);
+  INSERT INTO registration_installments (id) VALUES (1);
+  CREATE TABLE hitpay_payments (
+    id INTEGER PRIMARY KEY,
+    registration_id INTEGER NOT NULL,
+    installment_id INTEGER NOT NULL,
+    session_id TEXT NOT NULL UNIQUE,
+    gateway_ref TEXT,
+    amount_cents INTEGER NOT NULL,
+    currency TEXT NOT NULL,
+    fee_cents INTEGER NOT NULL DEFAULT 0,
+    channel TEXT NOT NULL CHECK (channel IN ('qr', 'online')),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed', 'expired')),
+    gateway_status TEXT,
+    qr_code TEXT,
+    payment_url TEXT,
+    expires_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  INSERT INTO hitpay_payments (registration_id, installment_id, session_id, amount_cents, currency, channel, status)
+  VALUES (1, 1, 'qr-session', 100, 'PHP', 'qr', 'pending');
+`);
+assert.throws(() => legacyHitpay.prepare(`
+  INSERT INTO hitpay_payments (registration_id, installment_id, session_id, amount_cents, currency, channel, status)
+  VALUES (1, 1, 'card-session', 100, 'PHP', 'card', 'pending')
+`).run());
+migrateHitpayCardChannel(legacyHitpay);
+legacyHitpay.prepare(`
+  INSERT INTO hitpay_payments (registration_id, installment_id, session_id, amount_cents, currency, channel, status)
+  VALUES (1, 1, 'card-session', 100, 'PHP', 'card', 'pending')
+`).run();
+assert.equal(legacyHitpay.prepare("SELECT channel FROM hitpay_payments WHERE session_id = 'qr-session'").get().channel, "qr");
+legacyHitpay.close();
 process.env.IBMC_ENABLE_HITPAY_CARD = "true";
 seedPaymentChannels(db);
 assert.equal(buyerPaymentChannels(db).find((item) => item.code === "hitpay_card").label, "HitPay card");

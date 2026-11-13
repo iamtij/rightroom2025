@@ -322,7 +322,7 @@ CREATE TABLE IF NOT EXISTS hitpay_payments (
   amount_cents INTEGER NOT NULL,
   currency TEXT NOT NULL,
   fee_cents INTEGER NOT NULL DEFAULT 0,
-  channel TEXT NOT NULL CHECK (channel IN ('qr', 'online')),
+  channel TEXT NOT NULL CHECK (channel IN ('qr', 'online', 'card')),
   status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed', 'expired')),
   gateway_status TEXT,
   qr_code TEXT,
@@ -482,6 +482,49 @@ const PRODUCTS = [
 
 const EMAIL_BEFORE = [7, 3, 1, 0];
 const SMS_BEFORE = [3, 1, 0];
+
+export function migrateHitpayCardChannel(db) {
+  const sql = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'hitpay_payments'").get()?.sql || "";
+  if (!sql || sql.includes("'card'")) return;
+  db.pragma("foreign_keys = OFF");
+  try {
+    db.exec(`
+      DROP TABLE IF EXISTS hitpay_payments_next;
+      CREATE TABLE hitpay_payments_next (
+        id INTEGER PRIMARY KEY,
+        registration_id INTEGER NOT NULL REFERENCES registrations(id),
+        installment_id INTEGER NOT NULL REFERENCES registration_installments(id),
+        session_id TEXT NOT NULL UNIQUE,
+        gateway_ref TEXT,
+        amount_cents INTEGER NOT NULL,
+        currency TEXT NOT NULL,
+        fee_cents INTEGER NOT NULL DEFAULT 0,
+        channel TEXT NOT NULL CHECK (channel IN ('qr', 'online', 'card')),
+        status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed', 'expired')),
+        gateway_status TEXT,
+        qr_code TEXT,
+        payment_url TEXT,
+        expires_at TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO hitpay_payments_next (
+        id, registration_id, installment_id, session_id, gateway_ref, amount_cents, currency, fee_cents,
+        channel, status, gateway_status, qr_code, payment_url, expires_at, created_at, updated_at
+      )
+      SELECT
+        id, registration_id, installment_id, session_id, gateway_ref, amount_cents, currency, fee_cents,
+        channel, status, gateway_status, qr_code, payment_url, expires_at, created_at, updated_at
+      FROM hitpay_payments;
+      DROP TABLE hitpay_payments;
+      ALTER TABLE hitpay_payments_next RENAME TO hitpay_payments;
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_hitpay_gateway ON hitpay_payments(gateway_ref) WHERE gateway_ref IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS idx_hitpay_installment ON hitpay_payments(installment_id, channel, status);
+    `);
+  } finally {
+    db.pragma("foreign_keys = ON");
+  }
+}
 
 export function openDatabase(file = process.env.IBMC_DB_PATH) {
   const volume = process.env.RAILWAY_VOLUME_MOUNT_PATH;
@@ -654,6 +697,7 @@ function migrate(db) {
     const columns = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name));
     if (columns.size && !columns.has("fee_cents")) db.exec(`ALTER TABLE ${table} ADD COLUMN fee_cents INTEGER NOT NULL DEFAULT 0`);
   }
+  migrateHitpayCardChannel(db);
   const paynamicsColumns = new Set(
     db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'paynamics_payments'").get()
       ? db.prepare("PRAGMA table_info(paynamics_payments)").all().map((column) => column.name)
