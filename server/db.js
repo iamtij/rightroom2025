@@ -6,6 +6,7 @@ import { seedPaymentChannels } from "./payment-channels.js";
 import { ENTRY_PASS_BODY, ENTRY_PASS_SUBJECT, INSTALLMENT_REMINDER_BODY, INSTALLMENT_REMINDER_SUBJECT } from "./templates.js";
 import { stagingTestRegistrationAllowed } from "./staging-early-payments.js";
 import { ibmcDeploymentEnv, railwayDeploymentClass } from "./deployment-identity.js";
+import { syncAudienceTags } from "./messaging.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -711,6 +712,82 @@ function migrate(db) {
   }
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_registrations_resume ON registrations(resume_token) WHERE resume_token IS NOT NULL");
   migrateBuiltinMessages(db);
+  migrateMessagingTables(db);
+  try {
+    syncAudienceTags(db);
+  } catch (error) {
+    console.error("[messaging] audience tag sync failed", error);
+  }
+}
+
+function migrateMessagingTables(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS message_tags (
+      id INTEGER PRIMARY KEY,
+      slug TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      color TEXT NOT NULL DEFAULT '#A8131F',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS member_tag_assignments (
+      member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+      tag_id INTEGER NOT NULL REFERENCES message_tags(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (member_id, tag_id)
+    );
+    CREATE TABLE IF NOT EXISTS registration_tag_assignments (
+      registration_id INTEGER NOT NULL REFERENCES registrations(id) ON DELETE CASCADE,
+      tag_id INTEGER NOT NULL REFERENCES message_tags(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (registration_id, tag_id)
+    );
+    CREATE TABLE IF NOT EXISTS message_groups (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      sources TEXT NOT NULL DEFAULT 'both' CHECK (sources IN ('members', 'registrations', 'both')),
+      tag_ids TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS message_blasts (
+      id INTEGER PRIMARY KEY,
+      channel TEXT NOT NULL CHECK (channel IN ('email', 'sms')),
+      group_id INTEGER REFERENCES message_groups(id) ON DELETE SET NULL,
+      audience_json TEXT NOT NULL,
+      template_id INTEGER REFERENCES message_templates(id) ON DELETE SET NULL,
+      subject TEXT,
+      body TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued' CHECK (status IN ('queued', 'sending', 'completed', 'failed')),
+      total INTEGER NOT NULL DEFAULT 0,
+      sent INTEGER NOT NULL DEFAULT 0,
+      failed INTEGER NOT NULL DEFAULT 0,
+      skipped INTEGER NOT NULL DEFAULT 0,
+      created_by INTEGER,
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      started_at TEXT,
+      completed_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS message_blast_deliveries (
+      id INTEGER PRIMARY KEY,
+      blast_id INTEGER NOT NULL REFERENCES message_blasts(id) ON DELETE CASCADE,
+      source TEXT NOT NULL CHECK (source IN ('member', 'registration')),
+      source_id INTEGER NOT NULL,
+      full_name TEXT,
+      contact TEXT,
+      contact_key TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed', 'skipped')),
+      provider_id TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      sent_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_member_tag_assignments_tag ON member_tag_assignments(tag_id);
+    CREATE INDEX IF NOT EXISTS idx_registration_tag_assignments_tag ON registration_tag_assignments(tag_id);
+    CREATE INDEX IF NOT EXISTS idx_message_blast_deliveries_blast ON message_blast_deliveries(blast_id, status);
+    CREATE INDEX IF NOT EXISTS idx_message_blasts_created ON message_blasts(created_at DESC);
+  `);
 }
 
 function migrateFeePercentScale(db) {

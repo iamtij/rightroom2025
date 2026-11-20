@@ -54,6 +54,42 @@ type Member = {
   sponsorDataAsOf: string;
   goldReward: string;
 };
+type MessageTag = { id: number; slug: string; label: string; color: string; managed?: boolean };
+type MessageGroup = { id: number; name: string; sources: "members" | "registrations" | "both"; tagIds: number[] };
+type MessageBlast = {
+  id: number;
+  channel: "email" | "sms";
+  groupId: number | null;
+  audience: { sources?: string; tagIds?: number[]; groupName?: string | null; eligible?: number; missingContact?: number };
+  templateId: number | null;
+  subject: string | null;
+  body: string;
+  status: string;
+  total: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  createdAt: string;
+  completedAt: string | null;
+  error: string | null;
+};
+type BlastDelivery = {
+  id: number;
+  source: string;
+  sourceId: number;
+  fullName: string;
+  contact: string;
+  status: string;
+  providerId: string | null;
+  error: string | null;
+  sentAt: string | null;
+};
+type AudiencePreview = {
+  eligible: number;
+  missingContact: number;
+  total: number;
+  sample: { fullName: string; contact: string; source: string }[];
+};
 
 const goldRewards = [
   { value: "GOLD_FREE", label: "Free" },
@@ -580,7 +616,7 @@ export function AdminSections() {
   useEffect(() => {
     api("/api/admin/me").then((me) => setRole(me.role === "super" ? "super" : "admin")).catch(() => setRole("admin"));
   }, []);
-  const sections = ["Dashboard", "Registrations", "Check-in", "Coupons", "Schedule", "Templates", "Members", "Chapters", "Settings", ...(role === "super" ? ["Admins"] : [])];
+  const sections = ["Dashboard", "Registrations", "Check-in", "Coupons", "Schedule", "Templates", "Messaging", "Members", "Chapters", "Settings", ...(role === "super" ? ["Admins"] : [])];
   return (
     <div className="flex flex-col gap-5">
       <nav className="flex flex-wrap gap-2">
@@ -602,6 +638,7 @@ export function AdminSections() {
       {section === "Coupons" ? <Coupons onError={setError} /> : null}
       {section === "Schedule" ? <Schedules onError={setError} /> : null}
       {section === "Templates" ? <Templates onError={setError} /> : null}
+      {section === "Messaging" ? <Messaging onError={setError} /> : null}
       {section === "Members" ? <Members onError={setError} /> : null}
       {section === "Chapters" ? <Chapters onError={setError} /> : null}
       {section === "Settings" ? <PaymentSettingsScreen role={role} onError={setError} /> : null}
@@ -646,6 +683,7 @@ function RegistrationView({
   onCloseEdit,
   onClose,
   onCancel,
+  onError,
 }: {
   row: Registration;
   editing: boolean;
@@ -657,7 +695,49 @@ function RegistrationView({
   onCloseEdit: () => void;
   onClose: () => void;
   onCancel: () => void;
+  onError: (message: string) => void;
 }) {
+  const [tags, setTags] = useState<MessageTag[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [savingTags, setSavingTags] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      api("/api/admin/message-tags"),
+      api(`/api/admin/registrations/${row.reference}/tags`),
+    ]).then(([catalog, assigned]) => {
+      setTags(catalog);
+      setSelectedTagIds(assigned.map((tag: MessageTag) => tag.id));
+    }).catch((error) => onError(error.message));
+  }, [row.reference]);
+
+  async function createTag(label: string) {
+    try {
+      const tag = await api("/api/admin/message-tags", { method: "POST", body: JSON.stringify({ label }) });
+      setTags((current) => current.some((row) => row.id === tag.id) ? current : [...current, tag]);
+      return tag as MessageTag;
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not create tag");
+      return null;
+    }
+  }
+
+  async function saveTags(nextIds: number[]) {
+    setSelectedTagIds(nextIds);
+    setSavingTags(true);
+    try {
+      const saved = await api(`/api/admin/registrations/${row.reference}/tags`, {
+        method: "PUT",
+        body: JSON.stringify({ tagIds: nextIds }),
+      });
+      setSelectedTagIds(saved.map((tag: MessageTag) => tag.id));
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not save tags");
+    } finally {
+      setSavingTags(false);
+    }
+  }
+
   const details = [
     ["Name", row.attendee.fullName],
     ["Email", row.attendee.email],
@@ -710,6 +790,11 @@ function RegistrationView({
           ))}
         </div>
       )}
+      <div className="flex flex-col gap-2">
+        <h3 className="m-0 text-[15px] font-bold">Messaging tags</h3>
+        <TagPicker tags={tags} selectedIds={selectedTagIds} onChange={(ids) => { saveTags(ids).catch(() => undefined); }} onCreate={createTag} lockManaged />
+        {savingTags ? <p className="m-0 text-[13px] text-[#5C5C63]">Saving tags…</p> : null}
+      </div>
       <div className="flex flex-col gap-2">
         <h3 className="m-0 text-[15px] font-bold">Payment plan</h3>
         <p className="m-0 text-sm text-[#5C5C63]">{row.plan === "installment" ? "Installment" : "Paid in full"} · {money(row.totalCents, row.currency)} total · {money(row.totalCents - row.balanceCents, row.currency)} paid</p>
@@ -891,7 +976,7 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
           </div>
         </form>
       ) : null}
-      {viewing ? <RegistrationView row={viewing} editing={editingDetails} draft={draft} setDraft={setDraft} chapters={chapters} onSave={save} onEdit={() => setEditingDetails(true)} onCloseEdit={() => setEditingDetails(false)} onClose={() => { setViewing(null); setEditingDetails(false); }} onCancel={() => setCancelTarget({ reference: viewing.reference, name: viewing.attendee.fullName })} /> : null}
+      {viewing ? <RegistrationView row={viewing} editing={editingDetails} draft={draft} setDraft={setDraft} chapters={chapters} onSave={save} onEdit={() => setEditingDetails(true)} onCloseEdit={() => setEditingDetails(false)} onClose={() => { setViewing(null); setEditingDetails(false); }} onCancel={() => setCancelTarget({ reference: viewing.reference, name: viewing.attendee.fullName })} onError={onError} /> : null}
       <DataTable columns={["Name", "Email", "Mobile", "Reference", "Ticket", "Paid", "Left", "Status", ""]} empty={empty}>
         {visible.map((row) => (
           <tr key={row.reference}>
@@ -1045,6 +1130,451 @@ function TemplatePreview({ channel, subject, body, systemKey }: { channel: strin
         </div>
       )}
     </div>
+  );
+}
+
+function TagPicker({
+  tags,
+  selectedIds,
+  onChange,
+  onCreate,
+  lockManaged = false,
+}: {
+  tags: MessageTag[];
+  selectedIds: number[];
+  onChange: (ids: number[]) => void;
+  onCreate?: (label: string) => Promise<MessageTag | null>;
+  lockManaged?: boolean;
+}) {
+  const [draft, setDraft] = useState("");
+  async function createTag() {
+    const label = draft.trim();
+    if (!label || !onCreate) return;
+    const tag = await onCreate(label);
+    setDraft("");
+    if (tag && !selectedIds.includes(tag.id)) onChange([...selectedIds, tag.id]);
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap gap-2">
+        {tags.length === 0 ? <p className="m-0 text-sm text-[#5C5C63]">No tags yet.</p> : null}
+        {tags.map((tag) => {
+          const on = selectedIds.includes(tag.id);
+          const locked = lockManaged && Boolean(tag.managed);
+          return (
+            <button
+              key={tag.id}
+              type="button"
+              disabled={locked}
+              title={locked ? "Assigned automatically from payment status" : undefined}
+              className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${on ? "border-[#141416] bg-[#141416] text-white" : "border-[#D9D5CF] bg-white text-[#3A3A40]"} ${locked ? "cursor-default opacity-80" : ""}`}
+              onClick={() => {
+                if (locked) return;
+                onChange(on ? selectedIds.filter((id) => id !== tag.id) : [...selectedIds, tag.id]);
+              }}
+            >
+              <span className="mr-1.5 inline-block h-2 w-2 rounded-full" style={{ background: tag.color }} />
+              {tag.label}
+            </button>
+          );
+        })}
+      </div>
+      {onCreate ? (
+        <div className="flex flex-wrap gap-2">
+          <input className={`${field} min-w-[180px] flex-1`} value={draft} placeholder="New tag label" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); createTag().catch(() => undefined); } }} />
+          <button type="button" className={ghostButton} onClick={() => { createTag().catch(() => undefined); }}>Add tag</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Messaging({ onError }: { onError: (message: string) => void }) {
+  const [tab, setTab] = useState<"compose" | "groups" | "history">("compose");
+  const [tags, setTags] = useState<MessageTag[]>([]);
+  const [groups, setGroups] = useState<MessageGroup[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [blasts, setBlasts] = useState<MessageBlast[]>([]);
+  const [report, setReport] = useState<{ blast: MessageBlast; deliveries: BlastDelivery[] } | null>(null);
+  const [groupForm, setGroupForm] = useState({ id: 0, name: "", sources: "both" as MessageGroup["sources"], tagIds: [] as number[] });
+  const [compose, setCompose] = useState({
+    groupId: "",
+    sources: "both" as MessageGroup["sources"],
+    tagIds: [] as number[],
+    channel: "email" as "email" | "sms",
+    templateId: "",
+    subject: "",
+    body: "",
+  });
+  const [preview, setPreview] = useState<AudiencePreview | null>(null);
+  const [confirming, setConfirming] = useState<AudiencePreview | null>(null);
+  const [sending, setSending] = useState(false);
+
+  async function load() {
+    const [tagRows, groupRows, templateRows, blastRows] = await Promise.all([
+      api("/api/admin/message-tags"),
+      api("/api/admin/message-groups"),
+      api("/api/admin/templates"),
+      api("/api/admin/message-blasts"),
+    ]);
+    setTags(tagRows);
+    setGroups(groupRows);
+    setTemplates(templateRows);
+    setBlasts(blastRows);
+  }
+
+  useEffect(() => { load().catch((error) => onError(error.message)); }, []);
+
+  async function createTag(label: string) {
+    try {
+      const tag = await api("/api/admin/message-tags", { method: "POST", body: JSON.stringify({ label }) });
+      setTags((current) => {
+        if (current.some((row) => row.id === tag.id)) return current.map((row) => row.id === tag.id ? tag : row);
+        return [...current, tag].sort((a, b) => a.label.localeCompare(b.label));
+      });
+      return tag as MessageTag;
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not create tag");
+      return null;
+    }
+  }
+
+  async function saveGroup(event: FormEvent) {
+    event.preventDefault();
+    try {
+      const path = groupForm.id ? `/api/admin/message-groups/${groupForm.id}` : "/api/admin/message-groups";
+      await api(path, {
+        method: groupForm.id ? "PATCH" : "POST",
+        body: JSON.stringify({ name: groupForm.name, sources: groupForm.sources, tagIds: groupForm.tagIds }),
+      });
+      setGroupForm({ id: 0, name: "", sources: "both", tagIds: [] });
+      await load();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not save group");
+    }
+  }
+
+  async function removeGroup(id: number) {
+    try {
+      await api(`/api/admin/message-groups/${id}`, { method: "DELETE" });
+      await load();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not delete group");
+    }
+  }
+
+  function applyTemplate(templateId: string) {
+    const template = templates.find((row) => String(row.id) === templateId);
+    if (!template) return;
+    setCompose((current) => ({
+      ...current,
+      channel: template.channel,
+      templateId,
+      subject: template.channel === "email" ? (template.subject || "") : "",
+      body: template.body || "",
+    }));
+    setPreview(null);
+  }
+
+  function audiencePayload() {
+    return compose.groupId
+      ? { channel: compose.channel, groupId: Number(compose.groupId) }
+      : { channel: compose.channel, sources: compose.sources, tagIds: compose.tagIds };
+  }
+
+  async function runPreview() {
+    try {
+      const result = await api("/api/admin/message-blasts/preview", { method: "POST", body: JSON.stringify(audiencePayload()) });
+      setPreview(result);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not preview audience");
+    }
+  }
+
+  async function sendBlast(event: FormEvent) {
+    event.preventDefault();
+    setSending(true);
+    try {
+      const result = await api("/api/admin/message-blasts/preview", { method: "POST", body: JSON.stringify(audiencePayload()) });
+      setPreview(result);
+      setConfirming(result);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not check the audience");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function confirmSend() {
+    if (!confirming || confirming.eligible < 1) return;
+    setSending(true);
+    try {
+      const blast = await api("/api/admin/message-blasts", {
+        method: "POST",
+        body: JSON.stringify({
+          ...audiencePayload(),
+          subject: compose.subject,
+          body: compose.body,
+          templateId: compose.templateId ? Number(compose.templateId) : null,
+          confirmText: "SEND",
+        }),
+      });
+      setConfirming(null);
+      setTab("history");
+      await load();
+      setReport(await api(`/api/admin/message-blasts/${blast.id}`));
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not send blast");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function openReport(id: number) {
+    try {
+      setReport(await api(`/api/admin/message-blasts/${id}`));
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not load report");
+    }
+  }
+
+  const contactLabel = compose.channel === "sms" ? "mobile number" : "email address";
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="m-0 font-archivo text-[28px] font-extrabold">Messaging</h1>
+        <div className="flex flex-wrap gap-2">
+          {(["compose", "groups", "history"] as const).map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={`rounded-full px-4 py-2 text-sm font-semibold ${tab === item ? "bg-[#141416] text-white" : "bg-white text-[#3A3A40] border border-[#D9D5CF]"}`}
+              onClick={() => setTab(item)}
+            >
+              {item === "compose" ? "Compose" : item === "groups" ? "Groups" : "History"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {tab === "compose" ? (
+        <form className="grid gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4" onSubmit={sendBlast}>
+          <p className="m-0 text-sm text-[#5C5C63]">Send email or SMS to a saved group, or pick sources and tags for an ad-hoc audience.</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Saved group">
+              <select
+                className={field}
+                value={compose.groupId}
+                onChange={(event) => {
+                  const groupId = event.target.value;
+                  const group = groups.find((row) => String(row.id) === groupId);
+                  setCompose((current) => ({
+                    ...current,
+                    groupId,
+                    sources: group?.sources || current.sources,
+                    tagIds: group?.tagIds || [],
+                  }));
+                  setPreview(null);
+                }}
+              >
+                <option value="">Ad-hoc (sources + tags)</option>
+                {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Channel">
+              <select
+                className={field}
+                value={compose.channel}
+                onChange={(event) => {
+                  const channel = event.target.value as "email" | "sms";
+                  setCompose((current) => ({ ...current, channel, templateId: "", subject: "", body: "" }));
+                  setPreview(null);
+                }}
+              >
+                <option value="email">Email</option>
+                <option value="sms">SMS</option>
+              </select>
+            </Field>
+          </div>
+          {!compose.groupId ? (
+            <>
+              <Field label="Sources">
+                <select className={field} value={compose.sources} onChange={(event) => { setCompose({ ...compose, sources: event.target.value as MessageGroup["sources"] }); setPreview(null); }}>
+                  <option value="both">Members + registrations</option>
+                  <option value="members">Members only</option>
+                  <option value="registrations">Registrations only</option>
+                </select>
+              </Field>
+              <div className="flex flex-col gap-1">
+                <span className="text-[13px] font-semibold text-[#3A3A40]">Tags</span>
+                <p className="m-0 text-[13px] text-[#5C5C63]">Select a tag to send only to people who have it. Leave every tag off to include everyone in the sources.</p>
+                <TagPicker tags={tags} selectedIds={compose.tagIds} onChange={(tagIds) => { setCompose({ ...compose, tagIds }); setPreview(null); }} />
+              </div>
+            </>
+          ) : null}
+          <Field label="Template">
+            <select
+              className={field}
+              value={compose.templateId}
+              onChange={(event) => {
+                const templateId = event.target.value;
+                if (!templateId) {
+                  setCompose({ ...compose, templateId: "" });
+                  return;
+                }
+                applyTemplate(templateId);
+              }}
+            >
+              <option value="">Custom message</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name} · {template.channel === "sms" ? "SMS" : "Email"}{template.system_key ? " · Built-in" : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {compose.channel === "email" ? (
+            <Field label="Subject">
+              <input className={field} required value={compose.subject} onChange={(event) => setCompose({ ...compose, subject: event.target.value })} />
+            </Field>
+          ) : null}
+          <Field label="Message">
+            <textarea className={`${field} min-h-28`} required value={compose.body} onChange={(event) => setCompose({ ...compose, body: event.target.value })} />
+          </Field>
+          <p className="m-0 text-[13px] text-[#5C5C63]">Placeholders: {"{{first_name}}"} {"{{full_name}}"} {"{{email}}"} {"{{mobile}}"} {"{{chapter}}"} {"{{reference}}"} {"{{product}}"}</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={ghostButton} onClick={() => { runPreview().catch(() => undefined); }}>Preview audience</button>
+            <button type="submit" className={buttonClass} disabled={sending}>{sending ? "Checking…" : "Send blast"}</button>
+          </div>
+          <p className="m-0 text-[13px] text-[#5C5C63]">Preview audience counts who would receive this message. It does not send.</p>
+          {preview ? (
+            <div className="rounded-[10px] bg-[#F6F4F1] px-3 py-3 text-sm">
+              <p className="m-0 font-semibold">{preview.eligible} would receive it · {preview.missingContact} missing a {contactLabel} · {preview.total} in the audience</p>
+              {preview.sample?.length ? (
+                <ul className="m-0 mt-2 list-disc pl-5 text-[#5C5C63]">
+                  {preview.sample.map((row) => (
+                    <li key={`${row.source}-${row.contact}`}>{row.fullName} · {row.contact} · {row.source}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+        </form>
+      ) : null}
+      {confirming ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#141416]/45 px-4" role="dialog" aria-modal="true" aria-labelledby="blast-confirm-title">
+          <div className="w-full max-w-[460px] rounded-[16px] border border-[#E4E1DC] bg-[#FDFCFA] p-5 shadow-[0_18px_50px_rgba(20,20,22,0.18)]">
+            <p className="m-0 text-xs font-bold tracking-[0.16em] text-[#A8131F] uppercase">IBMC 2027 · AMPLIFY</p>
+            <h2 id="blast-confirm-title" className="m-0 mt-2 font-archivo text-[26px] leading-tight font-extrabold">
+              {confirming.eligible > 0 ? `Send this ${compose.channel === "sms" ? "SMS" : "email"} to ${confirming.eligible} ${confirming.eligible === 1 ? "person" : "people"}?` : `No one would receive this ${compose.channel === "sms" ? "SMS" : "email"}.`}
+            </h2>
+            <p className="m-0 mt-2 text-sm leading-normal text-[#5C5C63]">
+              {confirming.total} in the audience. {confirming.missingContact > 0
+                ? `${confirming.missingContact} ${confirming.missingContact === 1 ? "person has" : "people have"} no ${contactLabel} and will be skipped.`
+                : `Everyone in the audience has a ${contactLabel}.`}
+            </p>
+            {confirming.sample?.length ? (
+              <ul className="m-0 mt-3 list-disc pl-5 text-sm text-[#3A3A40]">
+                {confirming.sample.map((row) => (
+                  <li key={`${row.source}-${row.contact}`}>{row.fullName} · {row.contact}</li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="mt-5 flex flex-wrap gap-2">
+              {confirming.eligible > 0 ? (
+                <button type="button" className={buttonClass} disabled={sending} onClick={() => { confirmSend().catch(() => undefined); }}>
+                  {sending ? "Sending…" : `Send to ${confirming.eligible} ${confirming.eligible === 1 ? "person" : "people"}`}
+                </button>
+              ) : null}
+              <button type="button" className={ghostButton} disabled={sending} onClick={() => setConfirming(null)}>Back</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "groups" ? (
+        <div className="flex flex-col gap-3">
+          <form className="grid gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4" onSubmit={saveGroup}>
+            <h2 className="m-0 text-[18px] font-bold">{groupForm.id ? "Edit group" : "New group"}</h2>
+            <Field label="Name"><input className={field} required value={groupForm.name} onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })} /></Field>
+            <Field label="Sources">
+              <select className={field} value={groupForm.sources} onChange={(event) => setGroupForm({ ...groupForm, sources: event.target.value as MessageGroup["sources"] })}>
+                <option value="both">Members + registrations</option>
+                <option value="members">Members only</option>
+                <option value="registrations">Registrations only</option>
+              </select>
+            </Field>
+            <div className="flex flex-col gap-1">
+              <span className="text-[13px] font-semibold text-[#3A3A40]">Tags (empty = everyone in the sources)</span>
+              <TagPicker tags={tags} selectedIds={groupForm.tagIds} onChange={(tagIds) => setGroupForm({ ...groupForm, tagIds })} onCreate={createTag} />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="submit" className={buttonClass}>{groupForm.id ? "Save group" : "Add group"}</button>
+              {groupForm.id ? <button type="button" className={ghostButton} onClick={() => setGroupForm({ id: 0, name: "", sources: "both", tagIds: [] })}>Cancel</button> : null}
+            </div>
+          </form>
+          <DataTable columns={["Name", "Sources", "Tags", ""]} empty={groups.length === 0 ? "No groups yet." : ""}>
+            {groups.map((group) => (
+              <tr key={group.id}>
+                <td className={`${tdClass} font-semibold`}>{group.name}</td>
+                <td className={tdClass}>{titleCase(group.sources)}</td>
+                <td className={tdClass}>{group.tagIds.length ? group.tagIds.map((id) => tags.find((tag) => tag.id === id)?.label || id).join(", ") : "Everyone"}</td>
+                <td className={`${tdClass} whitespace-nowrap text-right`}>
+                  <button type="button" className={linkButton} onClick={() => setGroupForm({ id: group.id, name: group.name, sources: group.sources, tagIds: group.tagIds })}>Edit</button>
+                  {" · "}
+                  <button type="button" className={linkButton} onClick={() => { removeGroup(group.id).catch(() => undefined); }}>Delete</button>
+                </td>
+              </tr>
+            ))}
+          </DataTable>
+        </div>
+      ) : null}
+
+      {tab === "history" ? (
+        <div className="flex flex-col gap-3">
+          <DataTable columns={["When", "Channel", "Audience", "Status", "Sent", "Failed", "Skipped", ""]} empty={blasts.length === 0 ? "No blasts yet." : ""}>
+            {blasts.map((blast) => (
+              <tr key={blast.id}>
+                <td className={tdClass}>{String(blast.createdAt || "").slice(0, 16).replace("T", " ")}</td>
+                <td className={tdClass}>{blast.channel.toUpperCase()}</td>
+                <td className={tdClass}>{blast.audience?.groupName || titleCase(blast.audience?.sources || "audience")}</td>
+                <td className={tdClass}>{titleCase(blast.status)}</td>
+                <td className={tdClass}>{blast.sent}</td>
+                <td className={tdClass}>{blast.failed}</td>
+                <td className={tdClass}>{blast.skipped}</td>
+                <td className={`${tdClass} text-right`}><button type="button" className={linkButton} onClick={() => { openReport(blast.id).catch(() => undefined); }}>Report</button></td>
+              </tr>
+            ))}
+          </DataTable>
+          {report ? (
+            <div className="flex flex-col gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="m-0 font-archivo text-[22px] font-extrabold">Blast #{report.blast.id}</h2>
+                  <p className="m-0 mt-1 text-sm text-[#5C5C63]">
+                    {report.blast.channel.toUpperCase()} · {titleCase(report.blast.status)} · {report.blast.sent} sent · {report.blast.failed} failed · {report.blast.skipped} skipped
+                  </p>
+                  {report.blast.error ? <p className="m-0 mt-1 text-sm text-[#A8131F]">{report.blast.error}</p> : null}
+                </div>
+                <button type="button" className={ghostButton} onClick={() => setReport(null)}>Close</button>
+              </div>
+              <DataTable columns={["Name", "Contact", "Source", "Status", "Error"]} empty={report.deliveries.length === 0 ? "No deliveries." : ""}>
+                {report.deliveries.map((row) => (
+                  <tr key={row.id}>
+                    <td className={`${tdClass} font-semibold`}>{row.fullName}</td>
+                    <td className={tdClass}>{row.contact}</td>
+                    <td className={tdClass}>{row.source}</td>
+                    <td className={tdClass}>{titleCase(row.status)}</td>
+                    <td className={tdClass}>{row.error || ""}</td>
+                  </tr>
+                ))}
+              </DataTable>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -1332,25 +1862,65 @@ const memberPageSize = 20;
 function Members({ onError }: { onError: (message: string) => void }) {
   const [rows, setRows] = useState<Member[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [tags, setTags] = useState<MessageTag[]>([]);
+  const [memberTags, setMemberTags] = useState<Record<number, number[]>>({});
   const [form, setForm] = useState(emptyMember);
   const [editor, setEditor] = useState<null | "add" | number>(null);
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [query, setQuery] = useState("");
   const [goldFilter, setGoldFilter] = useState("all");
   const [rewardFilter, setRewardFilter] = useState("");
   const [page, setPage] = useState(1);
   async function load() {
-    const [members, chapterRows] = await Promise.all([api("/api/admin/members"), api("/api/admin/chapters")]);
+    const [members, chapterRows, tagRows, assignments] = await Promise.all([
+      api("/api/admin/members"),
+      api("/api/admin/chapters"),
+      api("/api/admin/message-tags"),
+      api("/api/admin/message-tag-assignments"),
+    ]);
     setRows(members);
     setChapters(chapterRows);
+    setTags(tagRows);
+    setMemberTags(assignments.members || {});
   }
   useEffect(() => { load().catch((error) => onError(error.message)); }, []);
+
+  async function createTag(label: string) {
+    try {
+      const tag = await api("/api/admin/message-tags", { method: "POST", body: JSON.stringify({ label }) });
+      setTags((current) => current.some((row) => row.id === tag.id) ? current : [...current, tag]);
+      return tag as MessageTag;
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not create tag");
+      return null;
+    }
+  }
+
+  async function saveTags(nextIds: number[]) {
+    setSelectedTagIds(nextIds);
+    if (!editor || editor === "add") return;
+    try {
+      await api(`/api/admin/members/${editor}/tags`, { method: "PUT", body: JSON.stringify({ tagIds: nextIds }) });
+      setMemberTags((current) => ({ ...current, [editor]: nextIds }));
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not save tags");
+    }
+  }
 
   async function save(event: FormEvent) {
     event.preventDefault();
     try {
-      if (editor && editor !== "add") await api(`/api/admin/members/${editor}`, { method: "PATCH", body: JSON.stringify(form) });
-      else await api("/api/admin/members", { method: "POST", body: JSON.stringify(form) });
+      if (editor && editor !== "add") {
+        await api(`/api/admin/members/${editor}`, { method: "PATCH", body: JSON.stringify(form) });
+        await api(`/api/admin/members/${editor}/tags`, { method: "PUT", body: JSON.stringify({ tagIds: selectedTagIds }) });
+      } else {
+        const created = await api("/api/admin/members", { method: "POST", body: JSON.stringify(form) });
+        if (created?.id && selectedTagIds.length) {
+          await api(`/api/admin/members/${created.id}/tags`, { method: "PUT", body: JSON.stringify({ tagIds: selectedTagIds }) });
+        }
+      }
       setForm(emptyMember);
+      setSelectedTagIds([]);
       setEditor(null);
       await load();
     } catch (error) {
@@ -1388,7 +1958,7 @@ function Members({ onError }: { onError: (message: string) => void }) {
             Upload roster
             <input className="sr-only" type="file" accept=".csv,text/csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file); event.target.value = ""; }} />
           </label>
-          <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setForm(emptyMember); }}>Add</button>
+          <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setForm(emptyMember); setSelectedTagIds([]); }}>Add</button>
         </div>
       </div>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -1451,14 +2021,19 @@ function Members({ onError }: { onError: (message: string) => void }) {
               {form.goldReward && !goldRewards.some((reward) => reward.value === form.goldReward) ? <option value={form.goldReward}>{form.goldReward}</option> : null}
             </select>
           </Field>
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <span className="text-[13px] font-semibold text-[#3A3A40]">Messaging tags</span>
+            <TagPicker tags={tags} selectedIds={selectedTagIds} onChange={(ids) => { saveTags(ids).catch(() => undefined); }} onCreate={createTag} lockManaged />
+            <p className="m-0 text-[13px] text-[#5C5C63]">{editor === "add" ? "Tags are saved when you add the member." : "Clicking a tag saves it on this member. Payment tags update automatically."}</p>
+          </div>
           <p className="m-0 text-[13px] text-[#5C5C63] sm:col-span-2">CSV columns: name, email, mobile, chapter, category, business name, ticket type, reg status, country, gold club member.</p>
           <div className="flex gap-2 sm:col-span-2">
             <button type="submit" className={buttonClass}>{editor === "add" ? "Add member" : "Save member"}</button>
-            <button type="button" className={ghostButton} onClick={() => setEditor(null)}>Back</button>
+            <button type="button" className={ghostButton} onClick={() => { setEditor(null); setSelectedTagIds([]); }}>Back</button>
           </div>
         </form>
       ) : null}
-      <DataTable columns={["Name", "Email", "Mobile", "Chapter", "Category", "Business", "Ticket", "Status", "Country", "Gold club", ""]} empty={empty}>
+      <DataTable columns={["Name", "Email", "Mobile", "Chapter", "Category", "Business", "Ticket", "Status", "Country", "Gold club", "Tags", ""]} empty={empty}>
         {pageRows.map((row) => (
           <tr key={row.id}>
             <td className={`${tdClass} font-semibold`}>{row.fullName}</td>
@@ -1471,7 +2046,8 @@ function Members({ onError }: { onError: (message: string) => void }) {
             <td className={tdClass}>{titleCase(row.regStatus)}</td>
             <td className={tdClass}>{row.country}</td>
             <td className={tdClass}>{row.goldClub ? "Yes" : ""}</td>
-            <td className={`${tdClass} text-right`}><button type="button" className={linkButton} onClick={() => { setEditor(row.id); setForm(row); }}>Edit</button></td>
+            <td className={tdClass}>{(memberTags[row.id] || []).map((id) => tags.find((tag) => tag.id === id)?.label).filter(Boolean).join(", ")}</td>
+            <td className={`${tdClass} text-right`}><button type="button" className={linkButton} onClick={() => { setEditor(row.id); setForm(row); setSelectedTagIds(memberTags[row.id] || []); }}>Edit</button></td>
           </tr>
         ))}
       </DataTable>

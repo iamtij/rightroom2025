@@ -171,7 +171,15 @@ export function saveMember(db, input) {
   );
   syncRosterTickets(db, { email: input.email, mobile: input.mobile });
   const saved = db.prepare("SELECT * FROM members WHERE email = ?").get(input.email.trim().toLowerCase());
-  if (saved) syncMemberRewards(db, saved);
+  if (saved) {
+    syncMemberRewards(db, saved);
+    import("./messaging.js").then(({ syncMemberNotRegisteredTag }) => {
+      syncMemberNotRegisteredTag(db, saved.id);
+    }).catch((error) => {
+      console.error("[messaging] audience tag sync failed", error);
+    });
+  }
+  return saved;
 }
 
 export function memberContactClash(db, { email, mobile, excludeId = 0 }) {
@@ -226,7 +234,14 @@ export function updateMemberRecord(db, id, input) {
   );
   syncRosterTickets(db, { email, mobile });
   const saved = db.prepare("SELECT * FROM members WHERE id = ?").get(existing.id);
-  if (saved) syncMemberRewards(db, saved);
+  if (saved) {
+    syncMemberRewards(db, saved);
+    import("./messaging.js").then(({ syncMemberNotRegisteredTag }) => {
+      syncMemberNotRegisteredTag(db, saved.id);
+    }).catch((error) => {
+      console.error("[messaging] audience tag sync failed", error);
+    });
+  }
   return { member: listMembers(db).find((member) => member.id === existing.id) };
 }
 

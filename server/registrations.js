@@ -290,6 +290,11 @@ export function createRegistration(db, input) {
   });
   const registration = getRegistration(db, run());
   syncRosterTickets(db, { email: registration.email, mobile: registration.mobile });
+  import("./messaging.js").then(({ syncRegistrationAudienceTags }) => {
+    syncRegistrationAudienceTags(db, registration.id);
+  }).catch((error) => {
+    console.error("[messaging] audience tag sync failed", error);
+  });
   if (registration.gold_reward_current === "GOLD_FREE" && registration.qr_token && registration.balance_cents === 0) {
     import("./reminders.js").then(({ queueEntryPassAfterPayment }) => {
       queueEntryPassAfterPayment(db, registration.id);
@@ -367,6 +372,11 @@ export function cancelRegistration(db, id) {
   const current = db.prepare("SELECT email, mobile FROM registrations WHERE id = ?").get(id);
   db.prepare("UPDATE registrations SET status = 'cancelled' WHERE id = ? AND status != 'cancelled'").run(id);
   if (current) syncRosterTickets(db, current, { clear: true });
+  import("./messaging.js").then(({ syncRegistrationAudienceTags }) => {
+    syncRegistrationAudienceTags(db, id);
+  }).catch((error) => {
+    console.error("[messaging] audience tag sync failed", error);
+  });
   return getRegistration(db, id);
 }
 
@@ -449,6 +459,11 @@ export function recordPayment(db, input) {
   });
   const { registrationId, paymentId } = run();
   const updated = getRegistration(db, registrationId);
+  import("./messaging.js").then(({ syncRegistrationAudienceTags }) => {
+    syncRegistrationAudienceTags(db, registrationId);
+  }).catch((error) => {
+    console.error("[messaging] audience tag sync failed", error);
+  });
   import("./reminders.js").then(({ queuePaymentConfirmationAfterPayment, queueEntryPassAfterPayment }) => {
     queuePaymentConfirmationAfterPayment(db, registrationId, paymentId);
     if (updated.balance_cents === 0 && updated.fully_paid_at && updated.qr_token) {

@@ -27,6 +27,25 @@ import { buyerPaymentChannels, buyerPaynamicsMethods, hitpayConfigured, listPaym
 import { entryQrPng } from "./templates.js";
 import { recordSecurityEvent } from "./alerts.js";
 import { railwaySignalsPresent } from "./deployment-identity.js";
+import {
+  createBlast,
+  deleteMessageGroup,
+  deleteMessageTag,
+  getBlastReport,
+  listBlasts,
+  listMessageGroups,
+  listMessageTags,
+  memberTagMap,
+  previewAudience,
+  registrationTagMap,
+  saveMessageGroup,
+  setMemberTags,
+  setRegistrationTags,
+  syncAudienceTags,
+  tagsForMember,
+  tagsForRegistration,
+  upsertMessageTag,
+} from "./messaging.js";
 
 // Cloudflare's published test widget. It loads on any hostname, including localhost.
 // The configured sitekey is for the public site and shows "Invalid sitekey" on local dev.
@@ -1533,6 +1552,7 @@ export function createApi() {
       for (const member of rows) saveMember(db(), member);
     });
     saveAll(members);
+    syncAudienceTags(db());
     writeAudit(db(), req.admin.id, "member.import", String(members.length));
     res.json({ saved: members.length, members: listMembers(db()) });
   });
@@ -1544,6 +1564,151 @@ export function createApi() {
       return;
     }
     res.json(result.member);
+  });
+
+  router.get("/admin/message-tags", requireAdmin, (_req, res) => {
+    res.json(listMessageTags(db()));
+  });
+
+  router.post("/admin/message-tags", requireAdmin, (req, res) => {
+    const result = upsertMessageTag(db(), req.body || {});
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.status(201).json(result.tag);
+  });
+
+  router.patch("/admin/message-tags/:id", requireAdmin, (req, res) => {
+    const result = upsertMessageTag(db(), { ...(req.body || {}), id: req.params.id });
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.json(result.tag);
+  });
+
+  router.delete("/admin/message-tags/:id", requireAdmin, (req, res) => {
+    const result = deleteMessageTag(db(), req.params.id);
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.json({ ok: true });
+  });
+
+  router.get("/admin/message-tag-assignments", requireAdmin, (_req, res) => {
+    res.json({ members: memberTagMap(db()), registrations: registrationTagMap(db()) });
+  });
+
+  router.get("/admin/members/:id/tags", requireAdmin, (req, res) => {
+    const member = db().prepare("SELECT id FROM members WHERE id = ?").get(req.params.id);
+    if (!member) {
+      res.status(404).json({ error: "Member not found" });
+      return;
+    }
+    res.json(tagsForMember(db(), member.id));
+  });
+
+  router.put("/admin/members/:id/tags", requireAdmin, (req, res) => {
+    const result = setMemberTags(db(), req.params.id, req.body?.tagIds ?? req.body?.tags);
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    writeAudit(db(), req.admin.id, "member.tags", String(req.params.id));
+    res.json(result.tags);
+  });
+
+  router.get("/admin/registrations/:reference/tags", requireAdmin, (req, res) => {
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    res.json(tagsForRegistration(db(), row.id));
+  });
+
+  router.put("/admin/registrations/:reference/tags", requireAdmin, (req, res) => {
+    const row = db().prepare("SELECT id FROM registrations WHERE reference = ?").get(req.params.reference);
+    if (!row) {
+      res.status(404).json({ error: "Registration not found" });
+      return;
+    }
+    const result = setRegistrationTags(db(), row.id, req.body?.tagIds ?? req.body?.tags);
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    writeAudit(db(), req.admin.id, "registration.tags", req.params.reference);
+    res.json(result.tags);
+  });
+
+  router.get("/admin/message-groups", requireAdmin, (_req, res) => {
+    res.json(listMessageGroups(db()));
+  });
+
+  router.post("/admin/message-groups", requireAdmin, (req, res) => {
+    const result = saveMessageGroup(db(), req.body || {});
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.status(201).json(result.group);
+  });
+
+  router.patch("/admin/message-groups/:id", requireAdmin, (req, res) => {
+    const result = saveMessageGroup(db(), { ...(req.body || {}), id: req.params.id });
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.json(result.group);
+  });
+
+  router.delete("/admin/message-groups/:id", requireAdmin, (req, res) => {
+    const result = deleteMessageGroup(db(), req.params.id);
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.json({ ok: true });
+  });
+
+  router.post("/admin/message-blasts/preview", requireAdmin, (req, res) => {
+    const result = previewAudience(db(), req.body || {});
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.json(result);
+  });
+
+  router.get("/admin/message-blasts", requireAdmin, (req, res) => {
+    res.json(listBlasts(db(), { limit: req.query.limit }));
+  });
+
+  router.get("/admin/message-blasts/:id", requireAdmin, (req, res) => {
+    const result = getBlastReport(db(), req.params.id, { status: req.query.status });
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.json(result);
+  });
+
+  router.post("/admin/message-blasts", requireAdmin, (req, res) => {
+    const result = createBlast(db(), req.body || {}, { createdBy: req.admin.id });
+    if (result.error) {
+      res.status(result.status || 400).json({
+        error: result.error,
+        requiresConfirm: result.requiresConfirm || false,
+        eligible: result.eligible,
+      });
+      return;
+    }
+    writeAudit(db(), req.admin.id, "message.blast", String(result.blast.id));
+    res.status(201).json(result.blast);
   });
 
   app.use("/api", router);
