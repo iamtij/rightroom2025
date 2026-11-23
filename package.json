@@ -19,6 +19,7 @@
     "verify:turnstile-single-use": "node server/verify-turnstile-single-use.js",
     "verify:checkout-pay-flow": "node server/verify-checkout-pay-flow.js",
     "verify:registration-lookup": "node server/verify-registration-lookup.js",
+    "verify:registration-csv": "node server/verify-registration-csv.js",
     "verify:dashboard": "node server/verify-dashboard.js",
     "verify:daily-report": "node server/verify-daily-report.js",
     "verify:gold-club": "node server/verify-gold-club.js",

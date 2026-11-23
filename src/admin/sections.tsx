@@ -862,6 +862,7 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
   const [editingDetails, setEditingDetails] = useState(false);
   const [draft, setDraft] = useState(emptyRegistration);
   const [cancelTarget, setCancelTarget] = useState<null | { reference: string; name: string }>(null);
+  const [exporting, setExporting] = useState(false);
 
   async function load() {
     const [registrations, ticketProducts, chapterRows] = await Promise.all([
@@ -928,6 +929,33 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
     }
   }
 
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      const response = await fetch("/api/admin/registrations/export.csv", { credentials: "include" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Could not export registrations");
+      }
+      const blob = await response.blob();
+      const header = response.headers.get("content-disposition") || "";
+      const matched = /filename="([^"]+)"/i.exec(header);
+      const filename = matched?.[1] || `ibmc-registrations-${new Date().toISOString().slice(0, 10)}.csv`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not export registrations");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const visible = rows.filter((row) => {
     if (statusFilter && registrationListStatus(row) !== statusFilter) return false;
     return matches(query, [row.attendee.fullName, row.attendee.email, row.attendee.mobile, row.reference, row.tierName, row.attendee.business, row.attendee.chapter, row.status]);
@@ -938,7 +966,12 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="m-0 font-archivo text-[28px] font-extrabold">Registrations</h1>
-        <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setDraft(emptyRegistration); }}>Add manual</button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={ghostButton} disabled={exporting} onClick={() => { exportCsv().catch(() => {}); }}>
+            {exporting ? "Exporting…" : "Export CSV"}
+          </button>
+          <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setDraft(emptyRegistration); }}>Add manual</button>
+        </div>
       </div>
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-[240px] flex-1">

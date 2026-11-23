@@ -9,6 +9,7 @@ import {
 } from "./staging-early-payments.js";
 import { beginMfaSetup, clearSessionCookie, cookieValue, createAdmin, listAdmins, readMfaSetup, readSession, revokeSession, seedAdmin, sessionCookie, signSession, verifyPassword, verifyTotp } from "./auth.js";
 import { admitPass, cancelRegistration, compRegistration, createRegistration, discardUnopenedRegistration, ensureResumeToken, entryPassEligible, findRegistrationByContact, getEntryPass, getRegistration, recordPayment, resumeTokenMatches, scheduleNoteFromInstallments, updateBadge, updateRegistration } from "./registrations.js";
+import { buildRegistrationsCsv, registrationsCsvFilename } from "./registration-csv.js";
 import { assignFirstPaymentHold, expireRegistrationHold, firstPaymentHoldEnabled, HOLD_EXPIRED_MESSAGE } from "./payment-hold.js";
 import { listFirstPaymentBackfillTargets } from "./backfill-payment-confirmations.js";
 import { sendEntryPassForRegistration, sendPaymentConfirmation, syncBuiltinSchedule } from "./reminders.js";
@@ -1170,6 +1171,16 @@ export function createApi() {
       const registration = getRegistration(db(), row.id);
       return present(registration, { transactions: registrationTransactions(db(), registration.id) });
     }));
+  });
+
+  router.get("/admin/registrations/export.csv", requireAdmin, (req, res) => {
+    const csv = buildRegistrationsCsv(db());
+    const filename = registrationsCsvFilename();
+    writeAudit(db(), req.admin.id, "registration.export", "registrations");
+    recordSecurityEvent(db(), "registration.export", "registration csv export");
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.send(csv);
   });
 
   router.post("/admin/registrations/:reference/payments", requireAdmin, (req, res) => {

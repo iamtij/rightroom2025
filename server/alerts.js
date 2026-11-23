@@ -14,7 +14,7 @@ export async function recordSecurityEvent(db, kind, detail = "") {
     WHERE kind = ? AND created_at >= datetime('now', '-1 hour')
   `).get(kind).n;
   const threshold = THRESHOLDS[kind];
-  const notable = kind === "registration.comp" || kind === "registration.list" || kind === "member.list" || kind === "pass.override";
+  const notable = kind === "registration.comp" || kind === "registration.list" || kind === "registration.export" || kind === "member.list" || kind === "pass.override";
   if (!notable && (!threshold || recent < threshold || recent % threshold !== 0)) return;
   const to = String(process.env.ADMIN_EMAIL || "").trim();
   if (!to) return;
