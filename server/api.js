@@ -14,8 +14,8 @@ import { assignFirstPaymentHold, expireRegistrationHold, firstPaymentHoldEnabled
 import { listFirstPaymentBackfillTargets } from "./backfill-payment-confirmations.js";
 import { sendEntryPassForRegistration, sendPaymentConfirmation, syncBuiltinSchedule } from "./reminders.js";
 import { dashboardStats } from "./dashboard.js";
-import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
-import { listMembers, lookupMember, memberContactClash, memberFromProof, memberOwnedRegistration, memberPreview, memberRequiresOtp, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
+import { importChapters, listChapterProgress, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
+import { listMembers, lookupMember, memberContactClash, memberFromProof, memberOwnedRegistration, memberPreview, memberRegisterOptions, memberRequiresOtp, parseMemberCsv, registerMemberByAdmin, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
 import { presentCoupon, priceCoupon } from "./coupons.js";
 import { parseLookupContact } from "./contact.js";
 import { maskEmail, memberEditToken, readMemberEditToken, sendMemberOtp, sendRegistrationOtp, verifyMemberOtp, verifyRegistrationOtp } from "./otp.js";
@@ -223,6 +223,7 @@ function present(registration, options = {}) {
     planStatus: registration.status === "cancelled" ? "cancelled" : registration.balance_cents === 0 ? "fully_paid" : registration.plan_status || "active",
     qrReady: entryPassEligible(registration),
     registeredOn: registration.registered_on,
+    createdAt: registration.created_at || null,
     paymentHoldUntil: registration.payment_hold_until || null,
     payments,
     ...(options.transactions ? { transactions: options.transactions } : {}),
@@ -1525,6 +1526,10 @@ export function createApi() {
     res.json(listChapters(db()));
   });
 
+  router.get("/admin/chapters/progress", requireAdmin, (_req, res) => {
+    res.json(listChapterProgress(db()));
+  });
+
   router.post("/admin/chapters", requireAdmin, (req, res) => {
     const result = saveChapter(db(), req.body || {});
     if (result.error) {
@@ -1597,6 +1602,28 @@ export function createApi() {
       return;
     }
     res.json(result.member);
+  });
+
+  router.get("/admin/members/:id/register-options", requireAdmin, (req, res) => {
+    const result = memberRegisterOptions(db(), req.params.id);
+    if (result.error) {
+      res.status(result.status || 400).json({ error: result.error });
+      return;
+    }
+    res.json(result);
+  });
+
+  router.post("/admin/members/:id/register", requireAdmin, (req, res) => {
+    const result = registerMemberByAdmin(db(), req.params.id, req.body || {}, req.admin.id);
+    if (result.error) {
+      res.status(result.status || 400).json({
+        error: result.error,
+        ...(result.reference ? { reference: result.reference } : {}),
+      });
+      return;
+    }
+    writeAudit(db(), req.admin.id, "member.register", result.registration.reference);
+    res.status(201).json(present(result.registration));
   });
 
   router.get("/admin/message-tags", requireAdmin, (_req, res) => {

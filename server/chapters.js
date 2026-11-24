@@ -3,6 +3,116 @@ export function listChapters(db) {
   return db.prepare("SELECT id, name FROM chapters ORDER BY name COLLATE NOCASE, id").all();
 }
 
+function phoneKey(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : "";
+}
+
+function percent(part, whole) {
+  if (!whole) return null;
+  return Math.round((part / whole) * 100);
+}
+
+function registrationIndex(db) {
+  const rows = db.prepare(`
+    SELECT reference, email, mobile, phone_key, payment_plan, fully_paid_at
+    FROM registrations
+    WHERE status = 'confirmed'
+    ORDER BY id DESC
+  `).all();
+  const byEmail = new Map();
+  const byPhone = new Map();
+  for (const row of rows) {
+    const fullyPaid = Boolean(row.fully_paid_at);
+    const installment = row.payment_plan === "installment" && !fullyPaid;
+    if (!fullyPaid && !installment) continue;
+    const owned = {
+      reference: row.reference,
+      plan: fullyPaid ? "full" : "installment",
+      planLabel: fullyPaid ? "Fully paid" : "Installment",
+      fullyPaid,
+    };
+    const email = String(row.email || "").trim().toLowerCase();
+    if (email && !byEmail.has(email)) byEmail.set(email, owned);
+    const key = row.phone_key || phoneKey(row.mobile);
+    if (key && !byPhone.has(key)) byPhone.set(key, owned);
+  }
+  return { byEmail, byPhone };
+}
+
+function ownedRegistration(member, index) {
+  const email = String(member.email || "").trim().toLowerCase();
+  if (email && index.byEmail.has(email)) return index.byEmail.get(email);
+  const key = member.phone_key || phoneKey(member.mobile);
+  if (key && index.byPhone.has(key)) return index.byPhone.get(key);
+  return null;
+}
+
+/** Chapter roster progress: registered (fully paid or installment) over total members. */
+export function listChapterProgress(db) {
+  seedFromMembers(db);
+  const chapters = listChapters(db);
+  const byName = new Map(chapters.map((chapter) => [chapter.name.toLowerCase(), {
+    id: chapter.id,
+    name: chapter.name,
+    total: 0,
+    registered: 0,
+    percent: null,
+    members: [],
+  }]));
+  const ownedByContact = registrationIndex(db);
+  const members = db.prepare(`
+    SELECT id, full_name, email, mobile, phone_key, chapter
+    FROM members
+    ORDER BY full_name COLLATE NOCASE, id
+  `).all();
+
+  for (const member of members) {
+    const chapterName = String(member.chapter || "").trim();
+    if (!chapterName) continue;
+    const key = chapterName.toLowerCase();
+    let chapter = byName.get(key);
+    if (!chapter) {
+      chapter = {
+        id: null,
+        name: chapterName,
+        total: 0,
+        registered: 0,
+        percent: null,
+        members: [],
+      };
+      byName.set(key, chapter);
+    }
+    chapter.total += 1;
+    const owned = ownedRegistration(member, ownedByContact);
+    if (!owned) continue;
+    chapter.registered += 1;
+    chapter.members.push({
+      id: member.id,
+      fullName: member.full_name,
+      email: member.email,
+      mobile: member.mobile,
+      reference: owned.reference,
+      plan: owned.plan,
+      planLabel: owned.planLabel,
+      fullyPaid: owned.fullyPaid,
+    });
+  }
+
+  return [...byName.values()]
+    .map((chapter) => ({
+      ...chapter,
+      percent: percent(chapter.registered, chapter.total),
+    }))
+    .sort((left, right) => {
+      const leftPct = left.percent ?? -1;
+      const rightPct = right.percent ?? -1;
+      if (rightPct !== leftPct) return rightPct - leftPct;
+      if (right.registered !== left.registered) return right.registered - left.registered;
+      return left.name.localeCompare(right.name, undefined, { sensitivity: "base" });
+    });
+}
+
 export function saveChapter(db, input) {
   const name = String(input.name || "").trim();
   if (!name) return { error: "Add a chapter name", status: 400 };

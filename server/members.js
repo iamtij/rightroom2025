@@ -1,6 +1,8 @@
 import { createHmac, timingSafeEqual } from "crypto";
-import { memberGoldOffer, syncMemberRewards } from "./gold-club.js";
-import { findRegistrationByContact, registrationHasRecordedPayment } from "./registrations.js";
+import { memberGoldOffer, pricePlan, resolveGoldReward, syncMemberRewards } from "./gold-club.js";
+import { priceCoupon } from "./coupons.js";
+import { cancelRegistration, createRegistration, findRegistrationByContact, recordPayment, registrationHasRecordedPayment } from "./registrations.js";
+import { manilaParts } from "./time.js";
 
 const STATUSES = new Set(["updated", "delayed", "cancelled"]);
 const GOLD_REWARDS = new Set(["GOLD_FREE", "GOLD_50", "GOLD_3000"]);
@@ -299,7 +301,234 @@ export function updateMemberProfile(db, currentEmail, input) {
 
 export function listMembers(db) {
   syncRosterTickets(db);
-  return db.prepare("SELECT * FROM members ORDER BY registered_at DESC, id DESC").all().map(presentMember);
+  const ownedByContact = confirmedRegistrationIndex(db);
+  return db.prepare("SELECT * FROM members ORDER BY registered_at DESC, id DESC").all()
+    .map((row) => presentMember(row, ownedRegistrationForMember(row, ownedByContact)));
+}
+
+function confirmedRegistrationIndex(db) {
+  const rows = db.prepare(`
+    SELECT reference, email, mobile, phone_key, created_at
+    FROM registrations
+    WHERE status = 'confirmed'
+    ORDER BY id DESC
+  `).all();
+  const byEmail = new Map();
+  const byPhone = new Map();
+  for (const row of rows) {
+    const owned = { reference: row.reference, createdAt: row.created_at || null };
+    const email = String(row.email || "").trim().toLowerCase();
+    if (email && !byEmail.has(email)) byEmail.set(email, owned);
+    const key = row.phone_key || phoneKey(row.mobile);
+    if (key && !byPhone.has(key)) byPhone.set(key, owned);
+  }
+  return { byEmail, byPhone };
+}
+
+function ownedRegistrationForMember(member, index) {
+  const email = String(member.email || "").trim().toLowerCase();
+  if (email && index.byEmail.has(email)) return index.byEmail.get(email);
+  const key = member.phone_key || phoneKey(member.mobile);
+  if (key && index.byPhone.has(key)) return index.byPhone.get(key);
+  return null;
+}
+
+function localTicketProducts(db) {
+  return db.prepare(`
+    SELECT code, name, currency, full_price_cents, allows_installment, sales_start, sales_end
+    FROM ticket_products
+    WHERE active = 1 AND audience = 'local' AND code NOT LIKE 'test%'
+    ORDER BY sales_start, id
+  `).all();
+}
+
+function defaultLocalProductCode(db, today = manilaParts().date) {
+  const products = localTicketProducts(db);
+  const inWindow = products.find((product) => today >= product.sales_start && today <= product.sales_end);
+  return (inWindow || products[0])?.code || "first_mover";
+}
+
+function quoteMemberPlan(db, member, productCode, paymentPlan, today = manilaParts().date) {
+  const product = db.prepare("SELECT * FROM ticket_products WHERE code = ? AND active = 1").get(productCode);
+  if (!product) return { error: "Unknown ticket", status: 400 };
+  if (product.audience !== "local") return { error: "Pick a local ticket for member registration.", status: 400 };
+  if (paymentPlan === "installment" && !product.allows_installment) {
+    return { error: "This ticket is paid in full", status: 400 };
+  }
+  const priced = priceCoupon(db, {
+    productCode,
+    paymentPlan,
+    registeredOn: today,
+    today,
+  });
+  if (priced.error) return priced;
+  const goldReward = resolveGoldReward(member);
+  const gold = goldReward === "GOLD_NONE"
+    ? null
+    : pricePlan(priced.amounts, goldReward, product.currency);
+  const totalCents = gold ? gold.totalCents : priced.totalCents;
+  const dueTodayCents = gold
+    ? (gold.rows.find((row) => !row.covered)?.amountCents ?? 0)
+    : priced.dueTodayCents;
+  return {
+    productCode: product.code,
+    productName: product.name,
+    currency: product.currency,
+    paymentPlan,
+    allowsInstallment: Boolean(product.allows_installment),
+    goldReward,
+    listCents: gold ? gold.listCents : priced.listCents,
+    totalCents,
+    dueTodayCents,
+    discountCents: gold ? gold.discountCents : priced.discountCents || 0,
+  };
+}
+
+export function memberRegisterOptions(db, memberId) {
+  const row = db.prepare("SELECT * FROM members WHERE id = ?").get(Number(memberId));
+  if (!row) return { error: "Member not found", status: 404 };
+  const owned = memberOwnedRegistration(db, row);
+  const today = manilaParts().date;
+  const defaultProductCode = defaultLocalProductCode(db, today);
+  const products = localTicketProducts(db).map((product) => {
+    const full = quoteMemberPlan(db, row, product.code, "full", today);
+    const installment = product.allows_installment
+      ? quoteMemberPlan(db, row, product.code, "installment", today)
+      : null;
+    return {
+      code: product.code,
+      name: product.name,
+      currency: product.currency,
+      allowsInstallment: Boolean(product.allows_installment),
+      inSalesWindow: today >= product.sales_start && today <= product.sales_end,
+      salesStart: product.sales_start,
+      salesEnd: product.sales_end,
+      full: full.error ? null : full,
+      installment: installment && !installment.error ? installment : null,
+    };
+  });
+  return {
+    member: presentMember(row, owned ? { reference: owned.reference, createdAt: owned.created_at || null } : null),
+    registration: owned
+      ? {
+        reference: owned.reference,
+        balanceCents: owned.balance_cents,
+        plan: owned.payment_plan,
+        tierName: owned.product_name,
+      }
+      : null,
+    defaultProductCode,
+    goldReward: resolveGoldReward(row),
+    today,
+    products,
+  };
+}
+
+export function registerMemberByAdmin(db, memberId, input, adminUserId) {
+  const row = db.prepare("SELECT * FROM members WHERE id = ?").get(Number(memberId));
+  if (!row) return { error: "Member not found", status: 404 };
+  const owned = memberOwnedRegistration(db, row);
+  if (owned) {
+    return {
+      error: "This member is already registered.",
+      status: 409,
+      reference: owned.reference,
+    };
+  }
+
+  const today = manilaParts().date;
+  const paymentPlan = input.paymentPlan === "installment" ? "installment" : "full";
+  const productCode = String(input.productCode || "").trim() || defaultLocalProductCode(db, today);
+  const quote = quoteMemberPlan(db, row, productCode, paymentPlan, today);
+  if (quote.error) return { error: quote.error, status: quote.status || 400 };
+
+  const bankReference = String(input.bankReference || "").trim();
+  const paidOn = String(input.paidOn || "").trim() || today;
+  const notes = String(input.notes || "").trim();
+  const amountReceivedRaw = input.amountReceivedCents;
+  const amountReceivedCents = amountReceivedRaw === "" || amountReceivedRaw == null
+    ? null
+    : Number(amountReceivedRaw);
+  if (amountReceivedCents != null && (!Number.isFinite(amountReceivedCents) || amountReceivedCents < 0)) {
+    return { error: "Amount received must be a valid number.", status: 400 };
+  }
+  const sendEmail = input.sendEmail !== false;
+
+  if (quote.dueTodayCents > 0 && !bankReference) {
+    return { error: "Bank reference is required.", status: 400 };
+  }
+
+  let registration;
+  try {
+    registration = createRegistration(db, {
+      productCode,
+      paymentPlan,
+      fullName: row.full_name,
+      email: row.email,
+      mobile: row.mobile,
+      registeredOn: today,
+      attendeeType: "member",
+      business: row.business_name || "",
+      industry: row.category || "",
+      chapter: row.chapter || "",
+      member: row,
+      notify: sendEmail,
+    });
+  } catch (error) {
+    return { error: error.message || "Registration was not saved", status: error.status || 400 };
+  }
+
+  if (registration.balance_cents <= 0) {
+    if (bankReference || notes || amountReceivedCents != null) {
+      db.prepare(`
+        INSERT INTO admin_audit (admin_id, action, target, amount_cents)
+        VALUES (?, 'member.bank_register', ?, ?)
+      `).run(
+        adminUserId || null,
+        `${registration.reference}:${[bankReference, paidOn ? `paid ${paidOn}` : "", notes].filter(Boolean).join(" | ")}`.slice(0, 500),
+        amountReceivedCents ?? 0,
+      );
+    }
+    return { registration };
+  }
+
+  const due = registration.installments.find((item) => item.status === "due");
+  if (!due) {
+    cancelRegistration(db, registration.id);
+    return { error: "Nothing is due on this ticket.", status: 400 };
+  }
+
+  const payAmount = due.amount_cents - due.amount_paid_cents;
+  const noteParts = [];
+  if (paidOn) noteParts.push(`Paid on ${paidOn}`);
+  if (amountReceivedCents != null) {
+    noteParts.push(`Amount received: ${(amountReceivedCents / 100).toLocaleString("en-PH", { maximumFractionDigits: 2 })}`);
+  }
+  if (notes) noteParts.push(notes);
+  const paymentNotes = noteParts.join(". ");
+
+  try {
+    registration = recordPayment(db, {
+      registrationId: registration.id,
+      installmentId: due.id,
+      amountCents: payAmount,
+      method: "bank",
+      externalReference: bankReference || null,
+      notes: paymentNotes || null,
+      adminUserId,
+      notify: sendEmail,
+    });
+  } catch (error) {
+    cancelRegistration(db, registration.id);
+    return { error: error.message || "Payment was not recorded", status: error.status || 400 };
+  }
+
+  db.prepare(`
+    INSERT INTO admin_audit (admin_id, action, target, amount_cents)
+    VALUES (?, 'member.bank_register', ?, ?)
+  `).run(adminUserId || null, registration.reference, payAmount);
+
+  return { registration };
 }
 
 function sameMobile(left, right) {
@@ -359,7 +588,10 @@ export function toPublicMember(member, registered) {
   };
 }
 
-function presentMember(row) {
+function presentMember(row, registration = null) {
+  const owned = typeof registration === "string"
+    ? { reference: registration, createdAt: null }
+    : registration;
   return {
     id: row.id,
     fullName: row.full_name,
@@ -376,7 +608,8 @@ function presentMember(row) {
     sponsorsAugDec2026: row.sponsors_aug_dec_2026 == null ? null : Number(row.sponsors_aug_dec_2026),
     sponsorDataAsOf: row.sponsor_data_as_of || "",
     goldReward: row.gold_reward || "",
-    registeredAt: row.registered_at,
+    registeredAt: owned?.createdAt || row.registered_at || "",
+    registrationReference: owned?.reference || null,
   };
 }
 

@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS payments (
   currency TEXT NOT NULL,
   method TEXT,
   external_reference TEXT,
+  notes TEXT,
   admin_user_id INTEGER,
   recorded_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -585,6 +586,9 @@ function migrate(db) {
   const paymentColumns = new Set(db.prepare("PRAGMA table_info(payments)").all().map((column) => column.name));
   if (!paymentColumns.has("admin_user_id")) {
     db.exec("ALTER TABLE payments ADD COLUMN admin_user_id INTEGER");
+  }
+  if (!paymentColumns.has("notes")) {
+    db.exec("ALTER TABLE payments ADD COLUMN notes TEXT");
   }
   db.exec(`
     CREATE TABLE IF NOT EXISTS admin_sessions (

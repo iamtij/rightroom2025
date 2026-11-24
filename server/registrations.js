@@ -311,7 +311,12 @@ export function createRegistration(db, input) {
   }).catch((error) => {
     console.error("[messaging] audience tag sync failed", error);
   });
-  if (registration.gold_reward_current === "GOLD_FREE" && registration.qr_token && registration.balance_cents === 0) {
+  if (
+    input.notify !== false
+    && registration.gold_reward_current === "GOLD_FREE"
+    && registration.qr_token
+    && registration.balance_cents === 0
+  ) {
     import("./reminders.js").then(({ queueEntryPassAfterPayment }) => {
       queueEntryPassAfterPayment(db, registration.id);
     });
@@ -428,8 +433,8 @@ export function recordPayment(db, input) {
       throw new Error("Payment does not match the amount still due");
     }
     const paymentInsert = db.prepare(`
-      INSERT INTO payments (registration_id, installment_id, amount_cents, currency, method, external_reference, admin_user_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO payments (registration_id, installment_id, amount_cents, currency, method, external_reference, notes, admin_user_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       registration.id,
       target.id,
@@ -437,6 +442,7 @@ export function recordPayment(db, input) {
       registration.currency,
       input.method || null,
       input.externalReference || null,
+      input.notes || null,
       input.adminUserId || null,
     );
     const paymentId = paymentInsert.lastInsertRowid;
@@ -480,12 +486,14 @@ export function recordPayment(db, input) {
   }).catch((error) => {
     console.error("[messaging] audience tag sync failed", error);
   });
-  import("./reminders.js").then(({ queuePaymentConfirmationAfterPayment, queueEntryPassAfterPayment }) => {
-    queuePaymentConfirmationAfterPayment(db, registrationId, paymentId);
-    if (updated.balance_cents === 0 && updated.fully_paid_at && updated.qr_token) {
-      queueEntryPassAfterPayment(db, registrationId);
-    }
-  });
+  if (input.notify !== false) {
+    import("./reminders.js").then(({ queuePaymentConfirmationAfterPayment, queueEntryPassAfterPayment }) => {
+      queuePaymentConfirmationAfterPayment(db, registrationId, paymentId);
+      if (updated.balance_cents === 0 && updated.fully_paid_at && updated.qr_token) {
+        queueEntryPassAfterPayment(db, registrationId);
+      }
+    });
+  }
   return updated;
 }
 

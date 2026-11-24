@@ -23,6 +23,8 @@
     "verify:dashboard": "node server/verify-dashboard.js",
     "verify:daily-report": "node server/verify-daily-report.js",
     "verify:gold-club": "node server/verify-gold-club.js",
+    "verify:member-register": "node server/verify-member-register.js",
+    "verify:chapter-progress": "node server/verify-chapter-progress.js",
     "verify:messaging": "node server/verify-messaging.js",
     "preview": "vite preview",
     "clean": "rm -rf dist",
