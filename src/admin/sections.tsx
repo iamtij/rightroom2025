@@ -1,10 +1,12 @@
 import { Fragment, forwardRef, useEffect, useImperativeHandle, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Pencil, Ticket, UserPlus } from "lucide-react";
 import { formatFeePercentInput, formatFeePesoInput } from "../../server/convenience-fee.js";
 import { previewTemplate, smsCreditCount } from "../../server/templates.js";
 
 const field = "rounded-[10px] border border-[#D9D5CF] bg-white px-3 py-2.5 text-sm font-normal text-[#141416]";
 const labelClass = "flex flex-col gap-1 text-[13px] font-semibold text-[#3A3A40]";
 const buttonClass = "rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]";
+const iconButton = "inline-flex h-8 w-8 items-center justify-center rounded-full text-[#A8131F] hover:bg-[#F5E8E9] disabled:opacity-40";
 
 type Product = { code: string; name: string; allows_installment: number; currency: string };
 type Template = { id: number; name: string; channel: "email" | "sms"; subject: string | null; body: string; system_key: string | null };
@@ -2397,9 +2399,38 @@ function Members({
           </div>
         </form>
       ) : null}
-      <DataTable columns={["Date / time", "Name", "Email", "Mobile", "Chapter", "Category", "Business", "Ticket", "Status", "Country", "Gold club", "Tags", ""]} empty={empty}>
+      <DataTable columns={["", "Date / time", "Name", "Email", "Mobile", "Chapter", "Category", "Business", "Ticket", "Status", "Country", "Gold club", "Tags"]} empty={empty}>
         {pageRows.map((row) => (
           <tr key={row.id}>
+            <td className={`${tdClass} whitespace-nowrap`}>
+              <div className="flex items-center gap-0.5">
+                {row.registrationReference ? (
+                  <button type="button" className={iconButton} title="View registration" aria-label="View registration" onClick={() => onOpenRegistration?.(row.registrationReference!)}>
+                    <Ticket className="h-4 w-4" strokeWidth={2.25} />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className={iconButton}
+                    title={registerBusy && registerTarget?.id === row.id ? "Loading…" : "Register"}
+                    aria-label={registerBusy && registerTarget?.id === row.id ? "Loading" : "Register"}
+                    disabled={registerBusy && registerTarget?.id === row.id}
+                    onClick={() => { openRegister(row).catch(() => undefined); }}
+                  >
+                    <UserPlus className="h-4 w-4" strokeWidth={2.25} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={iconButton}
+                  title="Edit"
+                  aria-label="Edit"
+                  onClick={() => { setEditor(row.id); setForm(row); setSelectedTagIds(memberTags[row.id] || []); }}
+                >
+                  <Pencil className="h-4 w-4" strokeWidth={2.25} />
+                </button>
+              </div>
+            </td>
             <td className={`${tdClass} whitespace-nowrap`}>{row.registrationReference ? formatDateTime(row.registeredAt) : ""}</td>
             <td className={`${tdClass} font-semibold`}>{row.fullName}</td>
             <td className={tdClass}>{row.email}</td>
@@ -2412,18 +2443,6 @@ function Members({
             <td className={tdClass}>{row.country}</td>
             <td className={tdClass}>{row.goldClub ? "Yes" : ""}</td>
             <td className={tdClass}>{(memberTags[row.id] || []).map((id) => tags.find((tag) => tag.id === id)?.label).filter(Boolean).join(", ")}</td>
-            <td className={`${tdClass} whitespace-nowrap text-right`}>
-              <div className="flex flex-wrap justify-end gap-3">
-                {row.registrationReference ? (
-                  <button type="button" className={linkButton} onClick={() => onOpenRegistration?.(row.registrationReference!)}>View registration</button>
-                ) : (
-                  <button type="button" className={linkButton} disabled={registerBusy && registerTarget?.id === row.id} onClick={() => { openRegister(row).catch(() => undefined); }}>
-                    {registerBusy && registerTarget?.id === row.id ? "Loading…" : "Register"}
-                  </button>
-                )}
-                <button type="button" className={linkButton} onClick={() => { setEditor(row.id); setForm(row); setSelectedTagIds(memberTags[row.id] || []); }}>Edit</button>
-              </div>
-            </td>
           </tr>
         ))}
       </DataTable>
