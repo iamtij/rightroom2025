@@ -196,9 +196,9 @@ function formatDateTime(value?: string | null) {
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Manila",
-    month: "short",
+    month: "numeric",
     day: "numeric",
-    year: "numeric",
+    year: "2-digit",
     hour: "numeric",
     minute: "2-digit",
     hour12: true,
