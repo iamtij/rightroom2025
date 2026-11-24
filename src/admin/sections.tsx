@@ -661,14 +661,12 @@ function Admins({ onError }: { onError: (message: string) => void }) {
   );
 }
 
-type FocusMember = { id: number; action: "edit" | "register" };
-
 export function AdminSections() {
   const [section, setSection] = useState("Dashboard");
   const [error, setError] = useState("");
   const [role, setRole] = useState<"super" | "admin" | "">("");
   const [focusReference, setFocusReference] = useState<string | null>(null);
-  const [focusMember, setFocusMember] = useState<FocusMember | null>(null);
+  const [focusMemberId, setFocusMemberId] = useState<number | null>(null);
   useEffect(() => {
     api("/api/admin/me").then((me) => setRole(me.role === "super" ? "super" : "admin")).catch(() => setRole("admin"));
   }, []);
@@ -698,8 +696,8 @@ export function AdminSections() {
       {section === "Members" ? (
         <Members
           onError={setError}
-          focusMember={focusMember}
-          onFocusedMember={() => setFocusMember(null)}
+          focusMemberId={focusMemberId}
+          onFocusedMember={() => setFocusMemberId(null)}
           onOpenRegistration={(reference) => { setFocusReference(reference); setSection("Registrations"); }}
         />
       ) : null}
@@ -707,8 +705,7 @@ export function AdminSections() {
         <Chapters
           onError={setError}
           onOpenRegistration={(reference) => { setFocusReference(reference); setSection("Registrations"); }}
-          onEditMember={(id) => { setFocusMember({ id, action: "edit" }); setSection("Members"); }}
-          onRegisterMember={(id) => { setFocusMember({ id, action: "register" }); setSection("Members"); }}
+          onEditMember={(id) => { setFocusMemberId(id); setSection("Members"); }}
         />
       ) : null}
       {section === "Settings" ? <PaymentSettingsScreen role={role} onError={setError} /> : null}
@@ -1918,6 +1915,233 @@ const emptyMember = { fullName: "", email: "", mobile: "", chapter: "", category
 
 type Chapter = { id: number; name: string };
 
+type RegisterMemberTarget = { id: number; fullName: string };
+
+const emptyRegisterDraft = {
+  productCode: "first_mover",
+  paymentPlan: "full",
+  bankReference: "",
+  paidOn: "",
+  amountReceived: "",
+  notes: "",
+  sendEmail: true,
+};
+
+function MemberBankRegisterDialog({
+  target,
+  onClose,
+  onError,
+  onRegistered,
+  onAlreadyRegistered,
+}: {
+  target: RegisterMemberTarget | null;
+  onClose: () => void;
+  onError: (message: string) => void;
+  onRegistered: (reference: string) => void;
+  onAlreadyRegistered?: (reference: string) => void;
+}) {
+  const [options, setOptions] = useState<MemberRegisterOptions | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [draft, setDraft] = useState(emptyRegisterDraft);
+
+  useEffect(() => {
+    if (!target) {
+      setOptions(null);
+      setConfirm(false);
+      setBusy(false);
+      setDraft(emptyRegisterDraft);
+      return;
+    }
+    let cancelled = false;
+    setBusy(true);
+    setConfirm(false);
+    setOptions(null);
+    api(`/api/admin/members/${target.id}/register-options`)
+      .then((payload: MemberRegisterOptions) => {
+        if (cancelled) return;
+        if (payload.registration?.reference) {
+          onClose();
+          onAlreadyRegistered?.(payload.registration.reference);
+          return;
+        }
+        const productCode = payload.defaultProductCode || payload.products[0]?.code || "first_mover";
+        const product = payload.products.find((item) => item.code === productCode) || payload.products[0];
+        const paymentPlan = product?.allowsInstallment ? "installment" : "full";
+        const quote = paymentPlan === "installment" ? product?.installment : product?.full;
+        setOptions(payload);
+        setDraft({
+          productCode,
+          paymentPlan,
+          bankReference: "",
+          paidOn: payload.today || "",
+          amountReceived: quote ? String(quote.dueTodayCents / 100) : "",
+          notes: "",
+          sendEmail: true,
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        onClose();
+        onError(error instanceof Error ? error.message : "Could not load registration options");
+      })
+      .finally(() => {
+        if (!cancelled) setBusy(false);
+      });
+    return () => { cancelled = true; };
+  }, [target?.id]);
+
+  if (!target) return null;
+
+  const product = options?.products.find((item) => item.code === draft.productCode) || null;
+  const quote = product
+    ? (draft.paymentPlan === "installment" ? product.installment : product.full)
+    : null;
+
+  function updatePlan(productCode: string, paymentPlan: string) {
+    const nextProduct = options?.products.find((item) => item.code === productCode);
+    const plan = paymentPlan === "installment" && nextProduct?.allowsInstallment ? "installment" : "full";
+    const nextQuote = plan === "installment" ? nextProduct?.installment : nextProduct?.full;
+    setDraft((current) => ({
+      ...current,
+      productCode,
+      paymentPlan: plan,
+      amountReceived: nextQuote ? String(nextQuote.dueTodayCents / 100) : current.amountReceived,
+    }));
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!target || !confirm || !quote) return;
+    setBusy(true);
+    try {
+      const amountText = draft.amountReceived.trim();
+      const amountReceivedCents = amountText === "" ? null : Math.round(Number(amountText) * 100);
+      if (amountText !== "" && (!Number.isFinite(amountReceivedCents) || (amountReceivedCents ?? 0) < 0)) {
+        throw new Error("Amount received must be a valid number.");
+      }
+      const created = await api(`/api/admin/members/${target.id}/register`, {
+        method: "POST",
+        body: JSON.stringify({
+          productCode: draft.productCode,
+          paymentPlan: draft.paymentPlan,
+          bankReference: draft.bankReference.trim(),
+          paidOn: draft.paidOn,
+          amountReceivedCents,
+          notes: draft.notes.trim(),
+          sendEmail: draft.sendEmail,
+        }),
+      });
+      onClose();
+      if (created?.reference) onRegistered(created.reference);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not register the member");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!options) {
+    return busy ? (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#141416]/45 px-4" role="status" aria-live="polite">
+        <p className="m-0 rounded-[14px] border border-[#E4E1DC] bg-[#FDFCFA] px-4 py-3 text-sm text-[#5C5C63]">Loading registration…</p>
+      </div>
+    ) : null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#141416]/45 px-4" role="dialog" aria-modal="true" aria-labelledby="member-register-title">
+      <form className="max-h-[90vh] w-full max-w-[520px] overflow-y-auto rounded-[16px] border border-[#E4E1DC] bg-[#FDFCFA] p-5 shadow-[0_18px_50px_rgba(20,20,22,0.18)]" onSubmit={submit}>
+        <p className="m-0 text-xs font-bold tracking-[0.16em] text-[#A8131F] uppercase">IBMC 2027 · Bank register</p>
+        <h2 id="member-register-title" className="m-0 mt-2 font-archivo text-[26px] leading-tight font-extrabold">Register {target.fullName}?</h2>
+        <p className="m-0 mt-2 text-sm leading-normal text-[#5C5C63]">
+          Creates a registration and records the opening bank payment. Ask first, then confirm below.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <Field label="Ticket">
+            <select className={field} value={draft.productCode} onChange={(event) => updatePlan(event.target.value, draft.paymentPlan)}>
+              {options.products.map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.name}{item.inSalesWindow ? " · active" : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Payment plan">
+            <select className={field} value={draft.paymentPlan} onChange={(event) => updatePlan(draft.productCode, event.target.value)}>
+              <option value="full">Full payment</option>
+              {product?.allowsInstallment ? <option value="installment">Installment</option> : null}
+            </select>
+          </Field>
+          <Field label="Bank reference">
+            <input
+              className={field}
+              required={(quote?.dueTodayCents || 0) > 0}
+              value={draft.bankReference}
+              onChange={(event) => setDraft({ ...draft, bankReference: event.target.value })}
+              placeholder="Deposit / transfer reference"
+            />
+          </Field>
+          <Field label="Date paid">
+            <input className={field} type="date" value={draft.paidOn} onChange={(event) => setDraft({ ...draft, paidOn: event.target.value })} />
+          </Field>
+          <Field label="Amount received">
+            <input
+              className={field}
+              inputMode="decimal"
+              value={draft.amountReceived}
+              onChange={(event) => setDraft({ ...draft, amountReceived: event.target.value })}
+              placeholder={quote ? String(quote.dueTodayCents / 100) : ""}
+            />
+          </Field>
+          <Field label="Notes">
+            <input
+              className={field}
+              value={draft.notes}
+              onChange={(event) => setDraft({ ...draft, notes: event.target.value })}
+              placeholder="Optional bank details"
+            />
+          </Field>
+        </div>
+        <div className="mt-3 rounded-[12px] border border-[#E4E1DC] bg-white px-3 py-3 text-sm text-[#3A3A40]">
+          {quote ? (
+            <>
+              <p className="m-0 font-semibold">{quote.productName} · {draft.paymentPlan === "installment" ? "Installment" : "Full"}</p>
+              <p className="m-0 mt-1">
+                Due today {money(quote.dueTodayCents, quote.currency)}
+                {quote.discountCents > 0 ? ` · Gold saves ${money(quote.discountCents, quote.currency)}` : ""}
+                {" · "}Ticket total {money(quote.totalCents, quote.currency)}
+              </p>
+              {quote.goldReward && quote.goldReward !== "GOLD_NONE" ? (
+                <p className="m-0 mt-1 text-[#5C5C63]">Gold reward: {quote.goldReward.replace("GOLD_", "")}</p>
+              ) : null}
+              <p className="m-0 mt-1 text-[13px] text-[#5C5C63]">
+                Settlement uses the schedule amount above. Amount received is kept in the payment notes for audit.
+              </p>
+            </>
+          ) : (
+            <p className="m-0 text-[#A8131F]">This ticket/plan is not available.</p>
+          )}
+        </div>
+        <label className="mt-3 flex items-center gap-2 text-sm font-semibold">
+          <input type="checkbox" className="h-5 w-5 accent-[#D0202E]" checked={draft.sendEmail} onChange={(event) => setDraft({ ...draft, sendEmail: event.target.checked })} />
+          Send payment confirmation / entry pass email
+        </label>
+        <label className="mt-3 flex items-start gap-2 text-sm font-semibold">
+          <input type="checkbox" className="mt-0.5 h-5 w-5 accent-[#D0202E]" checked={confirm} onChange={(event) => setConfirm(event.target.checked)} />
+          <span>I confirmed this bank payment and want to register {target.fullName} now.</span>
+        </label>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <button type="submit" className={buttonClass} disabled={busy || !confirm || !quote}>
+            {busy ? "Registering…" : "Register with bank payment"}
+          </button>
+          <button type="button" className={ghostButton} disabled={busy} onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 type ChapterProgressMember = {
   id: number;
   fullName: string;
@@ -1944,12 +2168,10 @@ function Chapters({
   onError,
   onOpenRegistration,
   onEditMember,
-  onRegisterMember,
 }: {
   onError: (message: string) => void;
   onOpenRegistration?: (reference: string) => void;
   onEditMember?: (id: number) => void;
-  onRegisterMember?: (id: number) => void;
 }) {
   const [rows, setRows] = useState<Chapter[]>([]);
   const [progress, setProgress] = useState<ChapterProgress[]>([]);
@@ -1958,6 +2180,7 @@ function Chapters({
   const [managing, setManaging] = useState(false);
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [registerTarget, setRegisterTarget] = useState<RegisterMemberTarget | null>(null);
 
   async function load() {
     const [chapterRows, progressRows] = await Promise.all([
@@ -2099,7 +2322,13 @@ function Chapters({
                                             <Ticket className="h-4 w-4" strokeWidth={2.25} />
                                           </button>
                                         ) : (
-                                          <button type="button" className={iconButton} title="Register" aria-label="Register" onClick={() => onRegisterMember?.(member.id)}>
+                                          <button
+                                            type="button"
+                                            className={iconButton}
+                                            title="Register"
+                                            aria-label="Register"
+                                            onClick={() => setRegisterTarget({ id: member.id, fullName: member.fullName })}
+                                          >
                                             <UserPlus className="h-4 w-4" strokeWidth={2.25} />
                                           </button>
                                         )}
@@ -2138,6 +2367,19 @@ function Chapters({
           )}
         </div>
       )}
+      <MemberBankRegisterDialog
+        target={registerTarget}
+        onClose={() => setRegisterTarget(null)}
+        onError={onError}
+        onAlreadyRegistered={(reference) => onOpenRegistration?.(reference)}
+        onRegistered={async () => {
+          try {
+            setProgress(await api("/api/admin/chapters/progress"));
+          } catch (error) {
+            onError(error instanceof Error ? error.message : "Could not refresh chapter progress");
+          }
+        }}
+      />
     </section>
   );
 }
@@ -2147,12 +2389,12 @@ const memberPageSize = 20;
 function Members({
   onError,
   onOpenRegistration,
-  focusMember = null,
+  focusMemberId = null,
   onFocusedMember,
 }: {
   onError: (message: string) => void;
   onOpenRegistration?: (reference: string) => void;
-  focusMember?: FocusMember | null;
+  focusMemberId?: number | null;
   onFocusedMember?: () => void;
 }) {
   const [rows, setRows] = useState<Member[]>([]);
@@ -2166,19 +2408,7 @@ function Members({
   const [goldFilter, setGoldFilter] = useState("all");
   const [rewardFilter, setRewardFilter] = useState("");
   const [page, setPage] = useState(1);
-  const [registerTarget, setRegisterTarget] = useState<Member | null>(null);
-  const [registerOptions, setRegisterOptions] = useState<MemberRegisterOptions | null>(null);
-  const [registerBusy, setRegisterBusy] = useState(false);
-  const [registerConfirm, setRegisterConfirm] = useState(false);
-  const [registerDraft, setRegisterDraft] = useState({
-    productCode: "first_mover",
-    paymentPlan: "full",
-    bankReference: "",
-    paidOn: "",
-    amountReceived: "",
-    notes: "",
-    sendEmail: true,
-  });
+  const [registerTarget, setRegisterTarget] = useState<RegisterMemberTarget | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   async function load() {
@@ -2249,119 +2479,19 @@ function Members({
     }
   }
 
-  async function openRegister(row: Member) {
-    setRegisterBusy(true);
-    setRegisterConfirm(false);
-    setRegisterTarget(row);
-    setRegisterOptions(null);
-    try {
-      const options = await api(`/api/admin/members/${row.id}/register-options`) as MemberRegisterOptions;
-      if (options.registration?.reference) {
-        setRegisterTarget(null);
-        onOpenRegistration?.(options.registration.reference);
-        return;
-      }
-      const productCode = options.defaultProductCode || options.products[0]?.code || "first_mover";
-      const product = options.products.find((item) => item.code === productCode) || options.products[0];
-      const paymentPlan = product?.allowsInstallment ? "installment" : "full";
-      const quote = paymentPlan === "installment" ? product?.installment : product?.full;
-      setRegisterOptions(options);
-      setRegisterDraft({
-        productCode,
-        paymentPlan,
-        bankReference: "",
-        paidOn: options.today || "",
-        amountReceived: quote ? String(quote.dueTodayCents / 100) : "",
-        notes: "",
-        sendEmail: true,
-      });
-    } catch (error) {
-      setRegisterTarget(null);
-      onError(error instanceof Error ? error.message : "Could not load registration options");
-    } finally {
-      setRegisterBusy(false);
-    }
-  }
-
   useEffect(() => {
-    if (!focusMember || !loaded) return;
-    const row = rows.find((member) => member.id === focusMember.id);
+    if (!focusMemberId || !loaded) return;
+    const row = rows.find((member) => member.id === focusMemberId);
     if (!row) {
       onError("That member was not found.");
       onFocusedMember?.();
       return;
     }
-    if (focusMember.action === "edit") {
-      setEditor(row.id);
-      setForm(row);
-      setSelectedTagIds(memberTags[row.id] || []);
-      onFocusedMember?.();
-      return;
-    }
-    openRegister(row).finally(() => onFocusedMember?.());
-  }, [focusMember, loaded, rows]);
-
-  function closeRegister() {
-    setRegisterTarget(null);
-    setRegisterOptions(null);
-    setRegisterConfirm(false);
-    setRegisterBusy(false);
-  }
-
-  function selectedRegisterProduct() {
-    return registerOptions?.products.find((item) => item.code === registerDraft.productCode) || null;
-  }
-
-  function selectedRegisterQuote() {
-    const product = selectedRegisterProduct();
-    if (!product) return null;
-    return registerDraft.paymentPlan === "installment" ? product.installment : product.full;
-  }
-
-  function updateRegisterPlan(productCode: string, paymentPlan: string) {
-    const product = registerOptions?.products.find((item) => item.code === productCode);
-    const plan = paymentPlan === "installment" && product?.allowsInstallment ? "installment" : "full";
-    const quote = plan === "installment" ? product?.installment : product?.full;
-    setRegisterDraft((current) => ({
-      ...current,
-      productCode,
-      paymentPlan: plan,
-      amountReceived: quote ? String(quote.dueTodayCents / 100) : current.amountReceived,
-    }));
-  }
-
-  async function submitRegister(event: FormEvent) {
-    event.preventDefault();
-    if (!registerTarget || !registerConfirm) return;
-    const quote = selectedRegisterQuote();
-    setRegisterBusy(true);
-    try {
-      const amountText = registerDraft.amountReceived.trim();
-      const amountReceivedCents = amountText === "" ? null : Math.round(Number(amountText) * 100);
-      if (amountText !== "" && (!Number.isFinite(amountReceivedCents) || (amountReceivedCents ?? 0) < 0)) {
-        throw new Error("Amount received must be a valid number.");
-      }
-      const created = await api(`/api/admin/members/${registerTarget.id}/register`, {
-        method: "POST",
-        body: JSON.stringify({
-          productCode: registerDraft.productCode,
-          paymentPlan: registerDraft.paymentPlan,
-          bankReference: registerDraft.bankReference.trim(),
-          paidOn: registerDraft.paidOn,
-          amountReceivedCents,
-          notes: registerDraft.notes.trim(),
-          sendEmail: registerDraft.sendEmail,
-        }),
-      });
-      closeRegister();
-      await load();
-      if (created?.reference) onOpenRegistration?.(created.reference);
-    } catch (error) {
-      onError(error instanceof Error ? error.message : "Could not register the member");
-    } finally {
-      setRegisterBusy(false);
-    }
-  }
+    setEditor(row.id);
+    setForm(row);
+    setSelectedTagIds(memberTags[row.id] || []);
+    onFocusedMember?.();
+  }, [focusMemberId, loaded, rows]);
 
   const visible = rows.filter((row) => {
     if (goldFilter === "gold" && !row.goldClub) return false;
@@ -2373,8 +2503,6 @@ function Members({
   const pageStart = (currentPage - 1) * memberPageSize;
   const pageRows = visible.slice(pageStart, pageStart + memberPageSize);
   const empty = rows.length === 0 ? "No members yet." : visible.length === 0 ? "No members match that search." : "";
-  const registerQuote = selectedRegisterQuote();
-  const registerProduct = selectedRegisterProduct();
 
   return (
     <section className="flex flex-col gap-3">
@@ -2473,10 +2601,9 @@ function Members({
                   <button
                     type="button"
                     className={iconButton}
-                    title={registerBusy && registerTarget?.id === row.id ? "Loading…" : "Register"}
-                    aria-label={registerBusy && registerTarget?.id === row.id ? "Loading" : "Register"}
-                    disabled={registerBusy && registerTarget?.id === row.id}
-                    onClick={() => { openRegister(row).catch(() => undefined); }}
+                    title="Register"
+                    aria-label="Register"
+                    onClick={() => setRegisterTarget({ id: row.id, fullName: row.fullName })}
                   >
                     <UserPlus className="h-4 w-4" strokeWidth={2.25} />
                   </button>
@@ -2507,120 +2634,20 @@ function Members({
           </tr>
         ))}
       </DataTable>
-      {registerTarget && registerOptions ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#141416]/45 px-4" role="dialog" aria-modal="true" aria-labelledby="member-register-title">
-          <form className="max-h-[90vh] w-full max-w-[520px] overflow-y-auto rounded-[16px] border border-[#E4E1DC] bg-[#FDFCFA] p-5 shadow-[0_18px_50px_rgba(20,20,22,0.18)]" onSubmit={submitRegister}>
-            <p className="m-0 text-xs font-bold tracking-[0.16em] text-[#A8131F] uppercase">IBMC 2027 · Bank register</p>
-            <h2 id="member-register-title" className="m-0 mt-2 font-archivo text-[26px] leading-tight font-extrabold">Register {registerTarget.fullName}?</h2>
-            <p className="m-0 mt-2 text-sm leading-normal text-[#5C5C63]">
-              Creates a registration and records the opening bank payment. Ask first, then confirm below.
-            </p>
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <Field label="Ticket">
-                <select
-                  className={field}
-                  value={registerDraft.productCode}
-                  onChange={(event) => updateRegisterPlan(event.target.value, registerDraft.paymentPlan)}
-                >
-                  {registerOptions.products.map((product) => (
-                    <option key={product.code} value={product.code}>
-                      {product.name}{product.inSalesWindow ? " · active" : ""}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="Payment plan">
-                <select
-                  className={field}
-                  value={registerDraft.paymentPlan}
-                  onChange={(event) => updateRegisterPlan(registerDraft.productCode, event.target.value)}
-                >
-                  <option value="full">Full payment</option>
-                  {registerProduct?.allowsInstallment ? <option value="installment">Installment</option> : null}
-                </select>
-              </Field>
-              <Field label="Bank reference">
-                <input
-                  className={field}
-                  required={(registerQuote?.dueTodayCents || 0) > 0}
-                  value={registerDraft.bankReference}
-                  onChange={(event) => setRegisterDraft({ ...registerDraft, bankReference: event.target.value })}
-                  placeholder="Deposit / transfer reference"
-                />
-              </Field>
-              <Field label="Date paid">
-                <input
-                  className={field}
-                  type="date"
-                  value={registerDraft.paidOn}
-                  onChange={(event) => setRegisterDraft({ ...registerDraft, paidOn: event.target.value })}
-                />
-              </Field>
-              <Field label="Amount received">
-                <input
-                  className={field}
-                  inputMode="decimal"
-                  value={registerDraft.amountReceived}
-                  onChange={(event) => setRegisterDraft({ ...registerDraft, amountReceived: event.target.value })}
-                  placeholder={registerQuote ? String(registerQuote.dueTodayCents / 100) : ""}
-                />
-              </Field>
-              <Field label="Notes">
-                <input
-                  className={field}
-                  value={registerDraft.notes}
-                  onChange={(event) => setRegisterDraft({ ...registerDraft, notes: event.target.value })}
-                  placeholder="Optional bank details"
-                />
-              </Field>
-            </div>
-            <div className="mt-3 rounded-[12px] border border-[#E4E1DC] bg-white px-3 py-3 text-sm text-[#3A3A40]">
-              {registerQuote ? (
-                <>
-                  <p className="m-0 font-semibold">{registerQuote.productName} · {registerDraft.paymentPlan === "installment" ? "Installment" : "Full"}</p>
-                  <p className="m-0 mt-1">
-                    Due today {money(registerQuote.dueTodayCents, registerQuote.currency)}
-                    {registerQuote.discountCents > 0 ? ` · Gold saves ${money(registerQuote.discountCents, registerQuote.currency)}` : ""}
-                    {" · "}Ticket total {money(registerQuote.totalCents, registerQuote.currency)}
-                  </p>
-                  {registerQuote.goldReward && registerQuote.goldReward !== "GOLD_NONE" ? (
-                    <p className="m-0 mt-1 text-[#5C5C63]">Gold reward: {registerQuote.goldReward.replace("GOLD_", "")}</p>
-                  ) : null}
-                  <p className="m-0 mt-1 text-[13px] text-[#5C5C63]">
-                    Settlement uses the schedule amount above. Amount received is kept in the payment notes for audit.
-                  </p>
-                </>
-              ) : (
-                <p className="m-0 text-[#A8131F]">This ticket/plan is not available.</p>
-              )}
-            </div>
-            <label className="mt-3 flex items-center gap-2 text-sm font-semibold">
-              <input
-                type="checkbox"
-                className="h-5 w-5 accent-[#D0202E]"
-                checked={registerDraft.sendEmail}
-                onChange={(event) => setRegisterDraft({ ...registerDraft, sendEmail: event.target.checked })}
-              />
-              Send payment confirmation / entry pass email
-            </label>
-            <label className="mt-3 flex items-start gap-2 text-sm font-semibold">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-5 w-5 accent-[#D0202E]"
-                checked={registerConfirm}
-                onChange={(event) => setRegisterConfirm(event.target.checked)}
-              />
-              <span>I confirmed this bank payment and want to register {registerTarget.fullName} now.</span>
-            </label>
-            <div className="mt-5 flex flex-wrap gap-2">
-              <button type="submit" className={buttonClass} disabled={registerBusy || !registerConfirm || !registerQuote}>
-                {registerBusy ? "Registering…" : "Register with bank payment"}
-              </button>
-              <button type="button" className={ghostButton} disabled={registerBusy} onClick={closeRegister}>Cancel</button>
-            </div>
-          </form>
-        </div>
-      ) : null}
+      <MemberBankRegisterDialog
+        target={registerTarget}
+        onClose={() => setRegisterTarget(null)}
+        onError={onError}
+        onAlreadyRegistered={(reference) => onOpenRegistration?.(reference)}
+        onRegistered={async (reference) => {
+          try {
+            await load();
+          } catch (error) {
+            onError(error instanceof Error ? error.message : "Could not refresh members");
+          }
+          onOpenRegistration?.(reference);
+        }}
+      />
     </section>
   );
 }
