@@ -661,11 +661,14 @@ function Admins({ onError }: { onError: (message: string) => void }) {
   );
 }
 
+type FocusMember = { id: number; action: "edit" | "register" };
+
 export function AdminSections() {
   const [section, setSection] = useState("Dashboard");
   const [error, setError] = useState("");
   const [role, setRole] = useState<"super" | "admin" | "">("");
   const [focusReference, setFocusReference] = useState<string | null>(null);
+  const [focusMember, setFocusMember] = useState<FocusMember | null>(null);
   useEffect(() => {
     api("/api/admin/me").then((me) => setRole(me.role === "super" ? "super" : "admin")).catch(() => setRole("admin"));
   }, []);
@@ -692,8 +695,22 @@ export function AdminSections() {
       {section === "Schedule" ? <Schedules onError={setError} /> : null}
       {section === "Templates" ? <Templates onError={setError} /> : null}
       {section === "Messaging" ? <Messaging onError={setError} /> : null}
-      {section === "Members" ? <Members onError={setError} onOpenRegistration={(reference) => { setFocusReference(reference); setSection("Registrations"); }} /> : null}
-      {section === "Chapters" ? <Chapters onError={setError} onOpenRegistration={(reference) => { setFocusReference(reference); setSection("Registrations"); }} /> : null}
+      {section === "Members" ? (
+        <Members
+          onError={setError}
+          focusMember={focusMember}
+          onFocusedMember={() => setFocusMember(null)}
+          onOpenRegistration={(reference) => { setFocusReference(reference); setSection("Registrations"); }}
+        />
+      ) : null}
+      {section === "Chapters" ? (
+        <Chapters
+          onError={setError}
+          onOpenRegistration={(reference) => { setFocusReference(reference); setSection("Registrations"); }}
+          onEditMember={(id) => { setFocusMember({ id, action: "edit" }); setSection("Members"); }}
+          onRegisterMember={(id) => { setFocusMember({ id, action: "register" }); setSection("Members"); }}
+        />
+      ) : null}
       {section === "Settings" ? <PaymentSettingsScreen role={role} onError={setError} /> : null}
       {section === "Admins" && role === "super" ? <Admins onError={setError} /> : null}
     </div>
@@ -1926,9 +1943,13 @@ type ChapterProgress = {
 function Chapters({
   onError,
   onOpenRegistration,
+  onEditMember,
+  onRegisterMember,
 }: {
   onError: (message: string) => void;
   onOpenRegistration?: (reference: string) => void;
+  onEditMember?: (id: number) => void;
+  onRegisterMember?: (id: number) => void;
 }) {
   const [rows, setRows] = useState<Chapter[]>([]);
   const [progress, setProgress] = useState<ChapterProgress[]>([]);
@@ -2070,13 +2091,29 @@ function Chapters({
                             ) : (
                               <div className="flex flex-col gap-2">
                                 {row.members.map((member) => (
-                                  <div key={member.id} className="flex flex-wrap items-baseline justify-between gap-2 border-b border-[#F0EDE8] pb-2 last:border-b-0 last:pb-0">
-                                    <div>
-                                      <p className="m-0 font-semibold">{member.fullName}</p>
-                                      <p className="m-0 text-[13px] text-[#5C5C63]">{member.email} · {member.mobile}</p>
-                                      {member.registered && member.registeredAt ? (
-                                        <p className="m-0 text-[13px] text-[#5C5C63]">Registered {formatDateTime(member.registeredAt)}</p>
-                                      ) : null}
+                                  <div key={member.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-[#F0EDE8] pb-2 last:border-b-0 last:pb-0">
+                                    <div className="flex min-w-0 items-start gap-1">
+                                      <div className="flex shrink-0 items-center gap-0.5 pt-0.5">
+                                        {member.reference ? (
+                                          <button type="button" className={iconButton} title="View registration" aria-label="View registration" onClick={() => onOpenRegistration?.(member.reference!)}>
+                                            <Ticket className="h-4 w-4" strokeWidth={2.25} />
+                                          </button>
+                                        ) : (
+                                          <button type="button" className={iconButton} title="Register" aria-label="Register" onClick={() => onRegisterMember?.(member.id)}>
+                                            <UserPlus className="h-4 w-4" strokeWidth={2.25} />
+                                          </button>
+                                        )}
+                                        <button type="button" className={iconButton} title="Edit" aria-label="Edit" onClick={() => onEditMember?.(member.id)}>
+                                          <Pencil className="h-4 w-4" strokeWidth={2.25} />
+                                        </button>
+                                      </div>
+                                      <div className="min-w-0">
+                                        <p className="m-0 font-semibold">{member.fullName}</p>
+                                        <p className="m-0 text-[13px] text-[#5C5C63]">{member.email} · {member.mobile}</p>
+                                        {member.registered && member.registeredAt ? (
+                                          <p className="m-0 text-[13px] text-[#5C5C63]">Registered {formatDateTime(member.registeredAt)}</p>
+                                        ) : null}
+                                      </div>
                                     </div>
                                     <div className="flex flex-wrap items-center gap-3 text-right">
                                       <span className="text-sm text-[#5C5C63]">{member.planLabel}</span>
@@ -2110,9 +2147,13 @@ const memberPageSize = 20;
 function Members({
   onError,
   onOpenRegistration,
+  focusMember = null,
+  onFocusedMember,
 }: {
   onError: (message: string) => void;
   onOpenRegistration?: (reference: string) => void;
+  focusMember?: FocusMember | null;
+  onFocusedMember?: () => void;
 }) {
   const [rows, setRows] = useState<Member[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -2138,6 +2179,7 @@ function Members({
     notes: "",
     sendEmail: true,
   });
+  const [loaded, setLoaded] = useState(false);
 
   async function load() {
     const [members, chapterRows, tagRows, assignments] = await Promise.all([
@@ -2150,6 +2192,7 @@ function Members({
     setChapters(chapterRows);
     setTags(tagRows);
     setMemberTags(assignments.members || {});
+    setLoaded(true);
   }
   useEffect(() => { load().catch((error) => onError(error.message)); }, []);
 
@@ -2239,6 +2282,24 @@ function Members({
       setRegisterBusy(false);
     }
   }
+
+  useEffect(() => {
+    if (!focusMember || !loaded) return;
+    const row = rows.find((member) => member.id === focusMember.id);
+    if (!row) {
+      onError("That member was not found.");
+      onFocusedMember?.();
+      return;
+    }
+    if (focusMember.action === "edit") {
+      setEditor(row.id);
+      setForm(row);
+      setSelectedTagIds(memberTags[row.id] || []);
+      onFocusedMember?.();
+      return;
+    }
+    openRegister(row).finally(() => onFocusedMember?.());
+  }, [focusMember, loaded, rows]);
 
   function closeRegister() {
     setRegisterTarget(null);
