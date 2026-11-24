@@ -191,7 +191,18 @@ function titleCase(value: string) {
 
 function formatDateTime(value?: string | null) {
   if (!value) return "";
-  return String(value).slice(0, 16).replace("T", " ");
+  const raw = String(value).trim();
+  const date = raw.includes("T") ? new Date(raw) : new Date(`${raw.replace(" ", "T")}Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
 }
 
 function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
@@ -868,7 +879,7 @@ function RegistrationView({
               <tbody>
                 {(row.transactions || []).map((item) => (
                   <tr key={`${item.provider}-${item.reference}-${item.at}`}>
-                    <td className={tdClass}>{item.at ? String(item.at).slice(0, 16).replace("T", " ") : "—"}</td>
+                    <td className={tdClass}>{item.at ? formatDateTime(item.at) || "—" : "—"}</td>
                     <td className={tdClass}>{item.provider}</td>
                     <td className={tdClass}>{item.channel || "—"}</td>
                     <td className={tdClass}>{titleCase(item.status || "")}</td>
