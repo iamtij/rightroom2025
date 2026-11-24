@@ -84,6 +84,22 @@ export function findRegistrationByContact(db, query) {
   return resolveRegistrationByContact(db, query).registration;
 }
 
+/** True once any installment/full payment has been recorded for this registration. */
+export function registrationHasRecordedPayment(db, registrationId) {
+  const id = Number(registrationId);
+  if (!id) return false;
+  const payment = db.prepare("SELECT 1 AS ok FROM payments WHERE registration_id = ? LIMIT 1").get(id);
+  if (payment) return true;
+  const installment = db.prepare(`
+    SELECT 1 AS ok FROM registration_installments
+    WHERE registration_id = ? AND (amount_paid_cents > 0 OR status = 'paid')
+    LIMIT 1
+  `).get(id);
+  if (installment) return true;
+  const row = db.prepare("SELECT fully_paid_at FROM registrations WHERE id = ?").get(id);
+  return Boolean(row?.fully_paid_at);
+}
+
 export function getRegistration(db, id) {
   const registration = db.prepare(`
     SELECT r.*, p.name AS product_name, p.code AS product_code, p.fee_bearer AS fee_bearer

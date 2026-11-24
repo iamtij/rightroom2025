@@ -15,10 +15,10 @@ import { listFirstPaymentBackfillTargets } from "./backfill-payment-confirmation
 import { sendEntryPassForRegistration, sendPaymentConfirmation, syncBuiltinSchedule } from "./reminders.js";
 import { dashboardStats } from "./dashboard.js";
 import { importChapters, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
-import { listMembers, lookupMember, memberContactClash, memberFromProof, memberPreview, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
+import { listMembers, lookupMember, memberContactClash, memberFromProof, memberOwnedRegistration, memberPreview, memberRequiresOtp, parseMemberCsv, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
 import { presentCoupon, priceCoupon } from "./coupons.js";
 import { parseLookupContact } from "./contact.js";
-import { maskEmail, readMemberEditToken, sendMemberOtp, sendRegistrationOtp, verifyMemberOtp, verifyRegistrationOtp } from "./otp.js";
+import { maskEmail, memberEditToken, readMemberEditToken, sendMemberOtp, sendRegistrationOtp, verifyMemberOtp, verifyRegistrationOtp } from "./otp.js";
 import { rateLimit } from "./limits.js";
 import { formatLongDate, manilaParts } from "./time.js";
 import { handleUpayCallback, refreshUpayPayment, startUpayPayment, upayPublicCheckoutInfo } from "./upay.js";
@@ -542,13 +542,54 @@ export function createApi() {
       res.json({ ok: true, found: false });
       return;
     }
+    const member = lookupMember(db(), contact.value);
     res.json({
       ok: true,
       found: true,
       firstName: preview.firstName,
       chapter: preview.chapter,
       maskedEmail: maskEmail(preview.email),
+      requiresOtp: member ? memberRequiresOtp(db(), member) : false,
     });
+  });
+
+  function presentMemberAccess(res, member, owned) {
+    const registered = Boolean(owned);
+    const { id, ...visible } = member;
+    const body = {
+      ok: true,
+      editToken: memberEditToken(String(member.email || "").trim().toLowerCase()),
+      member: { ...visible, registered, memberToken: toPublicMember(member, registered).memberToken },
+    };
+    if (owned) {
+      const registration = ensureResumeToken(db(), owned);
+      attachResume(res, registration);
+      body.registration = present(registration, { resume: true });
+    }
+    return body;
+  }
+
+  router.post("/members/claim", memberLookupLimit, (req, res) => {
+    const contact = parseLookupContact(req.body?.query || req.body?.email);
+    if (contact.error) {
+      res.status(contact.status || 400).json({ error: contact.error });
+      return;
+    }
+    const member = lookupMember(db(), contact.value);
+    if (!member) {
+      res.status(404).json({ error: "We couldn't find that membership" });
+      return;
+    }
+    const owned = memberOwnedRegistration(db(), member);
+    if (owned && memberRequiresOtp(db(), member)) {
+      res.status(401).json({
+        error: "Confirm the code we emailed you.",
+        requiresOtp: true,
+        maskedEmail: maskEmail(String(member.email || "").trim().toLowerCase()),
+      });
+      return;
+    }
+    res.json(presentMemberAccess(res, member, owned));
   });
 
   router.post("/members/otp", otpLimit, async (req, res) => {
@@ -576,28 +617,9 @@ export function createApi() {
       res.status(400).json({ error: "That code is wrong." });
       return;
     }
-    const email = String(member.email || "").trim().toLowerCase();
-    const byEmail = email ? findRegistrationByContact(db(), email) : null;
-    const emailOwned = byEmail
-      && byEmail.status === "confirmed"
-      && String(byEmail.email || "").trim().toLowerCase() === email
-      ? byEmail
-      : null;
-    const byMobile = member.mobile ? findRegistrationByContact(db(), member.mobile) : null;
-    const mobileOwned = byMobile && byMobile.status === "confirmed" ? byMobile : null;
-    const owned = emailOwned || mobileOwned;
-    const registered = Boolean(owned);
-    const { id, ...visible } = member;
-    const body = {
-      ok: true,
-      editToken: result.editToken,
-      member: { ...visible, registered, memberToken: toPublicMember(member, registered).memberToken },
-    };
-    if (owned) {
-      const registration = ensureResumeToken(db(), owned);
-      attachResume(res, registration);
-      body.registration = present(registration, { resume: true });
-    }
+    const owned = memberOwnedRegistration(db(), member);
+    const body = presentMemberAccess(res, member, owned);
+    body.editToken = result.editToken;
     res.json(body);
   });
 

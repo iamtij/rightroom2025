@@ -1,5 +1,6 @@
 import { createHmac, timingSafeEqual } from "crypto";
 import { memberGoldOffer, syncMemberRewards } from "./gold-club.js";
+import { findRegistrationByContact, registrationHasRecordedPayment } from "./registrations.js";
 
 const STATUSES = new Set(["updated", "delayed", "cancelled"]);
 const GOLD_REWARDS = new Set(["GOLD_FREE", "GOLD_50", "GOLD_3000"]);
@@ -38,6 +39,28 @@ export function memberPreview(db, query) {
     chapter: String(row.chapter || "").trim(),
     email,
   };
+}
+
+/** Confirmed registration owned by this member email or mobile, if any. */
+export function memberOwnedRegistration(db, member) {
+  if (!member) return null;
+  const email = String(member.email || "").trim().toLowerCase();
+  const byEmail = email ? findRegistrationByContact(db, email) : null;
+  const emailOwned = byEmail
+    && byEmail.status === "confirmed"
+    && String(byEmail.email || "").trim().toLowerCase() === email
+    ? byEmail
+    : null;
+  const mobile = String(member.mobile || "").trim();
+  const byMobile = mobile ? findRegistrationByContact(db, mobile) : null;
+  const mobileOwned = byMobile && byMobile.status === "confirmed" ? byMobile : null;
+  return emailOwned || mobileOwned || null;
+}
+
+/** OTP is required only after the member has paid (installment or full). */
+export function memberRequiresOtp(db, member) {
+  const owned = memberOwnedRegistration(db, member);
+  return Boolean(owned && registrationHasRecordedPayment(db, owned.id));
 }
 
 export function signMemberProof(memberId) {

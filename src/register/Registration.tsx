@@ -781,7 +781,7 @@ function ResendCodeButton({ secondsLeft, busy = false, onClick }: { secondsLeft:
   );
 }
 
-function membershipHoldNote(member: FoundMember, editing: boolean) {
+function membershipHoldNote(member: FoundMember, needsCode: boolean) {
   if (member.profileReady) return "";
   const person = memberAttendee(member);
   const checks: Array<[string, string]> = [
@@ -798,9 +798,9 @@ function membershipHoldNote(member: FoundMember, editing: boolean) {
   if (!missing.length) return "";
   const listed = missing.length === 1 ? `your ${missing[0]}` : `your ${missing.slice(0, -1).join(", ")} and ${missing[missing.length - 1]}`;
   const add = missing.length === 1 ? "add it" : "add them";
-  const next = editing
+  const next = needsCode
     ? `Enter the code, then ${add}.`
-    : `Tap Edit my details, enter the code we email you, and ${add}.`;
+    : `Tap Edit my details and ${add}.`;
   return `We can't continue yet. Your membership is missing ${listed}. ${next}`;
 }
 
@@ -814,8 +814,9 @@ function RegistrationWizard() {
   const [searching, setSearching] = useState(false);
   const [lookupError, setLookupError] = useState("");
   const [member, setMember] = useState<FoundMember | null>(null);
-  const [memberPreview, setMemberPreview] = useState<{ firstName: string; chapter: string; maskedEmail: string } | null>(null);
+  const [memberPreview, setMemberPreview] = useState<{ firstName: string; chapter: string; maskedEmail: string; requiresOtp: boolean } | null>(null);
   const editAfterCode = useRef(false);
+  const [claimBusy, setClaimBusy] = useState(false);
   const [otpSentTo, setOtpSentTo] = useState("");
   const [otpCode, setOtpCode] = useState("");
   const [otpError, setOtpError] = useState("");
@@ -997,6 +998,85 @@ function RegistrationWizard() {
     openMemberTicket();
   }
 
+  function applyMemberAccess(payload: {
+    member: FoundMember;
+    editToken?: string;
+    registration?: StoredRegistration;
+  }, options: { editing?: boolean; advanceUnpaid?: boolean } = {}) {
+    const registration = payload.registration;
+    if (payload.member.registered && registration?.reference) {
+      rememberRegistration(registration);
+      setSaved(registration);
+      setManagedRecord(registration);
+      setMember(payload.member);
+      setEditToken(payload.editToken || "");
+      setOtpSentTo("");
+      setMemberPreview(null);
+      editAfterCode.current = false;
+      setStep("manage");
+      return;
+    }
+    setManagedRecord(null);
+    setMember(payload.member);
+    setEditToken(payload.editToken || "");
+    setAttendee(memberAttendee(payload.member));
+    setOtpSentTo("");
+    setMemberPreview(null);
+    const editing = Boolean(options.editing);
+    editAfterCode.current = false;
+    if (editing || !payload.member.profileReady) {
+      setMemberProof(payload.member.memberToken || "");
+      setAttendee(memberCheckoutAttendee(payload.member));
+      setPlan(memberTest ? "test" : "full");
+      setGuestError("");
+      setStep("guest");
+      return;
+    }
+    if (options.advanceUnpaid) {
+      setMemberProof(payload.member.memberToken || "");
+      setAttendee(memberCheckoutAttendee(payload.member));
+      setPlan(memberTest ? "test" : "full");
+      setStep("ticket");
+    }
+  }
+
+  async function claimMember(options: { advanceUnpaid?: boolean } = {}) {
+    if (claimBusy || otpBusy || (!memberPreview && !member)) return;
+    const contact = parseLookupContact(lookup.trim());
+    if ("error" in contact) {
+      setOtpError(contact.error);
+      return;
+    }
+    setClaimBusy(true);
+    setOtpError("");
+    try {
+      const response = await fetch("/api/members/claim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: lookup.trim() }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (response.status === 401 && payload.requiresOtp) {
+        setMemberPreview((current) => current
+          ? { ...current, requiresOtp: true, maskedEmail: String(payload.maskedEmail || current.maskedEmail) }
+          : {
+              firstName: "",
+              chapter: "",
+              maskedEmail: String(payload.maskedEmail || "your email"),
+              requiresOtp: true,
+            });
+        setMember(null);
+        throw new Error(payload.error || "Confirm the code we emailed you.");
+      }
+      if (!response.ok || !payload.member) throw new Error(payload.error || "Could not continue with that membership");
+      applyMemberAccess(payload, { advanceUnpaid: options.advanceUnpaid !== false });
+    } catch (error) {
+      setOtpError(error instanceof Error ? error.message : "Could not continue with that membership");
+    } finally {
+      setClaimBusy(false);
+    }
+  }
+
   async function sendOtp() {
     if (otpBusy || resendSeconds > 0 || (!member && !memberPreview)) return;
     const contact = parseLookupContact(lookup.trim());
@@ -1037,33 +1117,7 @@ function RegistrationWizard() {
       const payload = await response.json();
       if (!response.ok || !payload.member) throw new Error(payload.error || "That code is wrong.");
       resetResendCooldown();
-      const registration = payload.registration as StoredRegistration | undefined;
-      if (payload.member.registered && registration?.reference) {
-        rememberRegistration(registration);
-        setSaved(registration);
-        setManagedRecord(registration);
-        setMember(payload.member);
-        setEditToken(payload.editToken || "");
-        setOtpSentTo("");
-        editAfterCode.current = false;
-        setStep("manage");
-        return;
-      }
-      setManagedRecord(null);
-      setMember(payload.member);
-      setEditToken(payload.editToken || "");
-      setAttendee(memberAttendee(payload.member));
-      setOtpSentTo("");
-      setMemberPreview(null);
-      const editing = editAfterCode.current;
-      editAfterCode.current = false;
-      if (editing || !payload.member.profileReady) {
-        setMemberProof(payload.member.memberToken || "");
-        setAttendee(memberCheckoutAttendee(payload.member));
-        setPlan(memberTest ? "test" : "full");
-        setGuestError("");
-        setStep("guest");
-      }
+      applyMemberAccess(payload, { editing: editAfterCode.current });
     } catch (error) {
       setOtpError(error instanceof Error ? error.message : "That code is wrong.");
     } finally {
@@ -1106,6 +1160,7 @@ function RegistrationWizard() {
         firstName: String(payload.firstName || ""),
         chapter: String(payload.chapter || ""),
         maskedEmail: String(payload.maskedEmail || "your email"),
+        requiresOtp: Boolean(payload.requiresOtp),
       });
     } catch (error) {
       setLookupError(error instanceof Error ? error.message : "Could not look up that membership");
@@ -1501,14 +1556,18 @@ function RegistrationWizard() {
   }
 
   if (step === "member") {
-    const holdNote = member && !member.registered ? membershipHoldNote(member, Boolean(otpSentTo)) : "";
+    const holdNote = member && !member.registered ? membershipHoldNote(member, Boolean(otpSentTo) || !editToken) : "";
     const first = member?.fullName.trim().split(/\s+/)[0];
     const memberLev: { pose: LevPose; label: string; text: string } = member?.registered
       ? { pose: "smile", label: "Lev, already registered", text: `You're already registered, ${first}.` }
       : member
         ? { pose: "smile", label: "Lev smiling, found your membership", text: `Found you, ${first}!` }
         : memberPreview
-          ? { pose: "smile", label: "Lev smiling, found your membership", text: memberPreview.firstName ? `Found you, ${memberPreview.firstName}!` : "Found your membership." }
+          ? {
+              pose: "smile",
+              label: "Lev smiling, found your membership",
+              text: memberPreview.firstName ? `Found you, ${memberPreview.firstName}!` : "Found your membership.",
+            }
           : otpSentTo
             ? { pose: "smile", label: "Lev smiling", text: "Enter the code we emailed you." }
             : {
@@ -1531,6 +1590,10 @@ function RegistrationWizard() {
           <PrimaryButton onClick={editMemberDetails}>Edit my details</PrimaryButton>
         ) : member ? (
           <PrimaryButton onClick={continueVerifiedMember}>Continue</PrimaryButton>
+        ) : memberPreview && !memberPreview.requiresOtp && !otpSentTo ? (
+          <PrimaryButton disabled={claimBusy} onClick={() => claimMember({ advanceUnpaid: true })}>
+            {claimBusy ? "Continuing…" : "Continue"}
+          </PrimaryButton>
         ) : null}
       >
         <button type="button" className="self-start text-sm text-[#A8131F]" onClick={() => setStep("start")}>← Back</button>
@@ -1607,10 +1670,16 @@ function RegistrationWizard() {
             <span className="self-start rounded-full bg-[#141416] px-2.5 py-1 text-xs font-bold tracking-[0.1em] text-white uppercase">We found you</span>
             {memberPreview.firstName ? <p className="m-0 font-archivo text-[22px] font-extrabold">{memberPreview.firstName}</p> : null}
             {memberPreview.chapter ? <Detail label="Chapter" value={memberPreview.chapter} /> : null}
-            <p className="m-0 text-sm text-[#5C5C63]">We'll send a code to {memberPreview.maskedEmail} when you ask.</p>
-            <button type="button" disabled={otpBusy || resendSeconds > 0} onClick={sendOtp} className="self-start rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]">
-              {otpBusy ? "Sending a code…" : "Send code"}
-            </button>
+            {memberPreview.requiresOtp ? (
+              <>
+                <p className="m-0 text-sm text-[#5C5C63]">You're already registered. We'll send a code to {memberPreview.maskedEmail} to continue.</p>
+                <button type="button" disabled={otpBusy || resendSeconds > 0} onClick={sendOtp} className="self-start rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]">
+                  {otpBusy ? "Sending a code…" : "Send code"}
+                </button>
+              </>
+            ) : (
+              <p className="m-0 text-sm text-[#5C5C63]">Confirm this is you, then continue to pick your ticket.</p>
+            )}
             {otpError ? <p className="m-0 text-sm text-[#A8131F]">{otpError}</p> : null}
           </div>
         ) : null}
