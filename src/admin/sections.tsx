@@ -1893,10 +1893,12 @@ type ChapterProgressMember = {
   fullName: string;
   email: string;
   mobile: string;
-  reference: string;
-  plan: "full" | "installment";
+  registered: boolean;
+  reference: string | null;
+  plan: "full" | "installment" | null;
   planLabel: string;
   fullyPaid: boolean;
+  registeredAt: string | null;
 };
 
 type ChapterProgress = {
@@ -1957,7 +1959,7 @@ function Chapters({
     }
   }
 
-  const visibleProgress = progress.filter((row) => matches(query, [row.name, ...row.members.flatMap((member) => [member.fullName, member.email, member.reference])]));
+  const visibleProgress = progress.filter((row) => matches(query, [row.name, ...row.members.flatMap((member) => [member.fullName, member.email, member.reference, member.planLabel])]));
   const visibleChapters = rows.filter((row) => matches(query, [row.name]));
   const progressEmpty = progress.length === 0 ? "No chapters yet." : visibleProgress.length === 0 ? "No chapters match that search." : "";
   const manageEmpty = rows.length === 0 ? "No chapters yet." : visibleChapters.length === 0 ? "No chapters match that search." : "";
@@ -1970,7 +1972,7 @@ function Chapters({
         <div>
           <h1 className="m-0 font-archivo text-[28px] font-extrabold">Chapters</h1>
           <p className="m-0 mt-1 text-sm text-[#5C5C63]">
-            Registered members over roster size. Expand a chapter to see fully paid and installment seats.
+            Registered members over roster size. Expand a chapter to see the full roster, sorted by name.
             {memberTotal ? ` ${registeredTotal} of ${memberTotal} registered overall.` : ""}
           </p>
         </div>
@@ -2051,7 +2053,7 @@ function Chapters({
                         <tr>
                           <td className={`${tdClass} bg-[#FDFCFA]`} colSpan={4}>
                             {row.members.length === 0 ? (
-                              <p className="m-0 text-sm text-[#5C5C63]">No fully paid or installment registrations yet.</p>
+                              <p className="m-0 text-sm text-[#5C5C63]">No members on this chapter roster yet.</p>
                             ) : (
                               <div className="flex flex-col gap-2">
                                 {row.members.map((member) => (
@@ -2059,12 +2061,17 @@ function Chapters({
                                     <div>
                                       <p className="m-0 font-semibold">{member.fullName}</p>
                                       <p className="m-0 text-[13px] text-[#5C5C63]">{member.email} · {member.mobile}</p>
+                                      {member.registered && member.registeredAt ? (
+                                        <p className="m-0 text-[13px] text-[#5C5C63]">Registered {formatDateTime(member.registeredAt)}</p>
+                                      ) : null}
                                     </div>
                                     <div className="flex flex-wrap items-center gap-3 text-right">
                                       <span className="text-sm text-[#5C5C63]">{member.planLabel}</span>
-                                      <button type="button" className={linkButton} onClick={() => onOpenRegistration?.(member.reference)}>
-                                        {member.reference}
-                                      </button>
+                                      {member.reference ? (
+                                        <button type="button" className={linkButton} onClick={() => onOpenRegistration?.(member.reference!)}>
+                                          {member.reference}
+                                        </button>
+                                      ) : null}
                                     </div>
                                   </div>
                                 ))}

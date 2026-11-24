@@ -15,7 +15,7 @@ function percent(part, whole) {
 
 function registrationIndex(db) {
   const rows = db.prepare(`
-    SELECT reference, email, mobile, phone_key, payment_plan, fully_paid_at
+    SELECT reference, email, mobile, phone_key, payment_plan, fully_paid_at, created_at
     FROM registrations
     WHERE status = 'confirmed'
     ORDER BY id DESC
@@ -31,6 +31,7 @@ function registrationIndex(db) {
       plan: fullyPaid ? "full" : "installment",
       planLabel: fullyPaid ? "Fully paid" : "Installment",
       fullyPaid,
+      registeredAt: row.created_at || null,
     };
     const email = String(row.email || "").trim().toLowerCase();
     if (email && !byEmail.has(email)) byEmail.set(email, owned);
@@ -85,17 +86,18 @@ export function listChapterProgress(db) {
     }
     chapter.total += 1;
     const owned = ownedRegistration(member, ownedByContact);
-    if (!owned) continue;
-    chapter.registered += 1;
+    if (owned) chapter.registered += 1;
     chapter.members.push({
       id: member.id,
       fullName: member.full_name,
       email: member.email,
       mobile: member.mobile,
-      reference: owned.reference,
-      plan: owned.plan,
-      planLabel: owned.planLabel,
-      fullyPaid: owned.fullyPaid,
+      registered: Boolean(owned),
+      reference: owned?.reference || null,
+      plan: owned?.plan || null,
+      planLabel: owned?.planLabel || "Not registered",
+      fullyPaid: owned?.fullyPaid || false,
+      registeredAt: owned?.registeredAt || null,
     });
   }
 
@@ -103,6 +105,11 @@ export function listChapterProgress(db) {
     .map((chapter) => ({
       ...chapter,
       percent: percent(chapter.registered, chapter.total),
+      members: chapter.members.sort((left, right) => {
+        const byNameOrder = left.fullName.localeCompare(right.fullName, undefined, { sensitivity: "base" });
+        if (byNameOrder) return byNameOrder;
+        return left.id - right.id;
+      }),
     }))
     .sort((left, right) => {
       const leftPct = left.percent ?? -1;

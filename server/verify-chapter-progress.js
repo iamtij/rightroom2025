@@ -79,16 +79,18 @@ assert.ok(eagles);
 assert.equal(eagles.total, 3);
 assert.equal(eagles.registered, 2);
 assert.equal(eagles.percent, 67);
-assert.deepEqual(eagles.members.map((row) => [row.fullName, row.planLabel]).sort(), [
-  ["Fully Paid", "Fully paid"],
-  ["Installment Seat", "Installment"],
+assert.deepEqual(eagles.members.map((row) => [row.fullName, row.planLabel, Boolean(row.registeredAt)]), [
+  ["Fully Paid", "Fully paid", true],
+  ["Installment Seat", "Installment", true],
+  ["Not Registered", "Not registered", false],
 ]);
 
 assert.ok(titans);
 assert.equal(titans.total, 1);
 assert.equal(titans.registered, 0);
 assert.equal(titans.percent, 0);
-assert.equal(titans.members.length, 0);
+assert.equal(titans.members.length, 1);
+assert.equal(titans.members[0].planLabel, "Not registered");
 
 assert.ok(empty);
 assert.equal(empty.total, 0);
