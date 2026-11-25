@@ -14,6 +14,7 @@ import { assignFirstPaymentHold, expireRegistrationHold, firstPaymentHoldEnabled
 import { listFirstPaymentBackfillTargets } from "./backfill-payment-confirmations.js";
 import { sendEntryPassForRegistration, sendPaymentConfirmation, syncBuiltinSchedule } from "./reminders.js";
 import { dashboardStats } from "./dashboard.js";
+import { buildRegistrationPoster, renderRegistrationPoster } from "./registration-poster.js";
 import { importChapters, listChapterProgress, listChapters, parseChapterCsv, saveChapter } from "./chapters.js";
 import { listMembers, lookupMember, memberContactClash, memberFromProof, memberOwnedRegistration, memberPreview, memberRegisterOptions, memberRequiresOtp, parseMemberCsv, registerMemberByAdmin, saveMember, toPublicMember, updateMemberProfile, updateMemberRecord } from "./members.js";
 import { presentCoupon, priceCoupon } from "./coupons.js";
@@ -1180,6 +1181,19 @@ export function createApi() {
 
   router.get("/admin/dashboard", requireAdmin, (_req, res) => {
     res.json(dashboardStats(db()));
+  });
+
+  router.get("/admin/registration-poster.jpg", requireAdmin, async (req, res) => {
+    try {
+      const rendered = await renderRegistrationPoster(buildRegistrationPoster(db()));
+      writeAudit(db(), req.admin.id, "registration_poster.download", "registration_poster");
+      res.setHeader("Content-Type", "image/jpeg");
+      res.setHeader("Content-Disposition", `inline; filename="${rendered.filename}"`);
+      res.setHeader("Cache-Control", "private, no-store");
+      res.send(rendered.jpeg);
+    } catch (error) {
+      res.status(500).json({ error: error instanceof Error ? error.message : "Could not render the poster." });
+    }
   });
 
   router.get("/admin/registrations", requireAdmin, (req, res) => {

@@ -448,6 +448,145 @@ function TicketSplit({ ticket }: { ticket: DashboardData["tickets"][number] }) {
   );
 }
 
+async function fetchRegistrationPoster() {
+  const response = await fetch("/api/admin/registration-poster.jpg", { credentials: "include" });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || "Could not load the registration poster");
+  }
+  const blob = await response.blob();
+  const header = response.headers.get("content-disposition") || "";
+  const matched = /filename="([^"]+)"/i.exec(header);
+  return {
+    blob,
+    filename: matched?.[1] || "IBMC-2027-registration-update.jpg",
+  };
+}
+
+function RegistrationPosterPanel({ onError }: { onError: (message: string) => void }) {
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [filename, setFilename] = useState("IBMC-2027-registration-update.jpg");
+  const [busy, setBusy] = useState<"load" | "download" | "share" | "">("load");
+  const [note, setNote] = useState("");
+  const [canShareFiles, setCanShareFiles] = useState(false);
+  const previewUrlRef = useRef("");
+
+  function replacePreview(nextUrl: string) {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+    previewUrlRef.current = nextUrl;
+    setPreviewUrl(nextUrl);
+  }
+
+  async function loadPoster() {
+    setBusy("load");
+    setNote("");
+    try {
+      const poster = await fetchRegistrationPoster();
+      replacePreview(URL.createObjectURL(poster.blob));
+      setFilename(poster.filename);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not load the registration poster");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  useEffect(() => {
+    try {
+      const probe = new File([new Uint8Array([0xff, 0xd8])], "probe.jpg", { type: "image/jpeg" });
+      setCanShareFiles(Boolean(navigator.canShare?.({ files: [probe] })));
+    } catch {
+      setCanShareFiles(false);
+    }
+    loadPoster().catch(() => undefined);
+    return () => {
+      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
+      previewUrlRef.current = "";
+    };
+  }, []);
+
+  async function downloadPoster() {
+    setBusy("download");
+    setNote("");
+    try {
+      const poster = await fetchRegistrationPoster();
+      const url = URL.createObjectURL(poster.blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = poster.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNote("Downloaded. Attach it in your group chat.");
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not download the poster");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function sharePoster() {
+    setBusy("share");
+    setNote("");
+    try {
+      const poster = await fetchRegistrationPoster();
+      const file = new File([poster.blob], poster.filename, { type: "image/jpeg" });
+      if (canShareFiles && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: "IBMC 2027 Registration update",
+          text: "IBMC 2027 registration update",
+        });
+        setNote("Shared.");
+        return;
+      }
+      const url = URL.createObjectURL(poster.blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = poster.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNote("Download ready — attach the image in your group chat.");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      onError(error instanceof Error ? error.message : "Could not share the poster");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <Panel title="Registration poster">
+      <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Live count poster for chapter group chats. Download or share the image as-is.</p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={buttonClass} disabled={Boolean(busy)} onClick={() => { sharePoster().catch(() => undefined); }}>
+          {busy === "share" ? "Sharing…" : canShareFiles ? "Share to chats" : "Download for chats"}
+        </button>
+        <button type="button" className={ghostButton} disabled={Boolean(busy)} onClick={() => { downloadPoster().catch(() => undefined); }}>
+          {busy === "download" ? "Downloading…" : "Download JPG"}
+        </button>
+        <button type="button" className={ghostButton} disabled={Boolean(busy)} onClick={() => { loadPoster().catch(() => undefined); }}>
+          {busy === "load" ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+      {note ? <p className="m-0 text-sm font-semibold">{note}</p> : null}
+      {previewUrl ? (
+        <img
+          src={previewUrl}
+          alt="IBMC 2027 registration update poster"
+          className="w-full max-w-[800px] rounded-[12px] border border-[#E4E1DC] bg-[#F3F4F6]"
+        />
+      ) : (
+        <p className="m-0 text-sm text-[#5C5C63]">{busy === "load" ? "Rendering poster…" : "Poster unavailable."}</p>
+      )}
+      {previewUrl ? <p className="m-0 text-[12px] text-[#5C5C63]">{filename}</p> : null}
+    </Panel>
+  );
+}
+
 function Dashboard({ onError }: { onError: (message: string) => void }) {
   const [data, setData] = useState<DashboardData | null>(null);
   useEffect(() => { api("/api/admin/dashboard").then(setData).catch((error) => onError(error.message)); }, []);
@@ -553,6 +692,7 @@ function Dashboard({ onError }: { onError: (message: string) => void }) {
           {data.byDay.length === 0 ? <p className="m-0 text-sm text-[#5C5C63]">Confirmed signups will show here by date.</p> : <Columns rows={data.byDay.map((day) => ({ label: shortDate(day.day), value: day.signups }))} />}
         </Panel>
       </div>
+      <RegistrationPosterPanel onError={onError} />
     </section>
   );
 }
