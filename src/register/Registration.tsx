@@ -694,7 +694,9 @@ function AudienceCard({ title, body, onClick }: { title: string; body: string; o
         <span className="text-[16px] font-bold leading-snug text-black">{title}</span>
         <span className="text-[14px] leading-snug text-[#64666A]">{body}</span>
       </span>
-      <span aria-hidden="true" className="shrink-0 text-[22px] leading-none text-[#CF2030]">→</span>
+      <span className="shrink-0 rounded-full bg-[#D0202E] px-4 py-2 text-[14px] font-bold leading-none text-white">
+        Register
+      </span>
     </button>
   );
 }
