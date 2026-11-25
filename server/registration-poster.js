@@ -1,3 +1,4 @@
+import { listChapterProgress } from "./chapters.js";
 import { formatMoney } from "./time.js";
 import { renderPosterJpeg } from "./registration-poster-image.js";
 
@@ -77,18 +78,14 @@ export function buildRegistrationPoster(db, asOf = new Date()) {
   `).get(since, TEST_PRODUCT);
   const fullPaid = Number(counts.full_paid) || 0;
   const installments = Number(counts.installment) || 0;
-  const chapters = db.prepare(`
-    SELECT TRIM(r.chapter) AS name, COUNT(*) AS count
-    FROM registrations r
-    JOIN ticket_products p ON p.id = r.product_id
-    WHERE lower(r.status) = 'confirmed'
-      AND r.payment_hold_cancelled_at IS NULL
-      AND p.code NOT LIKE ?
-      AND TRIM(COALESCE(r.chapter, '')) != ''
-      AND (r.fully_paid_at IS NOT NULL OR (r.payment_plan = 'installment' AND r.fully_paid_at IS NULL))
-    GROUP BY TRIM(r.chapter)
-    ORDER BY COUNT(*) DESC, TRIM(r.chapter)
-  `).all(TEST_PRODUCT).map((row) => ({ name: row.name, count: Number(row.count) }));
+  const chapters = listChapterProgress(db)
+    .filter((chapter) => chapter.registered > 0)
+    .map((chapter) => ({
+      name: chapter.name,
+      count: chapter.registered,
+      total: chapter.total,
+      percent: chapter.percent,
+    }));
   const products = db.prepare(`
     SELECT name, full_price_cents, currency, sales_start, sales_end
     FROM ticket_products
@@ -142,7 +139,10 @@ export async function renderRegistrationPoster(poster) {
     `${poster.daysLeft} days left`,
     "",
     "Chapters",
-    ...poster.chapters.map((chapter) => `${chapter.name}: ${chapter.count}`),
+    ...poster.chapters.map((chapter) => {
+      const share = chapter.percent == null ? "" : ` · ${chapter.percent}%`;
+      return `${chapter.name}: ${chapter.count}/${chapter.total}${share}`;
+    }),
   ].join("\n");
   return {
     subject,

@@ -3,6 +3,8 @@ import { openDatabase } from "./db.js";
 import { cancelRegistration, createRegistration, recordPayment } from "./registrations.js";
 import { buildDailyReport, runDailyReport, runRegistrationPoster } from "./daily-report.js";
 import { renderDailyReport } from "./daily-report-email.js";
+import { saveChapter } from "./chapters.js";
+import { saveMember } from "./members.js";
 import { buildRegistrationPoster, renderRegistrationPoster } from "./registration-poster.js";
 
 const asOf = new Date("2026-11-11T01:00:00.000Z");
@@ -73,6 +75,21 @@ db.prepare(`
 
 setSecondDue(payFirst(installment("Bea Santos", "bea@example.com", "09171000002"), "upay:instapay"), "2026-11-16");
 setSecondDue(payFirst(installment("Carlo Reyes", "carlo@example.com", "09171000003"), "upay:instapay"), "2026-11-09");
+saveChapter(db, { name: "BNI Legacy" });
+saveMember(db, {
+  fullName: "Joy Dizon",
+  email: "joy@example.com",
+  mobile: "09171000004",
+  chapter: "BNI Legacy",
+  regStatus: "updated",
+});
+saveMember(db, {
+  fullName: "Legacy Waiting",
+  email: "legacy.wait@example.com",
+  mobile: "09171000014",
+  chapter: "BNI Legacy",
+  regStatus: "updated",
+});
 setSecondDue(payFirst(installment("Joy Dizon", "joy@example.com", "09171000004", "BNI Legacy"), "upay:instapay"), "2026-10-28");
 setSecondDue(payFirst(installment("Paolo Lim", "paolo@example.com", "09171000005"), "upay:instapay"), "2026-10-26");
 
@@ -208,7 +225,7 @@ assert.equal(posterModel.sinceYesterday, 1);
 assert.equal(posterModel.daysLeft, 19);
 assert.equal(posterModel.bannerTitle, "First Mover · ₱12,000");
 assert.match(posterModel.bannerNote, /Ends Nov 30 · Early Bird is ₱15,000/);
-assert.deepEqual(posterModel.chapters, [{ name: "BNI Legacy", count: 1 }]);
+assert.deepEqual(posterModel.chapters, [{ name: "BNI Legacy", count: 1, total: 2, percent: 50 }]);
 const poster = await renderRegistrationPoster(posterModel);
 assert.equal(poster.subject, "IBMC 2027 Registration update · Nov 11, 2026");
 assert.equal(poster.filename, "IBMC-2027-registration-update.jpg");
@@ -216,7 +233,7 @@ assert.equal(poster.jpeg[0], 0xff);
 assert.equal(poster.jpeg[1], 0xd8);
 assert.match(poster.html, /cid:registration-poster/);
 assert.match(poster.text, /Paid registrations: 8/);
-assert.match(poster.text, /BNI Legacy: 1/);
+assert.match(poster.text, /BNI Legacy: 1\/2 · 50%/);
 
 const previousKey = process.env.RESEND_API_KEY;
 delete process.env.RESEND_API_KEY;

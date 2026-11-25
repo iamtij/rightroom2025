@@ -121,22 +121,37 @@ export async function renderPosterJpeg(poster) {
   ctx.fillText("CHAPTERS", 52, chapterY + 36);
   if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
 
-  const maxCount = Math.max(...chapters.map((chapter) => chapter.count), 1);
   chapters.forEach((chapter, index) => {
     const rowY = chapterY + 64 + index * 46;
+    const count = Number(chapter.count) || 0;
+    const total = Number(chapter.total) || 0;
+    const percent = chapter.percent == null ? null : Number(chapter.percent);
+    const scoreLabel = percent == null
+      ? `${count.toLocaleString("en-US")}/${total.toLocaleString("en-US")}`
+      : `${count.toLocaleString("en-US")}/${total.toLocaleString("en-US")} · ${percent}%`;
+    ctx.font = font(700, 18);
+    const scoreWidth = ctx.measureText(scoreLabel).width;
+    const scoreX = WIDTH - 52 - scoreWidth;
+    const trackX = 300;
+    const trackW = Math.max(80, scoreX - 16 - trackX);
+
     ctx.fillStyle = "#222222";
     ctx.font = font(500, 20);
-    ctx.fillText(chapter.name, 52, rowY + 16);
-    const trackX = 330;
-    const trackW = 360;
+    const nameMax = trackX - 16 - 52;
+    let name = chapter.name;
+    while (name.length > 3 && ctx.measureText(name).width > nameMax) {
+      name = `${name.slice(0, -2)}…`;
+    }
+    ctx.fillText(name, 52, rowY + 16);
+
     fillRound(ctx, trackX, rowY, trackW, 16, 8, "#EEEEEE");
-    const fillW = Math.max(16, Math.round((chapter.count / maxCount) * trackW));
+    const fillRatio = percent == null ? 0 : Math.min(100, Math.max(0, percent)) / 100;
+    const fillW = fillRatio > 0 ? Math.max(16, Math.round(fillRatio * trackW)) : 0;
     fillRound(ctx, trackX, rowY, fillW, 16, 8, "#111111");
-    ctx.font = font(700, 20);
+
+    ctx.font = font(700, 18);
     ctx.fillStyle = "#222222";
-    const countLabel = chapter.count.toLocaleString("en-US");
-    const countWidth = ctx.measureText(countLabel).width;
-    ctx.fillText(countLabel, WIDTH - 52 - countWidth, rowY + 16);
+    ctx.fillText(scoreLabel, scoreX, rowY + 16);
   });
 
   ctx.fillStyle = "#111111";
