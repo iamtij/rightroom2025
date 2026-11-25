@@ -24,7 +24,7 @@ const contentSecurityPolicy = [
   `script-src 'self' https://connect.facebook.net https://challenges.cloudflare.com 'sha256-${scriptHash}'`,
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
-  "img-src 'self' data: https://www.facebook.com",
+  "img-src 'self' data: blob: https://www.facebook.com",
   "frame-src https://challenges.cloudflare.com https://www.youtube.com https://www.youtube-nocookie.com",
   "connect-src 'self' https://www.facebook.com https://connect.facebook.net https://challenges.cloudflare.com https://*.ingest.us.sentry.io",
   "frame-ancestors 'none'",

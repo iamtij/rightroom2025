@@ -464,32 +464,13 @@ async function fetchRegistrationPoster() {
 }
 
 function RegistrationPosterPanel({ onError }: { onError: (message: string) => void }) {
-  const [previewUrl, setPreviewUrl] = useState("");
-  const [filename, setFilename] = useState("IBMC-2027-registration-update.jpg");
-  const [busy, setBusy] = useState<"load" | "download" | "share" | "">("load");
+  const [revision, setRevision] = useState(() => Date.now());
+  const [previewReady, setPreviewReady] = useState(false);
+  const [busy, setBusy] = useState<"download" | "share" | "">("");
   const [note, setNote] = useState("");
   const [canShareFiles, setCanShareFiles] = useState(false);
-  const previewUrlRef = useRef("");
-
-  function replacePreview(nextUrl: string) {
-    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-    previewUrlRef.current = nextUrl;
-    setPreviewUrl(nextUrl);
-  }
-
-  async function loadPoster() {
-    setBusy("load");
-    setNote("");
-    try {
-      const poster = await fetchRegistrationPoster();
-      replacePreview(URL.createObjectURL(poster.blob));
-      setFilename(poster.filename);
-    } catch (error) {
-      onError(error instanceof Error ? error.message : "Could not load the registration poster");
-    } finally {
-      setBusy("");
-    }
-  }
+  const filename = "IBMC-2027-registration-update.jpg";
+  const previewSrc = `/api/admin/registration-poster.jpg?t=${revision}`;
 
   useEffect(() => {
     try {
@@ -498,12 +479,13 @@ function RegistrationPosterPanel({ onError }: { onError: (message: string) => vo
     } catch {
       setCanShareFiles(false);
     }
-    loadPoster().catch(() => undefined);
-    return () => {
-      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-      previewUrlRef.current = "";
-    };
   }, []);
+
+  function refreshPoster() {
+    setNote("");
+    setPreviewReady(false);
+    setRevision(Date.now());
+  }
 
   async function downloadPoster() {
     setBusy("download");
@@ -568,21 +550,24 @@ function RegistrationPosterPanel({ onError }: { onError: (message: string) => vo
         <button type="button" className={ghostButton} disabled={Boolean(busy)} onClick={() => { downloadPoster().catch(() => undefined); }}>
           {busy === "download" ? "Downloading…" : "Download JPG"}
         </button>
-        <button type="button" className={ghostButton} disabled={Boolean(busy)} onClick={() => { loadPoster().catch(() => undefined); }}>
-          {busy === "load" ? "Refreshing…" : "Refresh"}
+        <button type="button" className={ghostButton} disabled={Boolean(busy)} onClick={refreshPoster}>
+          Refresh
         </button>
       </div>
       {note ? <p className="m-0 text-sm font-semibold">{note}</p> : null}
-      {previewUrl ? (
-        <img
-          src={previewUrl}
-          alt="IBMC 2027 registration update poster"
-          className="w-full max-w-[800px] rounded-[12px] border border-[#E4E1DC] bg-[#F3F4F6]"
-        />
-      ) : (
-        <p className="m-0 text-sm text-[#5C5C63]">{busy === "load" ? "Rendering poster…" : "Poster unavailable."}</p>
-      )}
-      {previewUrl ? <p className="m-0 text-[12px] text-[#5C5C63]">{filename}</p> : null}
+      {!previewReady ? <p className="m-0 text-sm text-[#5C5C63]">Rendering poster…</p> : null}
+      <img
+        key={previewSrc}
+        src={previewSrc}
+        alt="IBMC 2027 registration update poster"
+        className={`w-full max-w-[800px] rounded-[12px] border border-[#E4E1DC] bg-[#F3F4F6] ${previewReady ? "" : "hidden"}`}
+        onLoad={() => setPreviewReady(true)}
+        onError={() => {
+          setPreviewReady(false);
+          onError("Could not load the registration poster");
+        }}
+      />
+      {previewReady ? <p className="m-0 text-[12px] text-[#5C5C63]">{filename}</p> : null}
     </Panel>
   );
 }
