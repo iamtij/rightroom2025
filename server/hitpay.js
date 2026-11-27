@@ -1,7 +1,7 @@
 import crypto from "crypto";
 import QRCode from "qrcode";
 import { getRegistration, hitpayRewardPurpose } from "./registrations.js";
-import { HOLD_EXPIRED_MESSAGE, expireRegistrationHold, refreshHeldRegistration, sessionStartedBeforeHold, settleOpeningPayment } from "./payment-hold.js";
+import { HOLD_EXPIRED_MESSAGE, checkoutHoldEndMs, expireRegistrationHold, refreshHeldRegistration, sessionStartedBeforeHold, settleOpeningPayment } from "./payment-hold.js";
 import { isChannelEnabled } from "./payment-channels.js";
 import { paymentCharge, settlementBaseCents } from "./convenience-fee.js";
 
@@ -88,6 +88,25 @@ function ttlMinutes() {
   const value = Number(process.env.HITPAY_CHECKOUT_TTL_MINUTES || 15);
   if (!Number.isFinite(value) || value < 1) return 15;
   return Math.min(Math.round(value), 24 * 60);
+}
+
+const MINUTE_MS = 60 * 1000;
+/** Smallest expires_after this code sends HitPay (ttlMinutes() floor). */
+const MIN_EXPIRY_MINUTES = 1;
+
+/**
+ * HitPay expiry for a new session: min(now + HITPAY_CHECKOUT_TTL_MINUTES, hold end).
+ * Returns { error } when less than MIN_EXPIRY_MINUTES of the hold is left.
+ */
+export function hitpayCheckoutWindow(db, registration, channel, now = Date.now()) {
+  const ttl = ttlMinutes();
+  const localMs = channel === "online" ? ONLINE_MS : ttl * MINUTE_MS;
+  const holdEnd = checkoutHoldEndMs(db, registration, now);
+  if (holdEnd === null) return { expiresAfterMinutes: ttl, expiresAtMs: now + localMs };
+  const leftMinutes = Math.floor((holdEnd - now) / MINUTE_MS);
+  if (leftMinutes < MIN_EXPIRY_MINUTES) return { error: HOLD_EXPIRED_MESSAGE, status: 400 };
+  const minutes = Math.min(ttl, leftMinutes);
+  return { expiresAfterMinutes: minutes, expiresAtMs: now + Math.min(localMs, minutes * MINUTE_MS) };
 }
 
 function publicOrigin() {
@@ -268,7 +287,7 @@ async function applyHitpayPayload(db, payload) {
   return row;
 }
 
-function requestBody(registration, sessionId, amountCents, channel) {
+function requestBody(registration, sessionId, amountCents, channel, expiresAfterMinutes = ttlMinutes()) {
   const body = {
     amount: Math.round(amountCents) / 100,
     currency: "PHP",
@@ -276,7 +295,7 @@ function requestBody(registration, sessionId, amountCents, channel) {
     email: registration.email,
     name: String(registration.full_name || "").slice(0, 255),
     purpose: hitpayRewardPurpose(registration),
-    expires_after: `${ttlMinutes()} mins`,
+    expires_after: `${expiresAfterMinutes} mins`,
     allow_repeated_payments: "false",
     send_email: "false",
     send_sms: "false",
@@ -325,6 +344,8 @@ async function retirePreviousHitpay(db, previousId) {
 }
 
 async function createHitpaySession(db, registration, due, amountCents, channel, previousId, feeCents = 0) {
+  const window = hitpayCheckoutWindow(db, registration, channel);
+  if (window.error) return { error: window.error, status: window.status, registration };
   const retired = await retirePreviousHitpay(db, previousId);
   if (retired) return retired;
   const sessionId = crypto.randomUUID();
@@ -332,7 +353,7 @@ async function createHitpaySession(db, registration, due, amountCents, channel, 
   try {
     created = await hitpayFetch("/v1/payment-requests", {
       method: "POST",
-      body: requestBody(registration, sessionId, amountCents, channel),
+      body: requestBody(registration, sessionId, amountCents, channel, window.expiresAfterMinutes),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "HitPay could not start the payment.";
@@ -346,7 +367,7 @@ async function createHitpaySession(db, registration, due, amountCents, channel, 
   const qr = channel === "qr" ? qrPayload(created.body) : "";
   const paymentUrl = hostedCheckout(channel) ? allowedHitpayUrl(created.body?.url) : "";
   const failed = (channel === "qr" && !qr) || (hostedCheckout(channel) && !paymentUrl);
-  const expiresAt = new Date(Date.now() + (channel === "online" ? ONLINE_MS : ttlMinutes() * 60 * 1000)).toISOString();
+  const expiresAt = new Date(window.expiresAtMs).toISOString();
   const insert = db.transaction(() => {
     if (previousId) {
       db.prepare(`

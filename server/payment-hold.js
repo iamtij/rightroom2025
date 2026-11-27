@@ -62,6 +62,21 @@ function openingStillOpen(db, registrationId) {
   return payments === 0;
 }
 
+/**
+ * When the first-payment hold for this checkout ends, or null when no hold applies.
+ * Used to clamp gateway session expiry so a payment page never outlives the hold.
+ * A registration with no stored hold yet is a new checkout: its hold is written right
+ * after the gateway session starts, so now + HOLD_MS is never later than that hold.
+ */
+export function checkoutHoldEndMs(db, registration, now = Date.now()) {
+  if (!firstPaymentHoldEnabled() || !registration?.id) return null;
+  if (registration.status !== "confirmed" || registration.currency !== "PHP") return null;
+  if (!openingStillOpen(db, registration.id)) return null;
+  if (!registration.payment_hold_until) return now + HOLD_MS;
+  const holdMs = Date.parse(registration.payment_hold_until);
+  return Number.isFinite(holdMs) ? holdMs : null;
+}
+
 function hasPendingSessionBeforeHold(db, registrationId, holdMs) {
   for (const table of SESSION_TABLES) {
     const rows = db.prepare(`

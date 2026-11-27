@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { openDatabase } from "./db.js";
 import { createRegistration, getRegistration, recordPayment, registrationContactClash } from "./registrations.js";
-import { handleHitpayWebhook } from "./hitpay.js";
+import { handleHitpayWebhook, startHitpayPayment } from "./hitpay.js";
+import { savePaymentChannels } from "./payment-channels.js";
+import { HOLD_EXPIRED_MESSAGE } from "./payment-hold.js";
 import { runReminders } from "./reminders.js";
 import {
   HOLD_GRACE_MS,
@@ -329,5 +331,112 @@ assert.equal(checkoutHoldDecision(db, getRegistration(db, legacy.id), T0 + 3 * H
 assert.equal(expireRegistrationHold(db, legacy.id, T0 + 24 * HOUR - MIN), false);
 assert.equal(getRegistration(db, legacy.id).status, "confirmed");
 assert.equal(expireRegistrationHold(db, legacy.id, T0 + 24 * HOUR + MIN), true);
+
+// ---- HitPay session expiry is clamped to the hold end ----
+{
+  const saved = {
+    fetch: global.fetch,
+    key: process.env.HITPAY_API_KEY,
+    base: process.env.HITPAY_API_BASE_URL,
+    ttl: process.env.HITPAY_CHECKOUT_TTL_MINUTES,
+  };
+  process.env.HITPAY_API_KEY = "test-key";
+  process.env.HITPAY_API_BASE_URL = "https://api.hit-pay.com";
+  savePaymentChannels(db, { hitpay_qr: { enabled: true } });
+  const sent = [];
+  global.fetch = async (url, init = {}) => {
+    const body = init.body ? JSON.parse(init.body) : null;
+    if (body) sent.push(body);
+    return new Response(JSON.stringify({
+      id: `gw-${sent.length}-${Math.random().toString(36).slice(2)}`,
+      status: "pending",
+      qr_code_data: { qr_code: "00020101021226-test-qr" },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  let clampSerial = 0;
+  function clampSignup(holdLeftMs) {
+    clampSerial += 1;
+    const reg = signup(`clamp-${clampSerial}@example.com`);
+    if (holdLeftMs !== null) {
+      db.prepare("UPDATE registrations SET payment_hold_until = ? WHERE id = ?")
+        .run(new Date(Date.now() + holdLeftMs).toISOString(), reg.id);
+    }
+    return getRegistration(db, reg.id);
+  }
+  async function startQr(reg) {
+    const before = sent.length;
+    const result = await startHitpayPayment(db, getRegistration(db, reg.id), "qr");
+    return { result, body: sent.length > before ? sent[sent.length - 1] : null };
+  }
+  try {
+    // TTL 600 min, stored 2h hold -> clamped to the hold end (120 min).
+    process.env.HITPAY_CHECKOUT_TTL_MINUTES = "600";
+    const longTtl = clampSignup(2 * HOUR + 30 * 1000);
+    const longRun = await startQr(longTtl);
+    assert.equal(longRun.result.error, undefined);
+    assert.equal(longRun.body.expires_after, "120 mins");
+    assert.ok(Date.parse(longRun.result.hitpay.expiresAt) <= Date.parse(longTtl.payment_hold_until));
+
+    // TTL 600 min, brand-new checkout (hold written right after the session) -> 120 min,
+    // never later than the hold that gets assigned.
+    const fresh2h = clampSignup(null);
+    const freshRun = await startQr(fresh2h);
+    assert.equal(freshRun.body.expires_after, "120 mins");
+    const freshUntil = assignFirstPaymentHold(db, fresh2h.id);
+    assert.ok(Date.parse(freshRun.result.hitpay.expiresAt) <= Date.parse(freshUntil));
+
+    // TTL 15 min well before the hold end stays 15 min.
+    process.env.HITPAY_CHECKOUT_TTL_MINUTES = "15";
+    const shortTtl = clampSignup(2 * HOUR + 30 * 1000);
+    const shortRun = await startQr(shortTtl);
+    assert.equal(shortRun.body.expires_after, "15 mins");
+    const shortExpiry = Date.parse(shortRun.result.hitpay.expiresAt);
+    assert.ok(shortExpiry > Date.now() + 14 * MIN && shortExpiry <= Date.now() + 15 * MIN);
+
+    // 5 minutes left on the hold -> 5-minute session, ending at or before the hold end.
+    const fiveLeft = clampSignup(5 * MIN + 20 * 1000);
+    const fiveRun = await startQr(fiveLeft);
+    assert.equal(fiveRun.body.expires_after, "5 mins");
+    assert.ok(Date.parse(fiveRun.result.hitpay.expiresAt) <= Date.parse(fiveLeft.payment_hold_until));
+
+    // Under the 1-minute minimum left -> refused with the expired message, nothing sent to HitPay.
+    const secondsLeft = clampSignup(30 * 1000);
+    const secondsRun = await startQr(secondsLeft);
+    assert.equal(secondsRun.body, null);
+    assert.equal(secondsRun.result.error, HOLD_EXPIRED_MESSAGE);
+    assert.equal(secondsRun.result.status, 400);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM hitpay_payments WHERE registration_id = ?").get(secondsLeft.id).n, 0);
+
+    // Hold already ended -> no session (existing expired behaviour).
+    const ended = clampSignup(-MIN);
+    const endedRun = await startQr(ended);
+    assert.equal(endedRun.body, null);
+    assert.equal(endedRun.result.error, HOLD_EXPIRED_MESSAGE);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM hitpay_payments WHERE registration_id = ?").get(ended.id).n, 0);
+
+    // Old 24h hold with 20h left, TTL 1440 -> clamped to its stored end (1200 min).
+    process.env.HITPAY_CHECKOUT_TTL_MINUTES = "1440";
+    const legacyClamp = clampSignup(20 * HOUR + 30 * 1000);
+    const legacyRun = await startQr(legacyClamp);
+    assert.equal(legacyRun.body.expires_after, "1200 mins");
+    assert.ok(Date.parse(legacyRun.result.hitpay.expiresAt) <= Date.parse(legacyClamp.payment_hold_until));
+
+    // Opening already paid -> hold no longer applies, later installment keeps the full TTL.
+    process.env.HITPAY_CHECKOUT_TTL_MINUTES = "600";
+    clampSerial += 1;
+    const paidOpening = signup(`clamp-${clampSerial}@example.com`, { paymentPlan: "installment" });
+    db.prepare("UPDATE registrations SET payment_hold_until = ? WHERE id = ?").run(new Date(Date.now() - HOUR).toISOString(), paidOpening.id);
+    recordPayment(db, { registrationId: paidOpening.id, amountCents: getRegistration(db, paidOpening.id).installments[0].amount_cents, method: "manual" });
+    const paidRun = await startQr(paidOpening);
+    assert.equal(paidRun.result.error, undefined);
+    assert.equal(paidRun.body.expires_after, "600 mins");
+  } finally {
+    global.fetch = saved.fetch;
+    for (const [name, value] of [["HITPAY_API_KEY", saved.key], ["HITPAY_API_BASE_URL", saved.base], ["HITPAY_CHECKOUT_TTL_MINUTES", saved.ttl]]) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+}
 
 console.log("payment hold ok");
