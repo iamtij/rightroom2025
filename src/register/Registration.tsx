@@ -515,26 +515,36 @@ function MoneyText({ text, className = "" }: { text: string; className?: string 
   );
 }
 
+/** Official BNI Red wordmark (1165×447). Clear-space “a” = I width + N–I gap = 194px → a/h ≈ 0.434. Asset has no built-in padding. */
+const BNI_LOGO_CLEAR_RATIO = 194 / 447;
+const BNI_LOGO_HEIGHT_PX = 28;
+const BNI_LOGO_CLEAR_PX = Math.round(BNI_LOGO_HEIGHT_PX * BNI_LOGO_CLEAR_RATIO);
+/** AMPLIFY wordmark is 904×132 — keep height fixed and width auto so it never stretches. */
+const AMPLIFY_LOGO_HEIGHT_PX = 20;
+const AMPLIFY_LOGO_WIDTH_PX = Math.round((904 / 132) * AMPLIFY_LOGO_HEIGHT_PX);
+
 function EventHeader({ onManage, goldClub = false }: { onManage?: () => void; goldClub?: boolean }) {
   return (
     <header className="border-b border-[#C8C8C8] bg-white">
-      <div className="mx-auto flex w-full max-w-[480px] items-center justify-between gap-2 px-5 py-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <a href="/" aria-label="BNI" className="shrink-0">
-            <img src="/assets/bni-logo-white.png" alt="" className="h-8 w-auto brightness-0" />
-          </a>
-          <span aria-hidden="true" className="h-8 w-px shrink-0 bg-[#C8C8C8]" />
-          <span className="flex flex-col gap-0.5">
-            <span className="text-[16px] font-bold leading-none text-black">IBMC 2027</span>
-            <span className="text-[12px] leading-tight whitespace-nowrap text-[#64666A]">June 16–17, 2027</span>
-            <span className="text-[12px] leading-tight whitespace-nowrap text-[#64666A]">Newport, Pasay City</span>
-          </span>
-        </div>
+      <div
+        className="mx-auto flex w-full max-w-[480px] flex-wrap items-center justify-between px-5"
+        style={{ columnGap: BNI_LOGO_CLEAR_PX, rowGap: BNI_LOGO_CLEAR_PX, paddingTop: BNI_LOGO_CLEAR_PX, paddingBottom: BNI_LOGO_CLEAR_PX }}
+      >
+        <a href="/" aria-label="BNI" className="shrink-0 leading-none">
+          <img
+            src="/assets/bni-logo-red.png"
+            alt=""
+            width={1165}
+            height={447}
+            className="block w-auto"
+            style={{ height: BNI_LOGO_HEIGHT_PX }}
+          />
+        </a>
         {onManage ? (
           <button
             type="button"
             onClick={onManage}
-            className="shrink-0 rounded-full border border-black bg-white px-3 py-1.5 text-[13px] font-semibold leading-none text-black"
+            className="ml-auto shrink-0 rounded-full border border-black bg-white px-3 py-1.5 text-[13px] font-semibold leading-none text-black"
           >
             My registration
           </button>
@@ -548,6 +558,25 @@ function EventHeader({ onManage, goldClub = false }: { onManage?: () => void; go
         </div>
       ) : null}
     </header>
+  );
+}
+
+function EventDetails() {
+  return (
+    <div className="flex flex-col gap-2">
+      <h1 className="m-0 text-[22px] font-bold leading-tight text-black">IBMC 2027</h1>
+      <img
+        src="/assets/amplify-logo-white.png"
+        alt="AMPLIFY"
+        width={AMPLIFY_LOGO_WIDTH_PX}
+        height={AMPLIFY_LOGO_HEIGHT_PX}
+        className="block shrink-0 brightness-0"
+        style={{ width: AMPLIFY_LOGO_WIDTH_PX, height: AMPLIFY_LOGO_HEIGHT_PX, objectFit: "contain" }}
+      />
+      <p className="m-0 text-[14px] leading-snug text-[#64666A]">
+        June 16–17, 2027 <span aria-hidden="true">|</span> Newport, Pasay City
+      </p>
+    </div>
   );
 }
 
@@ -1529,8 +1558,11 @@ function RegistrationWizard() {
         <div className="flex min-h-full flex-col">
           <EventHeader onManage={openManage} />
           <div className="mx-auto flex w-full max-w-[480px] flex-1 flex-col px-5 py-6">
-            {localTier ? <StartTierCard tier={localTier} /> : <p className="m-0 text-[15px]">Registration closed on May 31, 2027.</p>}
-            <h1 className="m-0 mt-6 text-[22px] font-bold leading-tight">Who's registering?</h1>
+            <EventDetails />
+            <div className="mt-5">
+              {localTier ? <StartTierCard tier={localTier} /> : <p className="m-0 text-[15px]">Registration closed on May 31, 2027.</p>}
+            </div>
+            <h2 className="m-0 mt-6 text-[22px] font-bold leading-tight">Who's registering?</h2>
             <div className="mt-3 flex flex-col gap-3">
               <AudienceCard title="I'm a BNI Philippines member" body="We'll fill in your details." onClick={() => choose("member")} />
               {internationalOnSale ? (
