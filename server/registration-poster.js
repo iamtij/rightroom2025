@@ -1,4 +1,5 @@
 import { listChapterProgress } from "./chapters.js";
+import { HAS_RECORDED_PAYMENT_SQL } from "./registrations.js";
 import { formatMoney } from "./time.js";
 import { renderPosterJpeg } from "./registration-poster-image.js";
 
@@ -65,13 +66,12 @@ export function buildRegistrationPoster(db, asOf = new Date()) {
   const today = manilaDate(asOf);
   const since = stamp(new Date(asOf.getTime() - 24 * 60 * 60 * 1000));
   const created = `REPLACE(SUBSTR(COALESCE(r.created_at, ''), 1, 19), 'T', ' ')`;
+  const paid = HAS_RECORDED_PAYMENT_SQL;
   const counts = db.prepare(`
     SELECT
       SUM(CASE WHEN r.status = 'confirmed' AND r.fully_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS full_paid,
-      SUM(CASE WHEN r.status = 'confirmed' AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN 1 ELSE 0 END) AS installment,
-      SUM(CASE WHEN r.status = 'confirmed'
-        AND (r.fully_paid_at IS NOT NULL OR (r.payment_plan = 'installment' AND r.fully_paid_at IS NULL))
-        AND ${created} >= ? THEN 1 ELSE 0 END) AS since_yesterday
+      SUM(CASE WHEN r.status = 'confirmed' AND ${paid} AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN 1 ELSE 0 END) AS installment,
+      SUM(CASE WHEN r.status = 'confirmed' AND ${paid} AND ${created} >= ? THEN 1 ELSE 0 END) AS since_yesterday
     FROM registrations r
     JOIN ticket_products p ON p.id = r.product_id
     WHERE p.code NOT LIKE ?

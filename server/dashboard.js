@@ -1,4 +1,5 @@
 import { listPaymentChannels } from "./payment-channels.js";
+import { HAS_RECORDED_PAYMENT_SQL } from "./registrations.js";
 import { addDays, manilaParts } from "./time.js";
 
 function percent(part, whole) {
@@ -234,14 +235,16 @@ export function collectPaymentMethods(db) {
 export function dashboardStats(db) {
   const today = manilaParts().date;
   const through = addDays(today, 30);
+  const paid = HAS_RECORDED_PAYMENT_SQL;
   const headline = db.prepare(`
     SELECT
       COUNT(*) AS total,
-      SUM(CASE WHEN status != 'cancelled' THEN 1 ELSE 0 END) AS confirmed,
-      SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
-      SUM(CASE WHEN status != 'cancelled' AND product_id = (SELECT id FROM ticket_products WHERE code = 'first_mover') THEN 1 ELSE 0 END) AS first_movers,
-      SUM(CASE WHEN status = 'cancelled' AND product_id = (SELECT id FROM ticket_products WHERE code = 'first_mover') THEN 1 ELSE 0 END) AS first_movers_cancelled
-    FROM registrations
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} THEN 1 ELSE 0 END) AS confirmed,
+      SUM(CASE WHEN r.status != 'cancelled' AND NOT ${paid} THEN 1 ELSE 0 END) AS unpaid_hold,
+      SUM(CASE WHEN r.status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} AND r.product_id = (SELECT id FROM ticket_products WHERE code = 'first_mover') THEN 1 ELSE 0 END) AS first_movers,
+      SUM(CASE WHEN r.status = 'cancelled' AND r.product_id = (SELECT id FROM ticket_products WHERE code = 'first_mover') THEN 1 ELSE 0 END) AS first_movers_cancelled
+    FROM registrations r
   `).get();
 
   const tickets = db.prepare(`
@@ -249,7 +252,8 @@ export function dashboardStats(db) {
       p.code,
       p.name,
       p.currency,
-      SUM(CASE WHEN r.status != 'cancelled' THEN 1 ELSE 0 END) AS signups,
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} THEN 1 ELSE 0 END) AS signups,
+      SUM(CASE WHEN r.status != 'cancelled' AND NOT ${paid} THEN 1 ELSE 0 END) AS unpaid_hold,
       SUM(CASE WHEN r.status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
       SUM(CASE WHEN r.status != 'cancelled' AND r.fully_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS fully_paid,
       COALESCE(SUM(CASE WHEN r.status != 'cancelled' AND r.fully_paid_at IS NOT NULL THEN (
@@ -257,15 +261,15 @@ export function dashboardStats(db) {
         FROM registration_installments i
         WHERE i.registration_id = r.id
       ) ELSE 0 END), 0) AS fully_paid_cents,
-      SUM(CASE WHEN r.status != 'cancelled' AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN 1 ELSE 0 END) AS installment_seats,
-      COALESCE(SUM(CASE WHEN r.status != 'cancelled' AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN (
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN 1 ELSE 0 END) AS installment_seats,
+      COALESCE(SUM(CASE WHEN r.status != 'cancelled' AND ${paid} AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN (
         SELECT COALESCE(SUM(i.amount_paid_cents), 0)
         FROM registration_installments i
         WHERE i.registration_id = r.id
       ) ELSE 0 END), 0) AS installment_cents,
-      SUM(CASE WHEN r.status != 'cancelled' AND r.payment_plan = 'full' THEN 1 ELSE 0 END) AS pay_in_full,
-      SUM(CASE WHEN r.status != 'cancelled' AND r.payment_plan = 'installment' THEN 1 ELSE 0 END) AS installment,
-      COALESCE(SUM(CASE WHEN r.status != 'cancelled' THEN r.amount_due_cents ELSE 0 END), 0) AS booked_cents,
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} AND r.payment_plan = 'full' THEN 1 ELSE 0 END) AS pay_in_full,
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} AND r.payment_plan = 'installment' THEN 1 ELSE 0 END) AS installment,
+      COALESCE(SUM(CASE WHEN r.status != 'cancelled' AND ${paid} THEN r.amount_due_cents ELSE 0 END), 0) AS booked_cents,
       COALESCE(SUM(CASE WHEN r.status != 'cancelled' THEN (
         SELECT COALESCE(SUM(i.amount_paid_cents), 0)
         FROM registration_installments i
@@ -278,11 +282,11 @@ export function dashboardStats(db) {
   `).all();
 
   const byDay = db.prepare(`
-    SELECT registered_on AS day, COUNT(*) AS signups
-    FROM registrations
-    WHERE status != 'cancelled'
-    GROUP BY registered_on
-    ORDER BY registered_on
+    SELECT r.registered_on AS day, COUNT(*) AS signups
+    FROM registrations r
+    WHERE r.status != 'cancelled' AND ${paid}
+    GROUP BY r.registered_on
+    ORDER BY r.registered_on
   `).all();
 
   const dueSoon = db.prepare(`
@@ -326,10 +330,12 @@ export function dashboardStats(db) {
   }
 
   const confirmed = headline.confirmed || 0;
+  const unpaidHold = headline.unpaid_hold || 0;
   return {
     signups: {
       total: headline.total || 0,
       confirmed,
+      unpaidHold,
       cancelled: headline.cancelled || 0,
       firstMovers: headline.first_movers || 0,
       firstMoversCancelled: headline.first_movers_cancelled || 0,
@@ -340,6 +346,7 @@ export function dashboardStats(db) {
       name: ticket.name,
       currency: ticket.currency,
       signups: ticket.signups,
+      unpaidHold: ticket.unpaid_hold,
       cancelled: ticket.cancelled,
       fullyPaid: ticket.fully_paid,
       fullyPaidCents: ticket.fully_paid_cents,

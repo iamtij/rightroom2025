@@ -147,6 +147,7 @@ type Registration = {
   status: string;
   registeredOn?: string;
   createdAt?: string | null;
+  paidAt?: string | null;
   attendee: { fullName: string; email: string; mobile: string; business?: string; industry?: string; chapter?: string };
   tierName: string;
   plan: string;
@@ -227,8 +228,8 @@ function DataTable({ columns, children, empty }: { columns: string[]; children: 
 }
 
 type DashboardData = {
-  signups: { total: number; confirmed: number; cancelled: number; firstMovers: number; firstMoversCancelled: number; firstMoverPercent: number | null };
-  tickets: { code: string; name: string; currency: "PHP" | "USD"; signups: number; cancelled: number; fullyPaid: number; fullyPaidCents: number; installmentSeats: number; installmentCents: number; collectedCents: number; bookedCents: number }[];
+  signups: { total: number; confirmed: number; unpaidHold: number; cancelled: number; firstMovers: number; firstMoversCancelled: number; firstMoverPercent: number | null };
+  tickets: { code: string; name: string; currency: "PHP" | "USD"; signups: number; unpaidHold: number; cancelled: number; fullyPaid: number; fullyPaidCents: number; installmentSeats: number; installmentCents: number; collectedCents: number; bookedCents: number }[];
   plans: { payInFull: number; installment: number; fullyPaid: number; owing: number };
   money: { currency: "PHP" | "USD"; collectedCents: number; outstandingCents: number }[];
   byDay: { day: string; signups: number }[];
@@ -418,7 +419,7 @@ function TicketAmount({ cents, currency }: { cents: number; currency: "PHP" | "U
 }
 
 function TicketSplit({ ticket }: { ticket: DashboardData["tickets"][number] }) {
-  if (!ticket.signups && !ticket.cancelled) {
+  if (!ticket.signups && !ticket.cancelled && !ticket.unpaidHold) {
     return (
       <div className="flex items-baseline justify-between gap-3 text-sm">
         <span className="font-semibold">{ticket.name}</span>
@@ -430,7 +431,7 @@ function TicketSplit({ ticket }: { ticket: DashboardData["tickets"][number] }) {
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="m-0 text-sm font-bold">{ticket.name}</h3>
-        <p className="m-0 text-right text-[13px] text-[#5C5C63]">{ticket.signups} confirmed</p>
+        <p className="m-0 text-right text-[13px] text-[#5C5C63]">{ticket.signups} paid{ticket.unpaidHold ? ` · ${ticket.unpaidHold} unpaid / on hold` : ""}</p>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-[10px] border border-[#E4E1DC] px-3 py-2">
@@ -578,18 +579,19 @@ function Dashboard({ onError }: { onError: (message: string) => void }) {
   if (!data) return <p className="m-0 text-sm text-[#5C5C63]">Loading dashboard…</p>;
   const pesos = data.money.find((row) => row.currency === "PHP");
   const firstMoverNote = data.signups.firstMoverPercent === null
-    ? (data.signups.firstMoversCancelled ? `${data.signups.firstMoversCancelled} cancelled` : "No confirmed signups yet")
-    : `${share(data.signups.firstMoverPercent)} of confirmed${data.signups.firstMoversCancelled ? ` · ${data.signups.firstMoversCancelled} cancelled` : ""}`;
+    ? (data.signups.firstMoversCancelled ? `${data.signups.firstMoversCancelled} cancelled` : "No paid signups yet")
+    : `${share(data.signups.firstMoverPercent)} of paid${data.signups.firstMoversCancelled ? ` · ${data.signups.firstMoversCancelled} cancelled` : ""}`;
   return (
     <section className="flex flex-col gap-4">
       <h1 className="m-0 font-archivo text-[28px] font-extrabold">Dashboard</h1>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <Kpi label="Total signups" value={data.signups.total} note={`${data.signups.confirmed} confirmed · ${data.signups.cancelled} cancelled`} />
-        <Kpi label="Fully paid" value={data.plans.fullyPaid} note={data.signups.confirmed ? `${Math.round((data.plans.fullyPaid / data.signups.confirmed) * 100)}% of confirmed` : "No confirmed signups yet"} />
+        <Kpi label="Paid signups" value={data.signups.confirmed} note={`${data.signups.cancelled} cancelled`} />
+        <Kpi label="Unpaid / on hold" value={data.signups.unpaidHold} note="Registered, waiting on first payment" accent />
+        <Kpi label="Fully paid" value={data.plans.fullyPaid} note={data.signups.confirmed ? `${Math.round((data.plans.fullyPaid / data.signups.confirmed) * 100)}% of paid` : "No paid signups yet"} />
         <Kpi label="First movers" value={data.signups.firstMovers} note={firstMoverNote} />
         <Kpi label="Updated" value={share(data.roster.updatedPercent)} note={`${data.roster.updated} of ${data.roster.total} on the roster`} />
         <Kpi label="Delayed" value={share(data.roster.delayedPercent)} note={`${data.roster.delayed} of ${data.roster.total} on the roster`} accent />
-        <Kpi label="Collected" value={<Peso cents={pesos?.collectedCents ?? 0} />} note="Confirmed registrations, pesos" />
+        <Kpi label="Collected" value={<Peso cents={pesos?.collectedCents ?? 0} />} note="Paid registrations, pesos" />
         <Kpi label="Still due" value={<Peso cents={pesos?.outstandingCents ?? 0} />} note={data.dueSoon.rows.length === 0 ? `Nothing due through ${shortDate(data.dueSoon.through)}` : data.dueSoon.rows.map((row) => `${money(row.cents, row.currency)} by ${shortDate(data.dueSoon.through)}`).join(" · ")} accent />
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
@@ -602,7 +604,7 @@ function Dashboard({ onError }: { onError: (message: string) => void }) {
         </Panel>
       </div>
       <Panel title="Signups by ticket">
-        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Amount collected, then the number of seats. Installment seats are not fully paid yet.</p>
+        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Paid seats only. Installment seats have paid at least the first amount but are not fully paid yet.</p>
         <div className="flex flex-col gap-4">
           {data.tickets.filter((ticket) => !ticket.code.startsWith("test")).map((ticket) => <TicketSplit key={ticket.code} ticket={ticket} />)}
         </div>
@@ -652,7 +654,7 @@ function Dashboard({ onError }: { onError: (message: string) => void }) {
               { label: "Still owing", value: data.plans.owing, color: chartColors.delayed },
             ]}
             center={String(data.signups.confirmed)}
-            caption="Confirmed"
+            caption="Paid"
           />
           <StackedBars rows={[
             ...data.money.map((row) => ({
@@ -940,6 +942,7 @@ function RegistrationView({
     ["Ticket", row.tierName],
     ["Reference", row.reference],
     ["Registered", row.registeredOn || ""],
+    ["Paid at", row.paidAt ? formatDateTime(row.paidAt) : ""],
     ["Status", registrationStatusLabel(row)],
   ];
   return (
@@ -1222,7 +1225,7 @@ function Registrations({
         </form>
       ) : null}
       {viewing ? <RegistrationView row={viewing} editing={editingDetails} draft={draft} setDraft={setDraft} chapters={chapters} onSave={save} onEdit={() => setEditingDetails(true)} onCloseEdit={() => setEditingDetails(false)} onClose={() => { setViewing(null); setEditingDetails(false); }} onCancel={() => setCancelTarget({ reference: viewing.reference, name: viewing.attendee.fullName })} onError={onError} /> : null}
-      <DataTable columns={["Date / time", "Name", "Email", "Mobile", "Reference", "Ticket", "Paid", "Left", "Status", ""]} empty={empty}>
+      <DataTable columns={["Date / time", "Name", "Email", "Mobile", "Reference", "Ticket", "Paid", "Left", "Paid at", "Status", ""]} empty={empty}>
         {visible.map((row) => (
           <tr key={row.reference}>
             <td className={`${tdClass} whitespace-nowrap`}>{formatDateTime(row.createdAt || row.registeredOn)}</td>
@@ -1233,6 +1236,7 @@ function Registrations({
             <td className={tdClass}>{row.tierName}</td>
             <td className={tdClass}>{money(row.totalCents - row.balanceCents, row.currency)}</td>
             <td className={tdClass}>{money(row.balanceCents, row.currency)}</td>
+            <td className={`${tdClass} whitespace-nowrap`}>{row.paidAt ? formatDateTime(row.paidAt) : "—"}</td>
             <td className={tdClass}>{registrationStatusLabel(row)}</td>
             <td className={`${tdClass} whitespace-nowrap text-right`}>
               <button type="button" className={linkButton} onClick={() => openView(row)}>View</button>

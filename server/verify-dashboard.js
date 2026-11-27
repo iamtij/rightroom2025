@@ -73,10 +73,26 @@ const cancelled = signup("first_mover", "cancelled@example.com", "09170000011");
 pay(cancelled, 99_000, "upay:instapay");
 cancelRegistration(db, cancelled.id);
 
+signup("first_mover", "hold@example.com", "09170000012");
+
+const installmentSeat = createRegistration(db, {
+  productCode: "first_mover",
+  paymentPlan: "installment",
+  fullName: "Installment Paid",
+  email: "installment-paid@example.com",
+  mobile: "09170000013",
+  registeredOn: "2026-11-12",
+});
+const firstDue = installmentSeat.installments.find((item) => item.status === "due") || installmentSeat.installments[0];
+pay(installmentSeat, firstDue.amount_cents, "bank transfer");
+
 const stats = dashboardStats(db);
+assert.equal(stats.signups.unpaidHold, 1);
+assert.equal(stats.signups.confirmed, 11);
+assert.equal(stats.signups.cancelled, 1);
+assert.equal(stats.tickets.reduce((sum, ticket) => sum + ticket.installmentSeats, 0), 1);
 assert.equal(stats.plans.fullyPaid, stats.tickets.reduce((sum, ticket) => sum + ticket.fullyPaid, 0));
 assert.ok(stats.tickets.every((ticket) => ticket.fullyPaidCents + ticket.installmentCents <= ticket.collectedCents));
-assert.equal(stats.tickets.reduce((sum, ticket) => sum + ticket.installmentSeats, 0), 0);
 const methods = stats.paymentMethods;
 const byChannel = (channel, currency) => methods.find((row) => row.channel === channel && row.currency === currency);
 const method = (channel, currency, code) => byChannel(channel, currency).methods.find((row) => row.code === code);
@@ -124,13 +140,13 @@ assert.equal(byChannel("admin", "USD").cents, 10_000);
 assert.equal(byChannel("comp", "PHP").cents, 12_000);
 assert.equal(byChannel("manual", "PHP").cents, 7_000);
 assert.equal(byChannel("other", "PHP").label, "Bank Transfer");
-assert.equal(byChannel("other", "PHP").cents, 4_000);
+assert.equal(byChannel("other", "PHP").cents, 104_000);
 assert.deepEqual(byChannel("other", "PHP").methods, []);
 
 const phpCollected = methods.filter((row) => row.currency === "PHP").reduce((sum, row) => sum + row.cents, 0);
 assert.equal(phpCollected, stats.money.find((row) => row.currency === "PHP").collectedCents);
 assert.equal(stats.money.find((row) => row.currency === "USD").collectedCents, 10_000);
-assert.equal(phpCollected, 264_000);
+assert.equal(phpCollected, 364_000);
 
 savePaymentChannels(db, { upay: { label: "UnionBank" }, hitpay_qr: { label: "QR Ph" } });
 const renamed = dashboardStats(db).paymentMethods;

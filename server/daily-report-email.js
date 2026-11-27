@@ -334,7 +334,7 @@ function renderCountReport(report) {
   const clock = clockLabel(report.asOf);
   const covers = report.coversLabel || `${shortStamp(report.windowStart)} to ${shortStamp(report.asOf)}`;
   const subject = `IBMC 2027 Report · ${clock.dateLine.replace(/^[A-Za-z]+, /, "")}`;
-  const preview = `${report.seatsConfirmed.toLocaleString("en-US")} seats confirmed · ${report.cancelledToDate.toLocaleString("en-US")} cancelled · ${report.roster.total.toLocaleString("en-US")} on the roster`;
+  const preview = `${report.seatsConfirmed.toLocaleString("en-US")} paid seats · ${(report.unpaidHold || 0).toLocaleString("en-US")} unpaid / on hold · ${report.cancelledToDate.toLocaleString("en-US")} cancelled · ${report.roster.total.toLocaleString("en-US")} on the roster`;
   const ticketRows = report.tickets.map((ticket) => ticketBlock(ticket, { money: false })).join("");
   const healthRows = report.health.bands.filter((band) => band.count != null).map((band) => {
     const background = band.key === "day15" ? "#EFEFEF" : band.late ? "#FBEAEB" : "#FFFFFF";
@@ -374,11 +374,12 @@ function renderCountReport(report) {
       <tr><td style="padding-bottom:16px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
           <tr>
-            ${tile("Seats confirmed", report.seatsConfirmed.toLocaleString("en-US"), pill(`+${report.activity.registrations.toLocaleString("en-US")} today`, report.activity.registrations > 0), false)}
-            ${tile("First movers", report.firstMovers.toLocaleString("en-US"), esc("Confirmed seats"), false)}
+            ${tile("Paid seats", report.seatsConfirmed.toLocaleString("en-US"), pill(`+${report.activity.registrations.toLocaleString("en-US")} today`, report.activity.registrations > 0), false)}
+            ${tile("First movers", report.firstMovers.toLocaleString("en-US"), esc("Paid seats"), false)}
           </tr>
           <tr>
-            ${tile("Fully paid", (report.fullyPaid ?? 0).toLocaleString("en-US"), esc("Confirmed seats, all tickets"), false)}
+            ${tile("Fully paid", (report.fullyPaid ?? 0).toLocaleString("en-US"), esc("Paid seats, all tickets"), false)}
+            ${tile("Unpaid / on hold", (report.unpaidHold ?? 0).toLocaleString("en-US"), esc("No successful payment yet"), false)}
           </tr>
         </table>
       </td></tr>
@@ -423,7 +424,8 @@ function renderCountReport(report) {
     `As of ${clock.dateLine} · ${clock.timeLine} (PHT)`,
     `Covers ${covers}`,
     "",
-    `Seats confirmed: ${report.seatsConfirmed} (+${report.activity.registrations} today)`,
+    `Paid seats: ${report.seatsConfirmed} (+${report.activity.registrations} today)`,
+    `Unpaid / on hold: ${report.unpaidHold || 0}`,
     `Fully paid: ${report.fullyPaid ?? 0}`,
     `Roster: ${report.roster.total} on the roster, ${report.roster.updated} updated, ${report.roster.delayed} delayed`,
     `First movers on the roster: ${report.roster.firstMovers}`,
@@ -455,7 +457,7 @@ export function renderDailyReport(report) {
   const covers = report.coversLabel || `${shortStamp(report.windowStart)} to ${shortStamp(report.asOf)}`;
   const preview = report.screen
     ? `${report.screen.signups.toLocaleString("en-US")} signups · ${peso(report.screen.collectedCents)} collected · ${peso(report.screen.stillDueCents)} still due`
-    : `${report.seatsConfirmed.toLocaleString("en-US")} seats confirmed · ${peso(report.collected.PHP)} collected · ${peso(report.overdue.PHP)} overdue`;
+    : `${report.seatsConfirmed.toLocaleString("en-US")} paid seats · ${peso(report.collected.PHP)} collected · ${peso(report.overdue.PHP)} overdue`;
   const scheduledUsd = report.scheduled?.USD ? ` · plus ${formatMoney(report.scheduled.USD, "USD")}` : "";
   const phpTickets = report.screen ? [] : report.tickets.filter((ticket) => ticket.currency === "PHP");
   const usdTickets = report.screen ? [] : report.tickets.filter((ticket) => ticket.currency === "USD");
@@ -508,8 +510,11 @@ export function renderDailyReport(report) {
             ${tile("Collected", peso(report.screen.collectedCents), esc("Confirmed registrations, pesos"), false)}
             ${tile("Still due", peso(report.screen.stillDueCents), esc(report.screen.stillDueNote), true)}
           </tr>` : `<tr>
-            ${tile("Seats confirmed", report.seatsConfirmed.toLocaleString("en-US"), pill(`+${report.activity.registrations.toLocaleString("en-US")} today`, report.activity.registrations > 0), false)}
-            ${tile("Fully paid", (report.fullyPaid ?? 0).toLocaleString("en-US"), esc("Confirmed seats, all tickets"), false)}
+            ${tile("Paid seats", report.seatsConfirmed.toLocaleString("en-US"), pill(`+${report.activity.registrations.toLocaleString("en-US")} today`, report.activity.registrations > 0), false)}
+            ${tile("Fully paid", (report.fullyPaid ?? 0).toLocaleString("en-US"), esc("Paid seats, all tickets"), false)}
+          </tr>
+          <tr>
+            ${tile("Unpaid / on hold", (report.unpaidHold ?? 0).toLocaleString("en-US"), esc("No successful payment yet"), false)}
           </tr>
           <tr>
             ${tile("Collected", peso(report.collected.PHP), collectedSub(report), false)}
@@ -595,7 +600,8 @@ function renderText(report, clock, covers) {
     `As of ${clock.dateLine} · ${clock.timeLine} (PHT)`,
     `Covers ${covers}`,
     "",
-    `Seats confirmed: ${report.seatsConfirmed.toLocaleString("en-US")} (+${report.activity.registrations.toLocaleString("en-US")} today)`,
+    `Paid seats: ${report.seatsConfirmed.toLocaleString("en-US")} (+${report.activity.registrations.toLocaleString("en-US")} today)`,
+    `Unpaid / on hold: ${(report.unpaidHold || 0).toLocaleString("en-US")}`,
     `Fully paid: ${(report.fullyPaid ?? 0).toLocaleString("en-US")}`,
     `Collected: ${peso(report.collected.PHP)} (+${peso(report.activity.collected.PHP || 0)} today)${report.collected.USD ? `, plus ${formatMoney(report.collected.USD, "USD")}` : ""}`,
     `Scheduled: ${peso(report.scheduled.PHP)}`,

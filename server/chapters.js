@@ -1,3 +1,5 @@
+import { HAS_RECORDED_PAYMENT_SQL } from "./registrations.js";
+
 export function listChapters(db) {
   seedFromMembers(db);
   return db.prepare("SELECT id, name FROM chapters ORDER BY name COLLATE NOCASE, id").all();
@@ -15,17 +17,15 @@ function percent(part, whole) {
 
 function registrationIndex(db) {
   const rows = db.prepare(`
-    SELECT reference, email, mobile, phone_key, payment_plan, fully_paid_at, created_at
-    FROM registrations
-    WHERE status = 'confirmed'
-    ORDER BY id DESC
+    SELECT r.id, r.reference, r.email, r.mobile, r.phone_key, r.payment_plan, r.fully_paid_at, r.created_at
+    FROM registrations r
+    WHERE r.status = 'confirmed' AND ${HAS_RECORDED_PAYMENT_SQL}
+    ORDER BY r.id DESC
   `).all();
   const byEmail = new Map();
   const byPhone = new Map();
   for (const row of rows) {
     const fullyPaid = Boolean(row.fully_paid_at);
-    const installment = row.payment_plan === "installment" && !fullyPaid;
-    if (!fullyPaid && !installment) continue;
     const owned = {
       reference: row.reference,
       plan: fullyPaid ? "full" : "installment",

@@ -74,11 +74,15 @@ assert.ok(csv.includes('"Ada ""CSV"" Cruz"'));
 assert.ok(csv.includes('"Cruz, Co"'));
 assert.ok(csv.includes("Ben Reyes"));
 
+assert.ok(REGISTRATION_CSV_HEADERS.includes("paid_at"));
 const paidCells = registrationCsvCells(getRegistration(db, paid.id));
 assert.equal(paidCells[REGISTRATION_CSV_HEADERS.indexOf("plan_status")], "fully_paid");
 assert.equal(paidCells[REGISTRATION_CSV_HEADERS.indexOf("balance")], "0.00");
 assert.equal(paidCells[REGISTRATION_CSV_HEADERS.indexOf("qr_ready")], "yes");
 assert.equal(paidCells[REGISTRATION_CSV_HEADERS.indexOf("total")], (paid.amount_due_cents / 100).toFixed(2));
+assert.ok(paidCells[REGISTRATION_CSV_HEADERS.indexOf("paid_at")]);
+const unpaidCells = registrationCsvCells(getRegistration(db, unpaid.id));
+assert.equal(unpaidCells[REGISTRATION_CSV_HEADERS.indexOf("paid_at")], "");
 await new Promise((resolve) => setTimeout(resolve, 100));
 db.close();
 

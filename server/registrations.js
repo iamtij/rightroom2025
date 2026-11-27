@@ -84,6 +84,16 @@ export function findRegistrationByContact(db, query) {
   return resolveRegistrationByContact(db, query).registration;
 }
 
+/** SQL predicate: registration alias `r` has at least one successful payment. */
+export const HAS_RECORDED_PAYMENT_SQL = `(
+  r.fully_paid_at IS NOT NULL
+  OR EXISTS (SELECT 1 FROM payments pay WHERE pay.registration_id = r.id)
+  OR EXISTS (
+    SELECT 1 FROM registration_installments ri
+    WHERE ri.registration_id = r.id AND (ri.amount_paid_cents > 0 OR ri.status = 'paid')
+  )
+)`;
+
 /** True once any installment/full payment has been recorded for this registration. */
 export function registrationHasRecordedPayment(db, registrationId) {
   const id = Number(registrationId);
@@ -98,6 +108,23 @@ export function registrationHasRecordedPayment(db, registrationId) {
   if (installment) return true;
   const row = db.prepare("SELECT fully_paid_at FROM registrations WHERE id = ?").get(id);
   return Boolean(row?.fully_paid_at);
+}
+
+/** Timestamp of the first successful payment, or null when none. */
+export function firstPaidAt(db, registrationId) {
+  const id = Number(registrationId);
+  if (!id) return null;
+  const fromPayments = db.prepare(`
+    SELECT MIN(recorded_at) AS at FROM payments WHERE registration_id = ?
+  `).get(id);
+  if (fromPayments?.at) return fromPayments.at;
+  const fromInstallments = db.prepare(`
+    SELECT MIN(paid_at) AS at FROM registration_installments
+    WHERE registration_id = ? AND paid_at IS NOT NULL
+  `).get(id);
+  if (fromInstallments?.at) return fromInstallments.at;
+  const row = db.prepare("SELECT fully_paid_at FROM registrations WHERE id = ?").get(id);
+  return row?.fully_paid_at || null;
 }
 
 export function getRegistration(db, id) {
@@ -115,6 +142,7 @@ export function getRegistration(db, id) {
   `).all(id);
   return {
     ...registration,
+    first_paid_at: firstPaidAt(db, id),
     balance_cents: registrationBalance(db, id),
     installment_count: installments.length,
     installments,

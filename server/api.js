@@ -225,6 +225,7 @@ function present(registration, options = {}) {
     qrReady: entryPassEligible(registration),
     registeredOn: registration.registered_on,
     createdAt: registration.created_at || null,
+    paidAt: registration.first_paid_at || null,
     paymentHoldUntil: registration.payment_hold_until || null,
     payments,
     ...(options.transactions ? { transactions: options.transactions } : {}),
