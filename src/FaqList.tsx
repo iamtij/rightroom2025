@@ -89,7 +89,7 @@ function InstallmentAnswer() {
 function FirstPaymentAnswer() {
   return (
     <p className="m-0 max-w-[62ch]">
-      24 hours from the moment checkout opens. That payment locks the ticket: <Price text="₱1,000" /> for First Mover, <Price text="₱4,000" /> for Early Bird, or the full amount. If it is not received in that time, the registration is cancelled and you start again. Later installment dates are not on this 24-hour clock. International delegates pay in full, and IBMC records that payment separately.
+      2 hours from the moment checkout opens. That payment locks the ticket: <Price text="₱1,000" /> for First Mover, <Price text="₱4,000" /> for Early Bird, or the full amount. If it is not received in that time, the registration is cancelled and you start again. Later installment dates are not on this 2-hour clock. International delegates pay in full, and IBMC records that payment separately.
     </p>
   );
 }

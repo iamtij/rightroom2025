@@ -1,9 +1,16 @@
 import { ibmcDeploymentEnv, railwayDeploymentClass, railwaySignalsPresent } from "./deployment-identity.js";
 import { getRegistration, recordPayment, registrationContactClash } from "./registrations.js";
 
-export const HOLD_MS = 24 * 60 * 60 * 1000;
+/**
+ * How long an unpaid PHP registration waits for its first payment.
+ * The deadline is written once per registration (payment_hold_until) when hosted checkout opens,
+ * so changing this only affects new holds. Holds already stored keep the deadline they were given.
+ */
+export const HOLD_HOURS = 2;
+export const HOLD_MS = HOLD_HOURS * 60 * 60 * 1000;
+/** Extra time before cancel when a gateway page opened before the deadline is still pending. */
 export const HOLD_GRACE_MS = 2 * 60 * 60 * 1000;
-export const HOLD_EXPIRED_MESSAGE = "The 24-hour hold ended. Start again to lock the ticket.";
+export const HOLD_EXPIRED_MESSAGE = "The payment hold ended. Start again to lock the ticket.";
 
 const SESSION_TABLES = ["hitpay_payments", "paynamics_payments", "upay_payments"];
 

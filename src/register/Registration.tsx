@@ -2147,7 +2147,7 @@ function RegistrationWizard() {
             </p>
             {firstPaymentHold ? (
               <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">
-                The first payment locks this ticket. It is due within 24 hours of checkout. After that, this registration is cancelled and you start again.
+                The first payment locks this ticket. It is due within 2 hours of checkout. After that, this registration is cancelled and you start again.
               </p>
             ) : null}
           </>
@@ -3701,7 +3701,7 @@ function Manage({
         label={due ? "Lev with a payment reminder" : "Lev"}
       >
         {expiredHold
-          ? "This registration expired. The first payment did not arrive within 24 hours. Start again to lock a ticket."
+          ? "This registration expired. The first payment did not arrive in time. Start again to lock a ticket."
           : record.planStatus === "fully_paid"
           ? "You're all paid up. Your QR ticket is ready."
           : holdDeadline
