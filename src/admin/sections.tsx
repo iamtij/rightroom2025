@@ -840,6 +840,7 @@ const emptyRegistration = { fullName: "", email: "", mobile: "", business: "", i
 function registrationListStatus(row: Registration) {
   if (row.status === "cancelled") return "cancelled";
   if (row.balanceCents === 0) return "fully_paid";
+  if (!row.paidAt) return "pending";
   return "active";
 }
 
@@ -847,6 +848,7 @@ function registrationStatusLabel(row: Registration) {
   const status = registrationListStatus(row);
   if (status === "fully_paid") return "Fully paid";
   if (status === "cancelled") return "Cancelled";
+  if (status === "pending") return "Pending";
   return "Active";
 }
 
@@ -1189,6 +1191,7 @@ function Registrations({
         <Field label="Status">
           <select className={`${field} min-w-[160px]`} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             <option value="">All</option>
+            <option value="pending">Pending</option>
             <option value="active">Active</option>
             <option value="fully_paid">Fully paid</option>
             <option value="cancelled">Cancelled</option>
