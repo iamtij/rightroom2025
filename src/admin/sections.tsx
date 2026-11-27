@@ -228,14 +228,24 @@ function DataTable({ columns, children, empty }: { columns: string[]; children: 
 }
 
 type DashboardData = {
-  signups: { total: number; confirmed: number; unpaidHold: number; cancelled: number; firstMovers: number; firstMoversCancelled: number; firstMoverPercent: number | null };
+  signups: {
+    total: number;
+    confirmed: number;
+    unpaidHold: number;
+    cancelled: number;
+    firstMovers: number;
+    firstMoversFullyPaid: number;
+    firstMoversInstallment: number;
+    firstMoversCancelled: number;
+    firstMoverPercent: number | null;
+  };
   tickets: { code: string; name: string; currency: "PHP" | "USD"; signups: number; unpaidHold: number; cancelled: number; fullyPaid: number; fullyPaidCents: number; installmentSeats: number; installmentCents: number; collectedCents: number; bookedCents: number }[];
   plans: { payInFull: number; installment: number; fullyPaid: number; owing: number };
+  delayed: { count: number; percent: number | null };
   money: { currency: "PHP" | "USD"; collectedCents: number; outstandingCents: number }[];
   byDay: { day: string; signups: number }[];
   dueSoon: { through: string; rows: { currency: "PHP" | "USD"; count: number; cents: number }[] };
-  roster: { total: number; updated: number; delayed: number; cancelled: number; updatedPercent: number | null; delayedPercent: number | null; cancelledPercent: number | null; goldClub: number };
-  firstMoverRoster: { total: number; updated: number; delayed: number; cancelled: number; updatedPercent: number | null; delayedPercent: number | null; cancelledPercent: number | null };
+  roster: { goldClub: number };
   paymentMethods: {
     channel: string;
     label: string;
@@ -328,14 +338,6 @@ function Donut({ slices, center, caption }: { slices: { label: string; value: nu
       </ul>
     </div>
   );
-}
-
-function statusSlices(group: DashboardData["firstMoverRoster"]) {
-  return [
-    { label: "Updated", value: group.updated, color: chartColors.updated },
-    { label: "Delayed", value: group.delayed, color: chartColors.delayed },
-    { label: "Cancelled", value: group.cancelled, color: chartColors.cancelled },
-  ];
 }
 
 function StackedBars({ rows }: { rows: { label: string; detail: string; parts: { value: number; color: string; name: string }[] }[] }) {
@@ -578,30 +580,22 @@ function Dashboard({ onError }: { onError: (message: string) => void }) {
   useEffect(() => { api("/api/admin/dashboard").then(setData).catch((error) => onError(error.message)); }, []);
   if (!data) return <p className="m-0 text-sm text-[#5C5C63]">Loading dashboard…</p>;
   const pesos = data.money.find((row) => row.currency === "PHP");
-  const firstMoverNote = data.signups.firstMoverPercent === null
-    ? (data.signups.firstMoversCancelled ? `${data.signups.firstMoversCancelled} cancelled` : "No paid signups yet")
-    : `${share(data.signups.firstMoverPercent)} of paid${data.signups.firstMoversCancelled ? ` · ${data.signups.firstMoversCancelled} cancelled` : ""}`;
+  const paidBreakdown = `${data.plans.fullyPaid} fully paid · ${data.plans.owing} installment`;
+  const firstMoverNote = data.signups.firstMovers
+    ? `${data.signups.firstMoversFullyPaid} fully paid · ${data.signups.firstMoversInstallment} installment`
+    : (data.signups.firstMoversCancelled ? `${data.signups.firstMoversCancelled} cancelled` : "No paid first movers yet");
+  const delayed = data.delayed || { count: 0, percent: null };
   return (
     <section className="flex flex-col gap-4">
       <h1 className="m-0 font-archivo text-[28px] font-extrabold">Dashboard</h1>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <Kpi label="Paid signups" value={data.signups.confirmed} note={`${data.signups.cancelled} cancelled`} />
+        <Kpi label="Paid signups" value={data.signups.confirmed} note={paidBreakdown} />
         <Kpi label="Unpaid / on hold" value={data.signups.unpaidHold} note="Registered, waiting on first payment" accent />
         <Kpi label="Fully paid" value={data.plans.fullyPaid} note={data.signups.confirmed ? `${Math.round((data.plans.fullyPaid / data.signups.confirmed) * 100)}% of paid` : "No paid signups yet"} />
         <Kpi label="First movers" value={data.signups.firstMovers} note={firstMoverNote} />
-        <Kpi label="Updated" value={share(data.roster.updatedPercent)} note={`${data.roster.updated} of ${data.roster.total} on the roster`} />
-        <Kpi label="Delayed" value={share(data.roster.delayedPercent)} note={`${data.roster.delayed} of ${data.roster.total} on the roster`} accent />
+        <Kpi label="Delayed" value={share(delayed.percent)} note={`${delayed.count} of ${data.signups.confirmed} paid`} accent />
         <Kpi label="Collected" value={<Peso cents={pesos?.collectedCents ?? 0} />} note="Paid registrations, pesos" />
         <Kpi label="Still due" value={<Peso cents={pesos?.outstandingCents ?? 0} />} note={data.dueSoon.rows.length === 0 ? `Nothing due through ${shortDate(data.dueSoon.through)}` : data.dueSoon.rows.map((row) => `${money(row.cents, row.currency)} by ${shortDate(data.dueSoon.through)}`).join(" · ")} accent />
-      </div>
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Panel title="Roster status">
-          <Donut slices={statusSlices(data.roster)} center={String(data.roster.total)} caption="Roster" />
-          <p className="m-0 text-[13px] text-[#5C5C63]">{data.roster.goldClub} gold club {data.roster.goldClub === 1 ? "member" : "members"}</p>
-        </Panel>
-        <Panel title="First movers on the roster">
-          <Donut slices={statusSlices(data.firstMoverRoster)} center={String(data.firstMoverRoster.total)} caption="On roster" />
-        </Panel>
       </div>
       <Panel title="Signups by ticket">
         <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Paid seats only. Installment seats have paid at least the first amount but are not fully paid yet.</p>
