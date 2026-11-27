@@ -4,13 +4,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { openDatabase } from "./db.js";
+import { migrateHitpayCardChannel, openDatabase } from "./db.js";
 import { currentTotp } from "./auth.js";
 import { createRegistration, getEntryPass, recordPayment, resumeTokenMatches } from "./registrations.js";
 import { upayPublicCheckoutInfo, upaySettlement } from "./upay.js";
-import { buyerPaymentChannels, listPaymentChannels, savePaymentChannels, savePaynamicsMethods } from "./payment-channels.js";
+import { buyerPaymentChannels, listPaymentChannels, savePaymentChannels, savePaynamicsMethods, seedPaymentChannels } from "./payment-channels.js";
 import { convenienceFeeCents, paymentCharge, settlementBaseCents } from "./convenience-fee.js";
-import { handleHitpayWebhook, hitpayCentavos, paymentAccepted, repairHitpayMismatches } from "./hitpay.js";
+import { handleHitpayWebhook, hitpayCentavos, hitpayPaymentMethods, paymentAccepted, repairHitpayMismatches } from "./hitpay.js";
 
 delete process.env.ALLOW_TEST_TICKET;
 
@@ -24,6 +24,51 @@ assert.equal(qrChannel().customLabel, "");
 assert.equal(qrChannel().customNote, "");
 assert.equal(qrChannel().note, qrNote);
 assert.equal(qrChannel().enabled, false);
+assert.equal(listPaymentChannels(db).find((item) => item.code === "hitpay_card").enabled, false);
+assert.deepEqual(hitpayPaymentMethods("card"), ["card_cybersource"]);
+const legacyHitpay = new Database(":memory:");
+legacyHitpay.exec(`
+  CREATE TABLE registrations (id INTEGER PRIMARY KEY);
+  CREATE TABLE registration_installments (id INTEGER PRIMARY KEY);
+  INSERT INTO registrations (id) VALUES (1);
+  INSERT INTO registration_installments (id) VALUES (1);
+  CREATE TABLE hitpay_payments (
+    id INTEGER PRIMARY KEY,
+    registration_id INTEGER NOT NULL,
+    installment_id INTEGER NOT NULL,
+    session_id TEXT NOT NULL UNIQUE,
+    gateway_ref TEXT,
+    amount_cents INTEGER NOT NULL,
+    currency TEXT NOT NULL,
+    fee_cents INTEGER NOT NULL DEFAULT 0,
+    channel TEXT NOT NULL CHECK (channel IN ('qr', 'online')),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed', 'expired')),
+    gateway_status TEXT,
+    qr_code TEXT,
+    payment_url TEXT,
+    expires_at TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+  INSERT INTO hitpay_payments (registration_id, installment_id, session_id, amount_cents, currency, channel, status)
+  VALUES (1, 1, 'qr-session', 100, 'PHP', 'qr', 'pending');
+`);
+assert.throws(() => legacyHitpay.prepare(`
+  INSERT INTO hitpay_payments (registration_id, installment_id, session_id, amount_cents, currency, channel, status)
+  VALUES (1, 1, 'card-session', 100, 'PHP', 'card', 'pending')
+`).run());
+migrateHitpayCardChannel(legacyHitpay);
+legacyHitpay.prepare(`
+  INSERT INTO hitpay_payments (registration_id, installment_id, session_id, amount_cents, currency, channel, status)
+  VALUES (1, 1, 'card-session', 100, 'PHP', 'card', 'pending')
+`).run();
+assert.equal(legacyHitpay.prepare("SELECT channel FROM hitpay_payments WHERE session_id = 'qr-session'").get().channel, "qr");
+legacyHitpay.close();
+process.env.IBMC_ENABLE_HITPAY_CARD = "true";
+seedPaymentChannels(db);
+assert.equal(buyerPaymentChannels(db).find((item) => item.code === "hitpay_card").label, "HitPay card");
+delete process.env.IBMC_ENABLE_HITPAY_CARD;
+savePaymentChannels(db, { hitpay_card: false });
 assert.equal(
   buyerPaymentChannels(db).find((item) => item.code === "upay").note,
   "UnionBank collects this for GLOBAL REFERRAL MARKETING INC.",
@@ -367,6 +412,8 @@ fs.rmSync(file, { force: true });
 process.env.IBMC_DB_PATH = file;
 process.env.ALLOW_TEST_TICKET = "";
 delete process.env.ALLOW_TEST_REGISTRATION;
+delete process.env.IBMC_STAGING_EARLY_PAYMENTS;
+delete process.env.IBMC_DEPLOYMENT_ENV;
 process.env.ADMIN_EMAIL = "audit@example.com";
 process.env.ADMIN_PASSWORD = "correct-horse-battery";
 process.env.ADMIN_SESSION_SECRET = "security-audit-test-secret-32ch";
@@ -375,6 +422,10 @@ process.env.TURNSTILE_SECRET_KEY = "";
 process.env.ALLOW_TEST_REGISTRATION = "false";
 process.env.IBMC_STAGING_EARLY_PAYMENTS = "false";
 const { createApi } = await import("./api.js");
+delete process.env.ALLOW_TEST_REGISTRATION;
+delete process.env.IBMC_STAGING_EARLY_PAYMENTS;
+delete process.env.IBMC_DEPLOYMENT_ENV;
+delete process.env.ALLOW_TEST_TICKET;
 const seeded = openDatabase(file);
 seeded.prepare("UPDATE ticket_products SET sales_start = '2020-01-01', payments_open = 1").run();
 seeded.close();
@@ -501,6 +552,7 @@ try {
   assert.equal(previewBody.email, undefined);
   assert.equal(previewBody.mobile, undefined);
   assert.equal(previewBody.memberToken, undefined);
+  assert.equal(previewBody.requiresOtp, false);
   const previewMiss = await fetch(`${base}/api/members/preview`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -514,21 +566,18 @@ try {
   });
   assert.equal(previewBad.status, 400);
 
-  const { issueMemberOtp } = await import("./otp.js");
-  const otpDb = openDatabase(file);
-  const issued = issueMemberOtp(otpDb, "member.one@example.com");
-  otpDb.close();
-  const verified = await fetch(`${base}/api/members/otp/verify`, {
+  const claimed = await fetch(`${base}/api/members/claim`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query: "member.one@example.com", code: issued.code }),
+    body: JSON.stringify({ query: "member.one@example.com" }),
   });
-  const looked = await verified.json();
-  assert.equal(verified.status, 200);
+  const looked = await claimed.json();
+  assert.equal(claimed.status, 200);
   assert.equal(looked.member.email, "member.one@example.com");
   assert.equal(looked.member.registered, false);
   assert.equal(looked.registration, undefined);
   assert.ok(looked.member.memberToken);
+  assert.ok(looked.editToken);
 
   const proved = await fetch(`${base}/api/registrations`, {
     method: "POST",
@@ -551,6 +600,46 @@ try {
   assert.equal(provedBody.attendee.email, "member.one@example.com");
   assert.equal(provedBody.attendee.mobile, "09181234567");
 
+  const unpaidClaim = await fetch(`${base}/api/members/claim`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "member.one@example.com" }),
+  });
+  const unpaidClaimBody = await unpaidClaim.json();
+  assert.equal(unpaidClaim.status, 200);
+  assert.equal(unpaidClaimBody.member.registered, true);
+  assert.equal(unpaidClaimBody.registration.reference, provedBody.reference);
+  assert.ok(String(unpaidClaim.headers.get("set-cookie") || "").includes("ibmc_resume="));
+
+  const payDb = openDatabase(file);
+  const paidRow = payDb.prepare("SELECT id, amount_due_cents FROM registrations WHERE reference = ?").get(provedBody.reference);
+  assert.ok(paidRow?.id);
+  recordPayment(payDb, {
+    registrationId: paidRow.id,
+    amountCents: paidRow.amount_due_cents,
+    method: "manual",
+  });
+  payDb.close();
+
+  const paidPreview = await fetch(`${base}/api/members/preview`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "member.one@example.com" }),
+  });
+  const paidPreviewBody = await paidPreview.json();
+  assert.equal(paidPreviewBody.requiresOtp, true);
+
+  const paidClaim = await fetch(`${base}/api/members/claim`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: "member.one@example.com" }),
+  });
+  const paidClaimBody = await paidClaim.json();
+  assert.equal(paidClaim.status, 401);
+  assert.equal(paidClaimBody.requiresOtp, true);
+  assert.equal(paidClaimBody.memberToken, undefined);
+
+  const { issueMemberOtp } = await import("./otp.js");
   const incompleteDb = openDatabase(file);
   incompleteDb.prepare(`
     INSERT INTO members (
@@ -560,7 +649,6 @@ try {
       '', '', '', 'updated', '2026-11-01'
     )
   `).run();
-  const incompleteCode = issueMemberOtp(incompleteDb, "incomplete.member@example.com");
   incompleteDb.close();
   const incompletePreview = await fetch(`${base}/api/members/preview`, {
     method: "POST",
@@ -572,13 +660,14 @@ try {
   assert.equal(incompletePreviewBody.firstName, "Incomplete");
   assert.equal(incompletePreviewBody.chapter, "");
   assert.equal(incompletePreviewBody.email, undefined);
-  const incompleteVerified = await fetch(`${base}/api/members/otp/verify`, {
+  assert.equal(incompletePreviewBody.requiresOtp, false);
+  const incompleteClaimed = await fetch(`${base}/api/members/claim`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query: "incomplete.member@example.com", code: incompleteCode.code }),
+    body: JSON.stringify({ query: "incomplete.member@example.com" }),
   });
-  const incompleteBody = await incompleteVerified.json();
-  assert.equal(incompleteVerified.status, 200);
+  const incompleteBody = await incompleteClaimed.json();
+  assert.equal(incompleteClaimed.status, 200);
   assert.equal(incompleteBody.member.profileReady, false);
   const incompletePay = await fetch(`${base}/api/registrations`, {
     method: "POST",

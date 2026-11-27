@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import { openDatabase } from "./db.js";
-import { createRegistration, getRegistration, recordPayment } from "./registrations.js";
+import { createRegistration, getRegistration, recordPayment, registrationContactClash } from "./registrations.js";
+import { handleHitpayWebhook, startHitpayPayment } from "./hitpay.js";
+import { savePaymentChannels } from "./payment-channels.js";
+import { HOLD_EXPIRED_MESSAGE } from "./payment-hold.js";
 import { runReminders } from "./reminders.js";
 import {
   HOLD_GRACE_MS,
@@ -23,7 +27,7 @@ delete process.env.RAILWAY_SERVICE_ID;
 delete process.env.IBMC_FIRST_PAYMENT_HOLD;
 process.env.IBMC_DEPLOYMENT_ENV = "staging";
 
-assert.equal(HOLD_MS, 24 * 60 * 60 * 1000);
+assert.equal(HOLD_MS, 2 * 60 * 60 * 1000);
 assert.equal(HOLD_GRACE_MS, 2 * 60 * 60 * 1000);
 assert.equal(firstPaymentHoldEnabled(), true);
 
@@ -196,5 +200,243 @@ assignFirstPaymentHold(db, reminded.id);
 ageHold(reminded, 60 * 60 * 1000);
 await runReminders(db);
 assert.equal(getRegistration(db, reminded.id).status, "cancelled");
+
+// ---- 2-hour hold ----
+const HOUR = 60 * 60 * 1000;
+const MIN = 60 * 1000;
+const T0 = Date.parse("2026-11-27T10:00:00.000Z");
+const TEST_SALT = "verify-payment-hold-test-salt";
+
+async function hitpayPaid(sessionId, amountCents) {
+  const raw = JSON.stringify({
+    id: `gw-${sessionId}`,
+    status: "completed",
+    reference_number: sessionId,
+    currency: "PHP",
+    amount: (amountCents / 100).toFixed(2),
+    payments: [{ status: "succeeded", currency: "php", amount: (amountCents / 100).toFixed(2) }],
+  });
+  const saved = process.env.HITPAY_SALT;
+  process.env.HITPAY_SALT = TEST_SALT;
+  try {
+    const signature = crypto.createHmac("sha256", TEST_SALT).update(raw, "utf8").digest("hex");
+    return await handleHitpayWebhook(db, raw, signature, { eventType: "completed", eventObject: "payment_request" });
+  } finally {
+    if (saved === undefined) delete process.env.HITPAY_SALT;
+    else process.env.HITPAY_SALT = saved;
+  }
+}
+
+function openHitpaySession(registration, sessionId, startedMs) {
+  const due = getRegistration(db, registration.id).installments[0];
+  db.prepare(`
+    INSERT INTO hitpay_payments (
+      registration_id, installment_id, session_id, amount_cents, currency, channel, status, created_at
+    ) VALUES (?, ?, ?, ?, 'PHP', 'qr', 'pending', ?)
+  `).run(registration.id, due.id, sessionId, due.amount_cents, sqliteUtc(startedMs));
+  return due;
+}
+
+// New hold deadline is checkout time + 2 hours.
+const twoHour = signup("two-hour@example.com", { couponCode: undefined });
+const twoHourUntil = assignFirstPaymentHold(db, twoHour.id, T0);
+assert.equal(twoHourUntil, new Date(T0 + 2 * HOUR).toISOString());
+assert.equal(getRegistration(db, twoHour.id).payment_hold_until, new Date(T0 + 2 * HOUR).toISOString());
+assert.equal(checkoutHoldDecision(db, getRegistration(db, twoHour.id), T0 + 2 * HOUR - MIN), "allow");
+assert.equal(checkoutHoldDecision(db, getRegistration(db, twoHour.id), T0 + 2 * HOUR + MIN), "expired");
+
+// Auto-cancel job (runReminders -> expireUnpaidFirstPayments) cancels just after 2 hours,
+// frees email/mobile, and releases the coupon.
+db.prepare(`
+  INSERT INTO coupons (code, discount_type, discount_value, active, usage_limit)
+  VALUES ('HOLD2H', 'percent', 10, 1, 1)
+`).run();
+const twoHourCoupon = signup("two-hour-coupon@example.com", { couponCode: "HOLD2H" });
+assert.equal(db.prepare("SELECT usage_count FROM coupons WHERE code = 'HOLD2H'").get().usage_count, 1);
+assignFirstPaymentHold(db, twoHourCoupon.id, T0);
+await runReminders(db, new Date(T0 + 2 * HOUR - MIN));
+assert.equal(getRegistration(db, twoHourCoupon.id).status, "confirmed");
+assert.equal(getRegistration(db, twoHour.id).status, "confirmed");
+assert.ok(registrationContactClash(db, { email: twoHourCoupon.email, mobile: twoHourCoupon.mobile }));
+await runReminders(db, new Date(T0 + 2 * HOUR + MIN));
+assert.equal(getRegistration(db, twoHourCoupon.id).status, "cancelled");
+assert.ok(getRegistration(db, twoHourCoupon.id).payment_hold_cancelled_at);
+assert.equal(getRegistration(db, twoHour.id).status, "cancelled");
+assert.equal(db.prepare("SELECT usage_count FROM coupons WHERE code = 'HOLD2H'").get().usage_count, 0);
+assert.equal(registrationContactClash(db, { email: twoHourCoupon.email, mobile: twoHourCoupon.mobile }), "");
+const twoHourAgain = createRegistration(db, {
+  productCode: "first_mover",
+  paymentPlan: "full",
+  fullName: "Hold Tester",
+  email: twoHourCoupon.email,
+  mobile: twoHourCoupon.mobile,
+  registeredOn: "2026-11-27",
+  attendeeType: "guest",
+  couponCode: "HOLD2H",
+});
+assert.equal(twoHourAgain.status, "confirmed");
+assert.equal(twoHourAgain.coupon_code, "HOLD2H");
+
+// Grace is unchanged: a gateway page opened before the 2-hour deadline holds the cancel
+// for HOLD_GRACE_MS past the deadline, then the job cancels.
+const graced = signup("two-hour-grace@example.com");
+assignFirstPaymentHold(db, graced.id, T0);
+openHitpaySession(graced, "sess-2h-grace", T0 + 2 * HOUR - 5 * MIN);
+assert.equal(expireRegistrationHold(db, graced.id, T0 + 2 * HOUR + 30 * MIN), false);
+assert.equal(expireRegistrationHold(db, graced.id, T0 + 2 * HOUR + HOLD_GRACE_MS - MIN), false);
+assert.equal(getRegistration(db, graced.id).status, "confirmed");
+assert.equal(expireRegistrationHold(db, graced.id, T0 + 2 * HOUR + HOLD_GRACE_MS + MIN), true);
+// A page opened after the deadline gets no grace.
+const noGrace = signup("two-hour-nograce@example.com");
+assignFirstPaymentHold(db, noGrace.id, T0);
+openHitpaySession(noGrace, "sess-2h-nograce", T0 + 2 * HOUR + MIN);
+assert.equal(expireRegistrationHold(db, noGrace.id, T0 + 2 * HOUR + 2 * MIN), true);
+
+// Late HitPay paid notice after the cancel is still recorded and recovers the registration.
+const lateHitpay = signup("two-hour-late@example.com");
+assignFirstPaymentHold(db, lateHitpay.id, T0);
+const lateDue = openHitpaySession(lateHitpay, "sess-2h-late", T0 + 90 * MIN);
+assert.equal(expireRegistrationHold(db, lateHitpay.id, T0 + 2 * HOUR + HOLD_GRACE_MS + MIN), true);
+assert.equal(getRegistration(db, lateHitpay.id).status, "cancelled");
+const lateWebhook = await hitpayPaid("sess-2h-late", lateDue.amount_cents);
+assert.equal(lateWebhook.status, 200);
+const lateRecovered = getRegistration(db, lateHitpay.id);
+assert.equal(lateRecovered.status, "confirmed");
+assert.equal(lateRecovered.payment_hold_cancelled_at, null);
+assert.equal(lateRecovered.balance_cents, 0);
+assert.ok(lateRecovered.qr_token);
+assert.equal(db.prepare("SELECT COUNT(*) AS n FROM payments WHERE external_reference = 'sess-2h-late'").get().n, 1);
+assert.equal(db.prepare("SELECT status FROM hitpay_payments WHERE session_id = 'sess-2h-late'").get().status, "paid");
+
+// HitPay paid within 2 hours confirms normally and the job never cancels it.
+const onTime = signup("two-hour-ontime@example.com");
+assignFirstPaymentHold(db, onTime.id, Date.now());
+const onTimeDue = openHitpaySession(onTime, "sess-2h-ontime", Date.now() - MIN);
+assert.equal((await hitpayPaid("sess-2h-ontime", onTimeDue.amount_cents)).status, 200);
+const onTimePaid = getRegistration(db, onTime.id);
+assert.equal(onTimePaid.status, "confirmed");
+assert.equal(onTimePaid.balance_cents, 0);
+assert.ok(onTimePaid.qr_token);
+await runReminders(db, new Date(Date.now() + 5 * HOUR));
+assert.equal(getRegistration(db, onTime.id).status, "confirmed");
+
+// Existing holds keep the deadline already stored on the row (written under the 24-hour rule).
+const legacy = signup("legacy-24h@example.com");
+const legacyUntil = new Date(T0 + 24 * HOUR).toISOString();
+db.prepare("UPDATE registrations SET payment_hold_until = ? WHERE id = ?").run(legacyUntil, legacy.id);
+assert.equal(assignFirstPaymentHold(db, legacy.id, T0 + HOUR), legacyUntil);
+assert.equal(getRegistration(db, legacy.id).payment_hold_until, legacyUntil);
+assert.equal(expireRegistrationHold(db, legacy.id, T0 + 3 * HOUR), false);
+assert.equal(checkoutHoldDecision(db, getRegistration(db, legacy.id), T0 + 3 * HOUR), "allow");
+assert.equal(expireRegistrationHold(db, legacy.id, T0 + 24 * HOUR - MIN), false);
+assert.equal(getRegistration(db, legacy.id).status, "confirmed");
+assert.equal(expireRegistrationHold(db, legacy.id, T0 + 24 * HOUR + MIN), true);
+
+// ---- HitPay session expiry is clamped to the hold end ----
+{
+  const saved = {
+    fetch: global.fetch,
+    key: process.env.HITPAY_API_KEY,
+    base: process.env.HITPAY_API_BASE_URL,
+    ttl: process.env.HITPAY_CHECKOUT_TTL_MINUTES,
+  };
+  process.env.HITPAY_API_KEY = "test-key";
+  process.env.HITPAY_API_BASE_URL = "https://api.hit-pay.com";
+  savePaymentChannels(db, { hitpay_qr: { enabled: true } });
+  const sent = [];
+  global.fetch = async (url, init = {}) => {
+    const body = init.body ? JSON.parse(init.body) : null;
+    if (body) sent.push(body);
+    return new Response(JSON.stringify({
+      id: `gw-${sent.length}-${Math.random().toString(36).slice(2)}`,
+      status: "pending",
+      qr_code_data: { qr_code: "00020101021226-test-qr" },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  let clampSerial = 0;
+  function clampSignup(holdLeftMs) {
+    clampSerial += 1;
+    const reg = signup(`clamp-${clampSerial}@example.com`);
+    if (holdLeftMs !== null) {
+      db.prepare("UPDATE registrations SET payment_hold_until = ? WHERE id = ?")
+        .run(new Date(Date.now() + holdLeftMs).toISOString(), reg.id);
+    }
+    return getRegistration(db, reg.id);
+  }
+  async function startQr(reg) {
+    const before = sent.length;
+    const result = await startHitpayPayment(db, getRegistration(db, reg.id), "qr");
+    return { result, body: sent.length > before ? sent[sent.length - 1] : null };
+  }
+  try {
+    // TTL 600 min, stored 2h hold -> clamped to the hold end (120 min).
+    process.env.HITPAY_CHECKOUT_TTL_MINUTES = "600";
+    const longTtl = clampSignup(2 * HOUR + 30 * 1000);
+    const longRun = await startQr(longTtl);
+    assert.equal(longRun.result.error, undefined);
+    assert.equal(longRun.body.expires_after, "120 mins");
+    assert.ok(Date.parse(longRun.result.hitpay.expiresAt) <= Date.parse(longTtl.payment_hold_until));
+
+    // TTL 600 min, brand-new checkout (hold written right after the session) -> 120 min,
+    // never later than the hold that gets assigned.
+    const fresh2h = clampSignup(null);
+    const freshRun = await startQr(fresh2h);
+    assert.equal(freshRun.body.expires_after, "120 mins");
+    const freshUntil = assignFirstPaymentHold(db, fresh2h.id);
+    assert.ok(Date.parse(freshRun.result.hitpay.expiresAt) <= Date.parse(freshUntil));
+
+    // TTL 15 min well before the hold end stays 15 min.
+    process.env.HITPAY_CHECKOUT_TTL_MINUTES = "15";
+    const shortTtl = clampSignup(2 * HOUR + 30 * 1000);
+    const shortRun = await startQr(shortTtl);
+    assert.equal(shortRun.body.expires_after, "15 mins");
+    const shortExpiry = Date.parse(shortRun.result.hitpay.expiresAt);
+    assert.ok(shortExpiry > Date.now() + 14 * MIN && shortExpiry <= Date.now() + 15 * MIN);
+
+    // 5 minutes left on the hold -> 5-minute session, ending at or before the hold end.
+    const fiveLeft = clampSignup(5 * MIN + 20 * 1000);
+    const fiveRun = await startQr(fiveLeft);
+    assert.equal(fiveRun.body.expires_after, "5 mins");
+    assert.ok(Date.parse(fiveRun.result.hitpay.expiresAt) <= Date.parse(fiveLeft.payment_hold_until));
+
+    // Under the 1-minute minimum left -> refused with the expired message, nothing sent to HitPay.
+    const secondsLeft = clampSignup(30 * 1000);
+    const secondsRun = await startQr(secondsLeft);
+    assert.equal(secondsRun.body, null);
+    assert.equal(secondsRun.result.error, HOLD_EXPIRED_MESSAGE);
+    assert.equal(secondsRun.result.status, 400);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM hitpay_payments WHERE registration_id = ?").get(secondsLeft.id).n, 0);
+
+    // Hold already ended -> no session (existing expired behaviour).
+    const ended = clampSignup(-MIN);
+    const endedRun = await startQr(ended);
+    assert.equal(endedRun.body, null);
+    assert.equal(endedRun.result.error, HOLD_EXPIRED_MESSAGE);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM hitpay_payments WHERE registration_id = ?").get(ended.id).n, 0);
+
+    // Old 24h hold with 20h left, TTL 1440 -> clamped to its stored end (1200 min).
+    process.env.HITPAY_CHECKOUT_TTL_MINUTES = "1440";
+    const legacyClamp = clampSignup(20 * HOUR + 30 * 1000);
+    const legacyRun = await startQr(legacyClamp);
+    assert.equal(legacyRun.body.expires_after, "1200 mins");
+    assert.ok(Date.parse(legacyRun.result.hitpay.expiresAt) <= Date.parse(legacyClamp.payment_hold_until));
+
+    // Opening already paid -> hold no longer applies, later installment keeps the full TTL.
+    process.env.HITPAY_CHECKOUT_TTL_MINUTES = "600";
+    clampSerial += 1;
+    const paidOpening = signup(`clamp-${clampSerial}@example.com`, { paymentPlan: "installment" });
+    db.prepare("UPDATE registrations SET payment_hold_until = ? WHERE id = ?").run(new Date(Date.now() - HOUR).toISOString(), paidOpening.id);
+    recordPayment(db, { registrationId: paidOpening.id, amountCents: getRegistration(db, paidOpening.id).installments[0].amount_cents, method: "manual" });
+    const paidRun = await startQr(paidOpening);
+    assert.equal(paidRun.result.error, undefined);
+    assert.equal(paidRun.body.expires_after, "600 mins");
+  } finally {
+    global.fetch = saved.fetch;
+    for (const [name, value] of [["HITPAY_API_KEY", saved.key], ["HITPAY_API_BASE_URL", saved.base], ["HITPAY_CHECKOUT_TTL_MINUTES", saved.ttl]]) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+}
 
 console.log("payment hold ok");

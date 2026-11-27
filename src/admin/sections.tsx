@@ -1,10 +1,12 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, forwardRef, useEffect, useImperativeHandle, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Pencil, Ticket, UserPlus } from "lucide-react";
 import { formatFeePercentInput, formatFeePesoInput } from "../../server/convenience-fee.js";
 import { previewTemplate, smsCreditCount } from "../../server/templates.js";
 
 const field = "rounded-[10px] border border-[#D9D5CF] bg-white px-3 py-2.5 text-sm font-normal text-[#141416]";
 const labelClass = "flex flex-col gap-1 text-[13px] font-semibold text-[#3A3A40]";
 const buttonClass = "rounded-full bg-[#D0202E] px-4 py-2.5 text-sm font-bold text-white disabled:bg-[#E4A0A6]";
+const iconButton = "inline-flex h-8 w-8 items-center justify-center rounded-full text-[#A8131F] hover:bg-[#F5E8E9] disabled:opacity-40";
 
 type Product = { code: string; name: string; allows_installment: number; currency: string };
 type Template = { id: number; name: string; channel: "email" | "sms"; subject: string | null; body: string; system_key: string | null };
@@ -49,7 +51,86 @@ type Member = {
   regStatus: "updated" | "delayed" | "cancelled";
   country: string;
   goldClub: boolean;
+  sponsors2026: number | null;
+  sponsorsAugDec2026: number | null;
+  sponsorDataAsOf: string;
+  goldReward: string;
+  registeredAt?: string;
+  registrationReference?: string | null;
 };
+type MemberRegisterQuote = {
+  productCode: string;
+  productName: string;
+  currency: "PHP" | "USD";
+  paymentPlan: string;
+  allowsInstallment: boolean;
+  goldReward: string;
+  listCents: number;
+  totalCents: number;
+  dueTodayCents: number;
+  discountCents: number;
+};
+type MemberRegisterProduct = {
+  code: string;
+  name: string;
+  currency: "PHP" | "USD";
+  allowsInstallment: boolean;
+  inSalesWindow: boolean;
+  salesStart: string;
+  salesEnd: string;
+  full: MemberRegisterQuote | null;
+  installment: MemberRegisterQuote | null;
+};
+type MemberRegisterOptions = {
+  member: Member;
+  registration: { reference: string; balanceCents: number; plan: string; tierName: string } | null;
+  defaultProductCode: string;
+  goldReward: string;
+  today: string;
+  products: MemberRegisterProduct[];
+};
+type MessageTag = { id: number; slug: string; label: string; color: string; managed?: boolean };
+type MessageGroup = { id: number; name: string; sources: "members" | "registrations" | "both"; tagIds: number[] };
+type MessageBlast = {
+  id: number;
+  channel: "email" | "sms";
+  groupId: number | null;
+  audience: { sources?: string; tagIds?: number[]; groupName?: string | null; eligible?: number; missingContact?: number };
+  templateId: number | null;
+  subject: string | null;
+  body: string;
+  status: string;
+  total: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  createdAt: string;
+  completedAt: string | null;
+  error: string | null;
+};
+type BlastDelivery = {
+  id: number;
+  source: string;
+  sourceId: number;
+  fullName: string;
+  contact: string;
+  status: string;
+  providerId: string | null;
+  error: string | null;
+  sentAt: string | null;
+};
+type AudiencePreview = {
+  eligible: number;
+  missingContact: number;
+  total: number;
+  sample: { fullName: string; contact: string; source: string }[];
+};
+
+const goldRewards = [
+  { value: "GOLD_FREE", label: "Free" },
+  { value: "GOLD_50", label: "50" },
+  { value: "GOLD_3000", label: "3,000" },
+];
 type Payment = { label: string; dueOn: string; amountCents: number; amountPaidCents?: number; status: "paid" | "due" | "upcoming" };
 type LedgerTransaction = {
   at: string;
@@ -65,6 +146,8 @@ type Registration = {
   reference: string;
   status: string;
   registeredOn?: string;
+  createdAt?: string | null;
+  paidAt?: string | null;
   attendee: { fullName: string; email: string; mobile: string; business?: string; industry?: string; chapter?: string };
   tierName: string;
   plan: string;
@@ -109,6 +192,22 @@ function titleCase(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function formatDateTime(value?: string | null) {
+  if (!value) return "";
+  const raw = String(value).trim();
+  const date = raw.includes("T") ? new Date(raw) : new Date(`${raw.replace(" ", "T")}Z`);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Manila",
+    month: "numeric",
+    day: "numeric",
+    year: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(date);
+}
+
 function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
   return <input className={`${field} w-full`} value={value} placeholder={placeholder} onChange={(event) => onChange(event.target.value)} />;
 }
@@ -129,14 +228,24 @@ function DataTable({ columns, children, empty }: { columns: string[]; children: 
 }
 
 type DashboardData = {
-  signups: { total: number; confirmed: number; cancelled: number; firstMovers: number; firstMoversCancelled: number; firstMoverPercent: number | null };
-  tickets: { code: string; name: string; currency: "PHP" | "USD"; signups: number; cancelled: number; fullyPaid: number; fullyPaidCents: number; installmentSeats: number; installmentCents: number; collectedCents: number; bookedCents: number }[];
+  signups: {
+    total: number;
+    confirmed: number;
+    unpaidHold: number;
+    cancelled: number;
+    firstMovers: number;
+    firstMoversFullyPaid: number;
+    firstMoversInstallment: number;
+    firstMoversCancelled: number;
+    firstMoverPercent: number | null;
+  };
+  tickets: { code: string; name: string; currency: "PHP" | "USD"; signups: number; unpaidHold: number; cancelled: number; fullyPaid: number; fullyPaidCents: number; installmentSeats: number; installmentCents: number; collectedCents: number; bookedCents: number }[];
   plans: { payInFull: number; installment: number; fullyPaid: number; owing: number };
+  delayed: { count: number; percent: number | null };
   money: { currency: "PHP" | "USD"; collectedCents: number; outstandingCents: number }[];
   byDay: { day: string; signups: number }[];
   dueSoon: { through: string; rows: { currency: "PHP" | "USD"; count: number; cents: number }[] };
-  roster: { total: number; updated: number; delayed: number; cancelled: number; updatedPercent: number | null; delayedPercent: number | null; cancelledPercent: number | null; goldClub: number };
-  firstMoverRoster: { total: number; updated: number; delayed: number; cancelled: number; updatedPercent: number | null; delayedPercent: number | null; cancelledPercent: number | null };
+  roster: { goldClub: number };
   paymentMethods: {
     channel: string;
     label: string;
@@ -231,14 +340,6 @@ function Donut({ slices, center, caption }: { slices: { label: string; value: nu
   );
 }
 
-function statusSlices(group: DashboardData["firstMoverRoster"]) {
-  return [
-    { label: "Updated", value: group.updated, color: chartColors.updated },
-    { label: "Delayed", value: group.delayed, color: chartColors.delayed },
-    { label: "Cancelled", value: group.cancelled, color: chartColors.cancelled },
-  ];
-}
-
 function StackedBars({ rows }: { rows: { label: string; detail: string; parts: { value: number; color: string; name: string }[] }[] }) {
   const max = Math.max(...rows.map((row) => row.parts.reduce((sum, part) => sum + part.value, 0)), 1);
   return (
@@ -320,7 +421,7 @@ function TicketAmount({ cents, currency }: { cents: number; currency: "PHP" | "U
 }
 
 function TicketSplit({ ticket }: { ticket: DashboardData["tickets"][number] }) {
-  if (!ticket.signups && !ticket.cancelled) {
+  if (!ticket.signups && !ticket.cancelled && !ticket.unpaidHold) {
     return (
       <div className="flex items-baseline justify-between gap-3 text-sm">
         <span className="font-semibold">{ticket.name}</span>
@@ -332,7 +433,7 @@ function TicketSplit({ ticket }: { ticket: DashboardData["tickets"][number] }) {
     <div className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between gap-3">
         <h3 className="m-0 text-sm font-bold">{ticket.name}</h3>
-        <p className="m-0 text-right text-[13px] text-[#5C5C63]">{ticket.signups} confirmed</p>
+        <p className="m-0 text-right text-[13px] text-[#5C5C63]">{ticket.signups} paid{ticket.unpaidHold ? ` · ${ticket.unpaidHold} unpaid / on hold` : ""}</p>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-[10px] border border-[#E4E1DC] px-3 py-2">
@@ -350,37 +451,154 @@ function TicketSplit({ ticket }: { ticket: DashboardData["tickets"][number] }) {
   );
 }
 
+async function fetchRegistrationPoster() {
+  const response = await fetch("/api/admin/registration-poster.jpg", { credentials: "include" });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || "Could not load the registration poster");
+  }
+  const blob = await response.blob();
+  const header = response.headers.get("content-disposition") || "";
+  const matched = /filename="([^"]+)"/i.exec(header);
+  return {
+    blob,
+    filename: matched?.[1] || "IBMC-2027-registration-update.jpg",
+  };
+}
+
+function RegistrationPosterPanel({ onError }: { onError: (message: string) => void }) {
+  const [revision, setRevision] = useState(() => Date.now());
+  const [previewReady, setPreviewReady] = useState(false);
+  const [busy, setBusy] = useState<"download" | "share" | "">("");
+  const [note, setNote] = useState("");
+  const [canShareFiles, setCanShareFiles] = useState(false);
+  const filename = "IBMC-2027-registration-update.jpg";
+  const previewSrc = `/api/admin/registration-poster.jpg?t=${revision}`;
+
+  useEffect(() => {
+    try {
+      const probe = new File([new Uint8Array([0xff, 0xd8])], "probe.jpg", { type: "image/jpeg" });
+      setCanShareFiles(Boolean(navigator.canShare?.({ files: [probe] })));
+    } catch {
+      setCanShareFiles(false);
+    }
+  }, []);
+
+  function refreshPoster() {
+    setNote("");
+    setPreviewReady(false);
+    setRevision(Date.now());
+  }
+
+  async function downloadPoster() {
+    setBusy("download");
+    setNote("");
+    try {
+      const poster = await fetchRegistrationPoster();
+      const url = URL.createObjectURL(poster.blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = poster.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNote("Downloaded. Attach it in your group chat.");
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not download the poster");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function sharePoster() {
+    setBusy("share");
+    setNote("");
+    try {
+      const poster = await fetchRegistrationPoster();
+      const file = new File([poster.blob], poster.filename, { type: "image/jpeg" });
+      if (canShareFiles && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: "IBMC 2027 Registration update",
+          text: "IBMC 2027 registration update",
+        });
+        setNote("Shared.");
+        return;
+      }
+      const url = URL.createObjectURL(poster.blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = poster.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setNote("Download ready — attach the image in your group chat.");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      onError(error instanceof Error ? error.message : "Could not share the poster");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <Panel title="Registration poster">
+      <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Live count poster for chapter group chats. Download or share the image as-is.</p>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className={buttonClass} disabled={Boolean(busy)} onClick={() => { sharePoster().catch(() => undefined); }}>
+          {busy === "share" ? "Sharing…" : canShareFiles ? "Share to chats" : "Download for chats"}
+        </button>
+        <button type="button" className={ghostButton} disabled={Boolean(busy)} onClick={() => { downloadPoster().catch(() => undefined); }}>
+          {busy === "download" ? "Downloading…" : "Download JPG"}
+        </button>
+        <button type="button" className={ghostButton} disabled={Boolean(busy)} onClick={refreshPoster}>
+          Refresh
+        </button>
+      </div>
+      {note ? <p className="m-0 text-sm font-semibold">{note}</p> : null}
+      {!previewReady ? <p className="m-0 text-sm text-[#5C5C63]">Rendering poster…</p> : null}
+      <img
+        key={previewSrc}
+        src={previewSrc}
+        alt="IBMC 2027 registration update poster"
+        className={`w-full max-w-[800px] rounded-[12px] border border-[#E4E1DC] bg-[#F3F4F6] ${previewReady ? "" : "hidden"}`}
+        onLoad={() => setPreviewReady(true)}
+        onError={() => {
+          setPreviewReady(false);
+          onError("Could not load the registration poster");
+        }}
+      />
+      {previewReady ? <p className="m-0 text-[12px] text-[#5C5C63]">{filename}</p> : null}
+    </Panel>
+  );
+}
+
 function Dashboard({ onError }: { onError: (message: string) => void }) {
   const [data, setData] = useState<DashboardData | null>(null);
   useEffect(() => { api("/api/admin/dashboard").then(setData).catch((error) => onError(error.message)); }, []);
   if (!data) return <p className="m-0 text-sm text-[#5C5C63]">Loading dashboard…</p>;
   const pesos = data.money.find((row) => row.currency === "PHP");
-  const firstMoverNote = data.signups.firstMoverPercent === null
-    ? (data.signups.firstMoversCancelled ? `${data.signups.firstMoversCancelled} cancelled` : "No confirmed signups yet")
-    : `${share(data.signups.firstMoverPercent)} of confirmed${data.signups.firstMoversCancelled ? ` · ${data.signups.firstMoversCancelled} cancelled` : ""}`;
+  const paidBreakdown = `${data.plans.fullyPaid} fully paid · ${data.plans.owing} installment`;
+  const firstMoverNote = data.signups.firstMovers
+    ? `${data.signups.firstMoversFullyPaid} fully paid · ${data.signups.firstMoversInstallment} installment`
+    : (data.signups.firstMoversCancelled ? `${data.signups.firstMoversCancelled} cancelled` : "No paid first movers yet");
+  const delayed = data.delayed || { count: 0, percent: null };
   return (
     <section className="flex flex-col gap-4">
       <h1 className="m-0 font-archivo text-[28px] font-extrabold">Dashboard</h1>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <Kpi label="Total signups" value={data.signups.total} note={`${data.signups.confirmed} confirmed · ${data.signups.cancelled} cancelled`} />
-        <Kpi label="Fully paid" value={data.plans.fullyPaid} note={data.signups.confirmed ? `${Math.round((data.plans.fullyPaid / data.signups.confirmed) * 100)}% of confirmed` : "No confirmed signups yet"} />
+        <Kpi label="Paid signups" value={data.signups.confirmed} note={paidBreakdown} />
+        <Kpi label="Unpaid / on hold" value={data.signups.unpaidHold} note="Registered, waiting on first payment" accent />
+        <Kpi label="Fully paid" value={data.plans.fullyPaid} note={data.signups.confirmed ? `${Math.round((data.plans.fullyPaid / data.signups.confirmed) * 100)}% of paid` : "No paid signups yet"} />
         <Kpi label="First movers" value={data.signups.firstMovers} note={firstMoverNote} />
-        <Kpi label="Updated" value={share(data.roster.updatedPercent)} note={`${data.roster.updated} of ${data.roster.total} on the roster`} />
-        <Kpi label="Delayed" value={share(data.roster.delayedPercent)} note={`${data.roster.delayed} of ${data.roster.total} on the roster`} accent />
-        <Kpi label="Collected" value={<Peso cents={pesos?.collectedCents ?? 0} />} note="Confirmed registrations, pesos" />
+        <Kpi label="Delayed" value={share(delayed.percent)} note={`${delayed.count} of ${data.signups.confirmed} paid`} accent />
+        <Kpi label="Collected" value={<Peso cents={pesos?.collectedCents ?? 0} />} note="Paid registrations, pesos" />
         <Kpi label="Still due" value={<Peso cents={pesos?.outstandingCents ?? 0} />} note={data.dueSoon.rows.length === 0 ? `Nothing due through ${shortDate(data.dueSoon.through)}` : data.dueSoon.rows.map((row) => `${money(row.cents, row.currency)} by ${shortDate(data.dueSoon.through)}`).join(" · ")} accent />
       </div>
-      <div className="grid gap-3 lg:grid-cols-2">
-        <Panel title="Roster status">
-          <Donut slices={statusSlices(data.roster)} center={String(data.roster.total)} caption="Roster" />
-          <p className="m-0 text-[13px] text-[#5C5C63]">{data.roster.goldClub} gold club {data.roster.goldClub === 1 ? "member" : "members"}</p>
-        </Panel>
-        <Panel title="First movers on the roster">
-          <Donut slices={statusSlices(data.firstMoverRoster)} center={String(data.firstMoverRoster.total)} caption="On roster" />
-        </Panel>
-      </div>
       <Panel title="Signups by ticket">
-        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Amount collected, then the number of seats. Installment seats are not fully paid yet.</p>
+        <p className="m-0 text-[13px] leading-normal text-[#5C5C63]">Paid seats only. Installment seats have paid at least the first amount but are not fully paid yet.</p>
         <div className="flex flex-col gap-4">
           {data.tickets.filter((ticket) => !ticket.code.startsWith("test")).map((ticket) => <TicketSplit key={ticket.code} ticket={ticket} />)}
         </div>
@@ -430,7 +648,7 @@ function Dashboard({ onError }: { onError: (message: string) => void }) {
               { label: "Still owing", value: data.plans.owing, color: chartColors.delayed },
             ]}
             center={String(data.signups.confirmed)}
-            caption="Confirmed"
+            caption="Paid"
           />
           <StackedBars rows={[
             ...data.money.map((row) => ({
@@ -455,6 +673,7 @@ function Dashboard({ onError }: { onError: (message: string) => void }) {
           {data.byDay.length === 0 ? <p className="m-0 text-sm text-[#5C5C63]">Confirmed signups will show here by date.</p> : <Columns rows={data.byDay.map((day) => ({ label: shortDate(day.day), value: day.signups }))} />}
         </Panel>
       </div>
+      <RegistrationPosterPanel onError={onError} />
     </section>
   );
 }
@@ -567,10 +786,12 @@ export function AdminSections() {
   const [section, setSection] = useState("Dashboard");
   const [error, setError] = useState("");
   const [role, setRole] = useState<"super" | "admin" | "">("");
+  const [focusReference, setFocusReference] = useState<string | null>(null);
+  const [focusMemberId, setFocusMemberId] = useState<number | null>(null);
   useEffect(() => {
     api("/api/admin/me").then((me) => setRole(me.role === "super" ? "super" : "admin")).catch(() => setRole("admin"));
   }, []);
-  const sections = ["Dashboard", "Registrations", "Check-in", "Coupons", "Schedule", "Templates", "Members", "Chapters", "Settings", ...(role === "super" ? ["Admins"] : [])];
+  const sections = ["Dashboard", "Registrations", "Check-in", "Coupons", "Schedule", "Templates", "Messaging", "Members", "Chapters", "Settings", ...(role === "super" ? ["Admins"] : [])];
   return (
     <div className="flex flex-col gap-5">
       <nav className="flex flex-wrap gap-2">
@@ -587,13 +808,27 @@ export function AdminSections() {
       </nav>
       {error ? <p className="m-0 text-sm text-[#A8131F]">{error}</p> : null}
       {section === "Dashboard" ? <Dashboard onError={setError} /> : null}
-      {section === "Registrations" ? <Registrations onError={setError} /> : null}
+      {section === "Registrations" ? <Registrations onError={setError} focusReference={focusReference} onFocused={() => setFocusReference(null)} /> : null}
       {section === "Check-in" ? <CheckIn onError={setError} /> : null}
       {section === "Coupons" ? <Coupons onError={setError} /> : null}
       {section === "Schedule" ? <Schedules onError={setError} /> : null}
       {section === "Templates" ? <Templates onError={setError} /> : null}
-      {section === "Members" ? <Members onError={setError} /> : null}
-      {section === "Chapters" ? <Chapters onError={setError} /> : null}
+      {section === "Messaging" ? <Messaging onError={setError} /> : null}
+      {section === "Members" ? (
+        <Members
+          onError={setError}
+          focusMemberId={focusMemberId}
+          onFocusedMember={() => setFocusMemberId(null)}
+          onOpenRegistration={(reference) => { setFocusReference(reference); setSection("Registrations"); }}
+        />
+      ) : null}
+      {section === "Chapters" ? (
+        <Chapters
+          onError={setError}
+          onOpenRegistration={(reference) => { setFocusReference(reference); setSection("Registrations"); }}
+          onEditMember={(id) => { setFocusMemberId(id); setSection("Members"); }}
+        />
+      ) : null}
       {section === "Settings" ? <PaymentSettingsScreen role={role} onError={setError} /> : null}
       {section === "Admins" && role === "super" ? <Admins onError={setError} /> : null}
     </div>
@@ -605,6 +840,7 @@ const emptyRegistration = { fullName: "", email: "", mobile: "", business: "", i
 function registrationListStatus(row: Registration) {
   if (row.status === "cancelled") return "cancelled";
   if (row.balanceCents === 0) return "fully_paid";
+  if (!row.paidAt) return "pending";
   return "active";
 }
 
@@ -612,6 +848,7 @@ function registrationStatusLabel(row: Registration) {
   const status = registrationListStatus(row);
   if (status === "fully_paid") return "Fully paid";
   if (status === "cancelled") return "Cancelled";
+  if (status === "pending") return "Pending";
   return "Active";
 }
 
@@ -636,6 +873,7 @@ function RegistrationView({
   onCloseEdit,
   onClose,
   onCancel,
+  onError,
 }: {
   row: Registration;
   editing: boolean;
@@ -647,7 +885,49 @@ function RegistrationView({
   onCloseEdit: () => void;
   onClose: () => void;
   onCancel: () => void;
+  onError: (message: string) => void;
 }) {
+  const [tags, setTags] = useState<MessageTag[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [savingTags, setSavingTags] = useState(false);
+
+  useEffect(() => {
+    Promise.all([
+      api("/api/admin/message-tags"),
+      api(`/api/admin/registrations/${row.reference}/tags`),
+    ]).then(([catalog, assigned]) => {
+      setTags(catalog);
+      setSelectedTagIds(assigned.map((tag: MessageTag) => tag.id));
+    }).catch((error) => onError(error.message));
+  }, [row.reference]);
+
+  async function createTag(label: string) {
+    try {
+      const tag = await api("/api/admin/message-tags", { method: "POST", body: JSON.stringify({ label }) });
+      setTags((current) => current.some((row) => row.id === tag.id) ? current : [...current, tag]);
+      return tag as MessageTag;
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not create tag");
+      return null;
+    }
+  }
+
+  async function saveTags(nextIds: number[]) {
+    setSelectedTagIds(nextIds);
+    setSavingTags(true);
+    try {
+      const saved = await api(`/api/admin/registrations/${row.reference}/tags`, {
+        method: "PUT",
+        body: JSON.stringify({ tagIds: nextIds }),
+      });
+      setSelectedTagIds(saved.map((tag: MessageTag) => tag.id));
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not save tags");
+    } finally {
+      setSavingTags(false);
+    }
+  }
+
   const details = [
     ["Name", row.attendee.fullName],
     ["Email", row.attendee.email],
@@ -658,6 +938,7 @@ function RegistrationView({
     ["Ticket", row.tierName],
     ["Reference", row.reference],
     ["Registered", row.registeredOn || ""],
+    ["Paid at", row.paidAt ? formatDateTime(row.paidAt) : ""],
     ["Status", registrationStatusLabel(row)],
   ];
   return (
@@ -701,6 +982,11 @@ function RegistrationView({
         </div>
       )}
       <div className="flex flex-col gap-2">
+        <h3 className="m-0 text-[15px] font-bold">Messaging tags</h3>
+        <TagPicker tags={tags} selectedIds={selectedTagIds} onChange={(ids) => { saveTags(ids).catch(() => undefined); }} onCreate={createTag} lockManaged />
+        {savingTags ? <p className="m-0 text-[13px] text-[#5C5C63]">Saving tags…</p> : null}
+      </div>
+      <div className="flex flex-col gap-2">
         <h3 className="m-0 text-[15px] font-bold">Payment plan</h3>
         <p className="m-0 text-sm text-[#5C5C63]">{row.plan === "installment" ? "Installment" : "Paid in full"} · {money(row.totalCents, row.currency)} total · {money(row.totalCents - row.balanceCents, row.currency)} paid</p>
         <div className="overflow-x-auto">
@@ -733,7 +1019,7 @@ function RegistrationView({
               <tbody>
                 {(row.transactions || []).map((item) => (
                   <tr key={`${item.provider}-${item.reference}-${item.at}`}>
-                    <td className={tdClass}>{item.at ? String(item.at).slice(0, 16).replace("T", " ") : "—"}</td>
+                    <td className={tdClass}>{item.at ? formatDateTime(item.at) || "—" : "—"}</td>
                     <td className={tdClass}>{item.provider}</td>
                     <td className={tdClass}>{item.channel || "—"}</td>
                     <td className={tdClass}>{titleCase(item.status || "")}</td>
@@ -756,7 +1042,15 @@ function RegistrationView({
   );
 }
 
-function Registrations({ onError }: { onError: (message: string) => void }) {
+function Registrations({
+  onError,
+  focusReference = null,
+  onFocused,
+}: {
+  onError: (message: string) => void;
+  focusReference?: string | null;
+  onFocused?: () => void;
+}) {
   const [rows, setRows] = useState<Registration[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
@@ -767,6 +1061,7 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
   const [editingDetails, setEditingDetails] = useState(false);
   const [draft, setDraft] = useState(emptyRegistration);
   const [cancelTarget, setCancelTarget] = useState<null | { reference: string; name: string }>(null);
+  const [exporting, setExporting] = useState(false);
 
   async function load() {
     const [registrations, ticketProducts, chapterRows] = await Promise.all([
@@ -778,6 +1073,7 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
     setProducts(ticketProducts);
     setChapters(chapterRows);
     setViewing((current) => current ? registrations.find((row: Registration) => row.reference === current.reference) || null : null);
+    return registrations as Registration[];
   }
 
   function openView(row: Registration) {
@@ -795,6 +1091,17 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
     });
   }
   useEffect(() => { load().catch((error) => onError(error.message)); }, []);
+  useEffect(() => {
+    if (!focusReference) return;
+    load()
+      .then((registrations) => {
+        const row = registrations.find((item) => item.reference === focusReference);
+        if (row) openView(row);
+        else onError(`Registration ${focusReference} was not found.`);
+        onFocused?.();
+      })
+      .catch((error) => onError(error.message));
+  }, [focusReference]);
 
   async function addManual(event: FormEvent) {
     event.preventDefault();
@@ -833,6 +1140,33 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
     }
   }
 
+  async function exportCsv() {
+    setExporting(true);
+    try {
+      const response = await fetch("/api/admin/registrations/export.csv", { credentials: "include" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || "Could not export registrations");
+      }
+      const blob = await response.blob();
+      const header = response.headers.get("content-disposition") || "";
+      const matched = /filename="([^"]+)"/i.exec(header);
+      const filename = matched?.[1] || `ibmc-registrations-${new Date().toISOString().slice(0, 10)}.csv`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not export registrations");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   const visible = rows.filter((row) => {
     if (statusFilter && registrationListStatus(row) !== statusFilter) return false;
     return matches(query, [row.attendee.fullName, row.attendee.email, row.attendee.mobile, row.reference, row.tierName, row.attendee.business, row.attendee.chapter, row.status]);
@@ -843,7 +1177,12 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="m-0 font-archivo text-[28px] font-extrabold">Registrations</h1>
-        <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setDraft(emptyRegistration); }}>Add manual</button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={ghostButton} disabled={exporting} onClick={() => { exportCsv().catch(() => {}); }}>
+            {exporting ? "Exporting…" : "Export CSV"}
+          </button>
+          <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setDraft(emptyRegistration); }}>Add manual</button>
+        </div>
       </div>
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-[240px] flex-1">
@@ -852,6 +1191,7 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
         <Field label="Status">
           <select className={`${field} min-w-[160px]`} value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
             <option value="">All</option>
+            <option value="pending">Pending</option>
             <option value="active">Active</option>
             <option value="fully_paid">Fully paid</option>
             <option value="cancelled">Cancelled</option>
@@ -881,10 +1221,11 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
           </div>
         </form>
       ) : null}
-      {viewing ? <RegistrationView row={viewing} editing={editingDetails} draft={draft} setDraft={setDraft} chapters={chapters} onSave={save} onEdit={() => setEditingDetails(true)} onCloseEdit={() => setEditingDetails(false)} onClose={() => { setViewing(null); setEditingDetails(false); }} onCancel={() => setCancelTarget({ reference: viewing.reference, name: viewing.attendee.fullName })} /> : null}
-      <DataTable columns={["Name", "Email", "Mobile", "Reference", "Ticket", "Paid", "Left", "Status", ""]} empty={empty}>
+      {viewing ? <RegistrationView row={viewing} editing={editingDetails} draft={draft} setDraft={setDraft} chapters={chapters} onSave={save} onEdit={() => setEditingDetails(true)} onCloseEdit={() => setEditingDetails(false)} onClose={() => { setViewing(null); setEditingDetails(false); }} onCancel={() => setCancelTarget({ reference: viewing.reference, name: viewing.attendee.fullName })} onError={onError} /> : null}
+      <DataTable columns={["Date / time", "Name", "Email", "Mobile", "Reference", "Ticket", "Paid", "Left", "Paid at", "Status", ""]} empty={empty}>
         {visible.map((row) => (
           <tr key={row.reference}>
+            <td className={`${tdClass} whitespace-nowrap`}>{formatDateTime(row.createdAt || row.registeredOn)}</td>
             <td className={`${tdClass} font-semibold`}>{row.attendee.fullName}</td>
             <td className={tdClass}>{row.attendee.email}</td>
             <td className={tdClass}>{row.attendee.mobile}</td>
@@ -892,6 +1233,7 @@ function Registrations({ onError }: { onError: (message: string) => void }) {
             <td className={tdClass}>{row.tierName}</td>
             <td className={tdClass}>{money(row.totalCents - row.balanceCents, row.currency)}</td>
             <td className={tdClass}>{money(row.balanceCents, row.currency)}</td>
+            <td className={`${tdClass} whitespace-nowrap`}>{row.paidAt ? formatDateTime(row.paidAt) : "—"}</td>
             <td className={tdClass}>{registrationStatusLabel(row)}</td>
             <td className={`${tdClass} whitespace-nowrap text-right`}>
               <button type="button" className={linkButton} onClick={() => openView(row)}>View</button>
@@ -1035,6 +1377,451 @@ function TemplatePreview({ channel, subject, body, systemKey }: { channel: strin
         </div>
       )}
     </div>
+  );
+}
+
+function TagPicker({
+  tags,
+  selectedIds,
+  onChange,
+  onCreate,
+  lockManaged = false,
+}: {
+  tags: MessageTag[];
+  selectedIds: number[];
+  onChange: (ids: number[]) => void;
+  onCreate?: (label: string) => Promise<MessageTag | null>;
+  lockManaged?: boolean;
+}) {
+  const [draft, setDraft] = useState("");
+  async function createTag() {
+    const label = draft.trim();
+    if (!label || !onCreate) return;
+    const tag = await onCreate(label);
+    setDraft("");
+    if (tag && !selectedIds.includes(tag.id)) onChange([...selectedIds, tag.id]);
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap gap-2">
+        {tags.length === 0 ? <p className="m-0 text-sm text-[#5C5C63]">No tags yet.</p> : null}
+        {tags.map((tag) => {
+          const on = selectedIds.includes(tag.id);
+          const locked = lockManaged && Boolean(tag.managed);
+          return (
+            <button
+              key={tag.id}
+              type="button"
+              disabled={locked}
+              title={locked ? "Assigned automatically from payment status" : undefined}
+              className={`rounded-full border px-3 py-1.5 text-sm font-semibold ${on ? "border-[#141416] bg-[#141416] text-white" : "border-[#D9D5CF] bg-white text-[#3A3A40]"} ${locked ? "cursor-default opacity-80" : ""}`}
+              onClick={() => {
+                if (locked) return;
+                onChange(on ? selectedIds.filter((id) => id !== tag.id) : [...selectedIds, tag.id]);
+              }}
+            >
+              <span className="mr-1.5 inline-block h-2 w-2 rounded-full" style={{ background: tag.color }} />
+              {tag.label}
+            </button>
+          );
+        })}
+      </div>
+      {onCreate ? (
+        <div className="flex flex-wrap gap-2">
+          <input className={`${field} min-w-[180px] flex-1`} value={draft} placeholder="New tag label" onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); createTag().catch(() => undefined); } }} />
+          <button type="button" className={ghostButton} onClick={() => { createTag().catch(() => undefined); }}>Add tag</button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Messaging({ onError }: { onError: (message: string) => void }) {
+  const [tab, setTab] = useState<"compose" | "groups" | "history">("compose");
+  const [tags, setTags] = useState<MessageTag[]>([]);
+  const [groups, setGroups] = useState<MessageGroup[]>([]);
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [blasts, setBlasts] = useState<MessageBlast[]>([]);
+  const [report, setReport] = useState<{ blast: MessageBlast; deliveries: BlastDelivery[] } | null>(null);
+  const [groupForm, setGroupForm] = useState({ id: 0, name: "", sources: "both" as MessageGroup["sources"], tagIds: [] as number[] });
+  const [compose, setCompose] = useState({
+    groupId: "",
+    sources: "both" as MessageGroup["sources"],
+    tagIds: [] as number[],
+    channel: "email" as "email" | "sms",
+    templateId: "",
+    subject: "",
+    body: "",
+  });
+  const [preview, setPreview] = useState<AudiencePreview | null>(null);
+  const [confirming, setConfirming] = useState<AudiencePreview | null>(null);
+  const [sending, setSending] = useState(false);
+
+  async function load() {
+    const [tagRows, groupRows, templateRows, blastRows] = await Promise.all([
+      api("/api/admin/message-tags"),
+      api("/api/admin/message-groups"),
+      api("/api/admin/templates"),
+      api("/api/admin/message-blasts"),
+    ]);
+    setTags(tagRows);
+    setGroups(groupRows);
+    setTemplates(templateRows);
+    setBlasts(blastRows);
+  }
+
+  useEffect(() => { load().catch((error) => onError(error.message)); }, []);
+
+  async function createTag(label: string) {
+    try {
+      const tag = await api("/api/admin/message-tags", { method: "POST", body: JSON.stringify({ label }) });
+      setTags((current) => {
+        if (current.some((row) => row.id === tag.id)) return current.map((row) => row.id === tag.id ? tag : row);
+        return [...current, tag].sort((a, b) => a.label.localeCompare(b.label));
+      });
+      return tag as MessageTag;
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not create tag");
+      return null;
+    }
+  }
+
+  async function saveGroup(event: FormEvent) {
+    event.preventDefault();
+    try {
+      const path = groupForm.id ? `/api/admin/message-groups/${groupForm.id}` : "/api/admin/message-groups";
+      await api(path, {
+        method: groupForm.id ? "PATCH" : "POST",
+        body: JSON.stringify({ name: groupForm.name, sources: groupForm.sources, tagIds: groupForm.tagIds }),
+      });
+      setGroupForm({ id: 0, name: "", sources: "both", tagIds: [] });
+      await load();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not save group");
+    }
+  }
+
+  async function removeGroup(id: number) {
+    try {
+      await api(`/api/admin/message-groups/${id}`, { method: "DELETE" });
+      await load();
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not delete group");
+    }
+  }
+
+  function applyTemplate(templateId: string) {
+    const template = templates.find((row) => String(row.id) === templateId);
+    if (!template) return;
+    setCompose((current) => ({
+      ...current,
+      channel: template.channel,
+      templateId,
+      subject: template.channel === "email" ? (template.subject || "") : "",
+      body: template.body || "",
+    }));
+    setPreview(null);
+  }
+
+  function audiencePayload() {
+    return compose.groupId
+      ? { channel: compose.channel, groupId: Number(compose.groupId) }
+      : { channel: compose.channel, sources: compose.sources, tagIds: compose.tagIds };
+  }
+
+  async function runPreview() {
+    try {
+      const result = await api("/api/admin/message-blasts/preview", { method: "POST", body: JSON.stringify(audiencePayload()) });
+      setPreview(result);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not preview audience");
+    }
+  }
+
+  async function sendBlast(event: FormEvent) {
+    event.preventDefault();
+    setSending(true);
+    try {
+      const result = await api("/api/admin/message-blasts/preview", { method: "POST", body: JSON.stringify(audiencePayload()) });
+      setPreview(result);
+      setConfirming(result);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not check the audience");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function confirmSend() {
+    if (!confirming || confirming.eligible < 1) return;
+    setSending(true);
+    try {
+      const blast = await api("/api/admin/message-blasts", {
+        method: "POST",
+        body: JSON.stringify({
+          ...audiencePayload(),
+          subject: compose.subject,
+          body: compose.body,
+          templateId: compose.templateId ? Number(compose.templateId) : null,
+          confirmText: "SEND",
+        }),
+      });
+      setConfirming(null);
+      setTab("history");
+      await load();
+      setReport(await api(`/api/admin/message-blasts/${blast.id}`));
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not send blast");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function openReport(id: number) {
+    try {
+      setReport(await api(`/api/admin/message-blasts/${id}`));
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not load report");
+    }
+  }
+
+  const contactLabel = compose.channel === "sms" ? "mobile number" : "email address";
+
+  return (
+    <section className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="m-0 font-archivo text-[28px] font-extrabold">Messaging</h1>
+        <div className="flex flex-wrap gap-2">
+          {(["compose", "groups", "history"] as const).map((item) => (
+            <button
+              key={item}
+              type="button"
+              className={`rounded-full px-4 py-2 text-sm font-semibold ${tab === item ? "bg-[#141416] text-white" : "bg-white text-[#3A3A40] border border-[#D9D5CF]"}`}
+              onClick={() => setTab(item)}
+            >
+              {item === "compose" ? "Compose" : item === "groups" ? "Groups" : "History"}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {tab === "compose" ? (
+        <form className="grid gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4" onSubmit={sendBlast}>
+          <p className="m-0 text-sm text-[#5C5C63]">Send email or SMS to a saved group, or pick sources and tags for an ad-hoc audience.</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Saved group">
+              <select
+                className={field}
+                value={compose.groupId}
+                onChange={(event) => {
+                  const groupId = event.target.value;
+                  const group = groups.find((row) => String(row.id) === groupId);
+                  setCompose((current) => ({
+                    ...current,
+                    groupId,
+                    sources: group?.sources || current.sources,
+                    tagIds: group?.tagIds || [],
+                  }));
+                  setPreview(null);
+                }}
+              >
+                <option value="">Ad-hoc (sources + tags)</option>
+                {groups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Channel">
+              <select
+                className={field}
+                value={compose.channel}
+                onChange={(event) => {
+                  const channel = event.target.value as "email" | "sms";
+                  setCompose((current) => ({ ...current, channel, templateId: "", subject: "", body: "" }));
+                  setPreview(null);
+                }}
+              >
+                <option value="email">Email</option>
+                <option value="sms">SMS</option>
+              </select>
+            </Field>
+          </div>
+          {!compose.groupId ? (
+            <>
+              <Field label="Sources">
+                <select className={field} value={compose.sources} onChange={(event) => { setCompose({ ...compose, sources: event.target.value as MessageGroup["sources"] }); setPreview(null); }}>
+                  <option value="both">Members + registrations</option>
+                  <option value="members">Members only</option>
+                  <option value="registrations">Registrations only</option>
+                </select>
+              </Field>
+              <div className="flex flex-col gap-1">
+                <span className="text-[13px] font-semibold text-[#3A3A40]">Tags</span>
+                <p className="m-0 text-[13px] text-[#5C5C63]">Select a tag to send only to people who have it. Leave every tag off to include everyone in the sources.</p>
+                <TagPicker tags={tags} selectedIds={compose.tagIds} onChange={(tagIds) => { setCompose({ ...compose, tagIds }); setPreview(null); }} />
+              </div>
+            </>
+          ) : null}
+          <Field label="Template">
+            <select
+              className={field}
+              value={compose.templateId}
+              onChange={(event) => {
+                const templateId = event.target.value;
+                if (!templateId) {
+                  setCompose({ ...compose, templateId: "" });
+                  return;
+                }
+                applyTemplate(templateId);
+              }}
+            >
+              <option value="">Custom message</option>
+              {templates.map((template) => (
+                <option key={template.id} value={template.id}>
+                  {template.name} · {template.channel === "sms" ? "SMS" : "Email"}{template.system_key ? " · Built-in" : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+          {compose.channel === "email" ? (
+            <Field label="Subject">
+              <input className={field} required value={compose.subject} onChange={(event) => setCompose({ ...compose, subject: event.target.value })} />
+            </Field>
+          ) : null}
+          <Field label="Message">
+            <textarea className={`${field} min-h-28`} required value={compose.body} onChange={(event) => setCompose({ ...compose, body: event.target.value })} />
+          </Field>
+          <p className="m-0 text-[13px] text-[#5C5C63]">Placeholders: {"{{first_name}}"} {"{{full_name}}"} {"{{email}}"} {"{{mobile}}"} {"{{chapter}}"} {"{{reference}}"} {"{{product}}"}</p>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" className={ghostButton} onClick={() => { runPreview().catch(() => undefined); }}>Preview audience</button>
+            <button type="submit" className={buttonClass} disabled={sending}>{sending ? "Checking…" : "Send blast"}</button>
+          </div>
+          <p className="m-0 text-[13px] text-[#5C5C63]">Preview audience counts who would receive this message. It does not send.</p>
+          {preview ? (
+            <div className="rounded-[10px] bg-[#F6F4F1] px-3 py-3 text-sm">
+              <p className="m-0 font-semibold">{preview.eligible} would receive it · {preview.missingContact} missing a {contactLabel} · {preview.total} in the audience</p>
+              {preview.sample?.length ? (
+                <ul className="m-0 mt-2 list-disc pl-5 text-[#5C5C63]">
+                  {preview.sample.map((row) => (
+                    <li key={`${row.source}-${row.contact}`}>{row.fullName} · {row.contact} · {row.source}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
+        </form>
+      ) : null}
+      {confirming ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#141416]/45 px-4" role="dialog" aria-modal="true" aria-labelledby="blast-confirm-title">
+          <div className="w-full max-w-[460px] rounded-[16px] border border-[#E4E1DC] bg-[#FDFCFA] p-5 shadow-[0_18px_50px_rgba(20,20,22,0.18)]">
+            <p className="m-0 text-xs font-bold tracking-[0.16em] text-[#A8131F] uppercase">IBMC 2027 · AMPLIFY</p>
+            <h2 id="blast-confirm-title" className="m-0 mt-2 font-archivo text-[26px] leading-tight font-extrabold">
+              {confirming.eligible > 0 ? `Send this ${compose.channel === "sms" ? "SMS" : "email"} to ${confirming.eligible} ${confirming.eligible === 1 ? "person" : "people"}?` : `No one would receive this ${compose.channel === "sms" ? "SMS" : "email"}.`}
+            </h2>
+            <p className="m-0 mt-2 text-sm leading-normal text-[#5C5C63]">
+              {confirming.total} in the audience. {confirming.missingContact > 0
+                ? `${confirming.missingContact} ${confirming.missingContact === 1 ? "person has" : "people have"} no ${contactLabel} and will be skipped.`
+                : `Everyone in the audience has a ${contactLabel}.`}
+            </p>
+            {confirming.sample?.length ? (
+              <ul className="m-0 mt-3 list-disc pl-5 text-sm text-[#3A3A40]">
+                {confirming.sample.map((row) => (
+                  <li key={`${row.source}-${row.contact}`}>{row.fullName} · {row.contact}</li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="mt-5 flex flex-wrap gap-2">
+              {confirming.eligible > 0 ? (
+                <button type="button" className={buttonClass} disabled={sending} onClick={() => { confirmSend().catch(() => undefined); }}>
+                  {sending ? "Sending…" : `Send to ${confirming.eligible} ${confirming.eligible === 1 ? "person" : "people"}`}
+                </button>
+              ) : null}
+              <button type="button" className={ghostButton} disabled={sending} onClick={() => setConfirming(null)}>Back</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "groups" ? (
+        <div className="flex flex-col gap-3">
+          <form className="grid gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4" onSubmit={saveGroup}>
+            <h2 className="m-0 text-[18px] font-bold">{groupForm.id ? "Edit group" : "New group"}</h2>
+            <Field label="Name"><input className={field} required value={groupForm.name} onChange={(event) => setGroupForm({ ...groupForm, name: event.target.value })} /></Field>
+            <Field label="Sources">
+              <select className={field} value={groupForm.sources} onChange={(event) => setGroupForm({ ...groupForm, sources: event.target.value as MessageGroup["sources"] })}>
+                <option value="both">Members + registrations</option>
+                <option value="members">Members only</option>
+                <option value="registrations">Registrations only</option>
+              </select>
+            </Field>
+            <div className="flex flex-col gap-1">
+              <span className="text-[13px] font-semibold text-[#3A3A40]">Tags (empty = everyone in the sources)</span>
+              <TagPicker tags={tags} selectedIds={groupForm.tagIds} onChange={(tagIds) => setGroupForm({ ...groupForm, tagIds })} onCreate={createTag} />
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button type="submit" className={buttonClass}>{groupForm.id ? "Save group" : "Add group"}</button>
+              {groupForm.id ? <button type="button" className={ghostButton} onClick={() => setGroupForm({ id: 0, name: "", sources: "both", tagIds: [] })}>Cancel</button> : null}
+            </div>
+          </form>
+          <DataTable columns={["Name", "Sources", "Tags", ""]} empty={groups.length === 0 ? "No groups yet." : ""}>
+            {groups.map((group) => (
+              <tr key={group.id}>
+                <td className={`${tdClass} font-semibold`}>{group.name}</td>
+                <td className={tdClass}>{titleCase(group.sources)}</td>
+                <td className={tdClass}>{group.tagIds.length ? group.tagIds.map((id) => tags.find((tag) => tag.id === id)?.label || id).join(", ") : "Everyone"}</td>
+                <td className={`${tdClass} whitespace-nowrap text-right`}>
+                  <button type="button" className={linkButton} onClick={() => setGroupForm({ id: group.id, name: group.name, sources: group.sources, tagIds: group.tagIds })}>Edit</button>
+                  {" · "}
+                  <button type="button" className={linkButton} onClick={() => { removeGroup(group.id).catch(() => undefined); }}>Delete</button>
+                </td>
+              </tr>
+            ))}
+          </DataTable>
+        </div>
+      ) : null}
+
+      {tab === "history" ? (
+        <div className="flex flex-col gap-3">
+          <DataTable columns={["When", "Channel", "Audience", "Status", "Sent", "Failed", "Skipped", ""]} empty={blasts.length === 0 ? "No blasts yet." : ""}>
+            {blasts.map((blast) => (
+              <tr key={blast.id}>
+                <td className={tdClass}>{String(blast.createdAt || "").slice(0, 16).replace("T", " ")}</td>
+                <td className={tdClass}>{blast.channel.toUpperCase()}</td>
+                <td className={tdClass}>{blast.audience?.groupName || titleCase(blast.audience?.sources || "audience")}</td>
+                <td className={tdClass}>{titleCase(blast.status)}</td>
+                <td className={tdClass}>{blast.sent}</td>
+                <td className={tdClass}>{blast.failed}</td>
+                <td className={tdClass}>{blast.skipped}</td>
+                <td className={`${tdClass} text-right`}><button type="button" className={linkButton} onClick={() => { openReport(blast.id).catch(() => undefined); }}>Report</button></td>
+              </tr>
+            ))}
+          </DataTable>
+          {report ? (
+            <div className="flex flex-col gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="m-0 font-archivo text-[22px] font-extrabold">Blast #{report.blast.id}</h2>
+                  <p className="m-0 mt-1 text-sm text-[#5C5C63]">
+                    {report.blast.channel.toUpperCase()} · {titleCase(report.blast.status)} · {report.blast.sent} sent · {report.blast.failed} failed · {report.blast.skipped} skipped
+                  </p>
+                  {report.blast.error ? <p className="m-0 mt-1 text-sm text-[#A8131F]">{report.blast.error}</p> : null}
+                </div>
+                <button type="button" className={ghostButton} onClick={() => setReport(null)}>Close</button>
+              </div>
+              <DataTable columns={["Name", "Contact", "Source", "Status", "Error"]} empty={report.deliveries.length === 0 ? "No deliveries." : ""}>
+                {report.deliveries.map((row) => (
+                  <tr key={row.id}>
+                    <td className={`${tdClass} font-semibold`}>{row.fullName}</td>
+                    <td className={tdClass}>{row.contact}</td>
+                    <td className={tdClass}>{row.source}</td>
+                    <td className={tdClass}>{titleCase(row.status)}</td>
+                    <td className={tdClass}>{row.error || ""}</td>
+                  </tr>
+                ))}
+              </DataTable>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -1250,17 +2037,287 @@ function Schedules({ onError }: { onError: (message: string) => void }) {
   );
 }
 
-const emptyMember = { fullName: "", email: "", mobile: "", chapter: "", category: "", businessName: "", ticketType: "", regStatus: "updated" as Member["regStatus"], country: "", goldClub: false };
+const emptyMember = { fullName: "", email: "", mobile: "", chapter: "", category: "", businessName: "", ticketType: "", regStatus: "updated" as Member["regStatus"], country: "", goldClub: false, sponsors2026: null as number | null, sponsorsAugDec2026: null as number | null, sponsorDataAsOf: "", goldReward: "" };
 
 type Chapter = { id: number; name: string };
 
-function Chapters({ onError }: { onError: (message: string) => void }) {
+type RegisterMemberTarget = { id: number; fullName: string };
+
+const emptyRegisterDraft = {
+  productCode: "first_mover",
+  paymentPlan: "full",
+  bankReference: "",
+  paidOn: "",
+  amountReceived: "",
+  notes: "",
+  sendEmail: true,
+};
+
+function MemberBankRegisterDialog({
+  target,
+  onClose,
+  onError,
+  onRegistered,
+  onAlreadyRegistered,
+}: {
+  target: RegisterMemberTarget | null;
+  onClose: () => void;
+  onError: (message: string) => void;
+  onRegistered: (reference: string) => void;
+  onAlreadyRegistered?: (reference: string) => void;
+}) {
+  const [options, setOptions] = useState<MemberRegisterOptions | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [confirm, setConfirm] = useState(false);
+  const [draft, setDraft] = useState(emptyRegisterDraft);
+
+  useEffect(() => {
+    if (!target) {
+      setOptions(null);
+      setConfirm(false);
+      setBusy(false);
+      setDraft(emptyRegisterDraft);
+      return;
+    }
+    let cancelled = false;
+    setBusy(true);
+    setConfirm(false);
+    setOptions(null);
+    api(`/api/admin/members/${target.id}/register-options`)
+      .then((payload: MemberRegisterOptions) => {
+        if (cancelled) return;
+        if (payload.registration?.reference) {
+          onClose();
+          onAlreadyRegistered?.(payload.registration.reference);
+          return;
+        }
+        const productCode = payload.defaultProductCode || payload.products[0]?.code || "first_mover";
+        const product = payload.products.find((item) => item.code === productCode) || payload.products[0];
+        const paymentPlan = product?.allowsInstallment ? "installment" : "full";
+        const quote = paymentPlan === "installment" ? product?.installment : product?.full;
+        setOptions(payload);
+        setDraft({
+          productCode,
+          paymentPlan,
+          bankReference: "",
+          paidOn: payload.today || "",
+          amountReceived: quote ? String(quote.dueTodayCents / 100) : "",
+          notes: "",
+          sendEmail: true,
+        });
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        onClose();
+        onError(error instanceof Error ? error.message : "Could not load registration options");
+      })
+      .finally(() => {
+        if (!cancelled) setBusy(false);
+      });
+    return () => { cancelled = true; };
+  }, [target?.id]);
+
+  if (!target) return null;
+
+  const product = options?.products.find((item) => item.code === draft.productCode) || null;
+  const quote = product
+    ? (draft.paymentPlan === "installment" ? product.installment : product.full)
+    : null;
+
+  function updatePlan(productCode: string, paymentPlan: string) {
+    const nextProduct = options?.products.find((item) => item.code === productCode);
+    const plan = paymentPlan === "installment" && nextProduct?.allowsInstallment ? "installment" : "full";
+    const nextQuote = plan === "installment" ? nextProduct?.installment : nextProduct?.full;
+    setDraft((current) => ({
+      ...current,
+      productCode,
+      paymentPlan: plan,
+      amountReceived: nextQuote ? String(nextQuote.dueTodayCents / 100) : current.amountReceived,
+    }));
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!target || !confirm || !quote) return;
+    setBusy(true);
+    try {
+      const amountText = draft.amountReceived.trim();
+      const amountReceivedCents = amountText === "" ? null : Math.round(Number(amountText) * 100);
+      if (amountText !== "" && (!Number.isFinite(amountReceivedCents) || (amountReceivedCents ?? 0) < 0)) {
+        throw new Error("Amount received must be a valid number.");
+      }
+      const created = await api(`/api/admin/members/${target.id}/register`, {
+        method: "POST",
+        body: JSON.stringify({
+          productCode: draft.productCode,
+          paymentPlan: draft.paymentPlan,
+          bankReference: draft.bankReference.trim(),
+          paidOn: draft.paidOn,
+          amountReceivedCents,
+          notes: draft.notes.trim(),
+          sendEmail: draft.sendEmail,
+        }),
+      });
+      onClose();
+      if (created?.reference) onRegistered(created.reference);
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not register the member");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!options) {
+    return busy ? (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#141416]/45 px-4" role="status" aria-live="polite">
+        <p className="m-0 rounded-[14px] border border-[#E4E1DC] bg-[#FDFCFA] px-4 py-3 text-sm text-[#5C5C63]">Loading registration…</p>
+      </div>
+    ) : null;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#141416]/45 px-4" role="dialog" aria-modal="true" aria-labelledby="member-register-title">
+      <form className="max-h-[90vh] w-full max-w-[520px] overflow-y-auto rounded-[16px] border border-[#E4E1DC] bg-[#FDFCFA] p-5 shadow-[0_18px_50px_rgba(20,20,22,0.18)]" onSubmit={submit}>
+        <p className="m-0 text-xs font-bold tracking-[0.16em] text-[#A8131F] uppercase">IBMC 2027 · Bank register</p>
+        <h2 id="member-register-title" className="m-0 mt-2 font-archivo text-[26px] leading-tight font-extrabold">Register {target.fullName}?</h2>
+        <p className="m-0 mt-2 text-sm leading-normal text-[#5C5C63]">
+          Creates a registration and records the opening bank payment. Ask first, then confirm below.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <Field label="Ticket">
+            <select className={field} value={draft.productCode} onChange={(event) => updatePlan(event.target.value, draft.paymentPlan)}>
+              {options.products.map((item) => (
+                <option key={item.code} value={item.code}>
+                  {item.name}{item.inSalesWindow ? " · active" : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Payment plan">
+            <select className={field} value={draft.paymentPlan} onChange={(event) => updatePlan(draft.productCode, event.target.value)}>
+              <option value="full">Full payment</option>
+              {product?.allowsInstallment ? <option value="installment">Installment</option> : null}
+            </select>
+          </Field>
+          <Field label="Bank reference">
+            <input
+              className={field}
+              required={(quote?.dueTodayCents || 0) > 0}
+              value={draft.bankReference}
+              onChange={(event) => setDraft({ ...draft, bankReference: event.target.value })}
+              placeholder="Deposit / transfer reference"
+            />
+          </Field>
+          <Field label="Date paid">
+            <input className={field} type="date" value={draft.paidOn} onChange={(event) => setDraft({ ...draft, paidOn: event.target.value })} />
+          </Field>
+          <Field label="Amount received">
+            <input
+              className={field}
+              inputMode="decimal"
+              value={draft.amountReceived}
+              onChange={(event) => setDraft({ ...draft, amountReceived: event.target.value })}
+              placeholder={quote ? String(quote.dueTodayCents / 100) : ""}
+            />
+          </Field>
+          <Field label="Notes">
+            <input
+              className={field}
+              value={draft.notes}
+              onChange={(event) => setDraft({ ...draft, notes: event.target.value })}
+              placeholder="Optional bank details"
+            />
+          </Field>
+        </div>
+        <div className="mt-3 rounded-[12px] border border-[#E4E1DC] bg-white px-3 py-3 text-sm text-[#3A3A40]">
+          {quote ? (
+            <>
+              <p className="m-0 font-semibold">{quote.productName} · {draft.paymentPlan === "installment" ? "Installment" : "Full"}</p>
+              <p className="m-0 mt-1">
+                Due today {money(quote.dueTodayCents, quote.currency)}
+                {quote.discountCents > 0 ? ` · Gold saves ${money(quote.discountCents, quote.currency)}` : ""}
+                {" · "}Ticket total {money(quote.totalCents, quote.currency)}
+              </p>
+              {quote.goldReward && quote.goldReward !== "GOLD_NONE" ? (
+                <p className="m-0 mt-1 text-[#5C5C63]">Gold reward: {quote.goldReward.replace("GOLD_", "")}</p>
+              ) : null}
+              <p className="m-0 mt-1 text-[13px] text-[#5C5C63]">
+                Settlement uses the schedule amount above. Amount received is kept in the payment notes for audit.
+              </p>
+            </>
+          ) : (
+            <p className="m-0 text-[#A8131F]">This ticket/plan is not available.</p>
+          )}
+        </div>
+        <label className="mt-3 flex items-center gap-2 text-sm font-semibold">
+          <input type="checkbox" className="h-5 w-5 accent-[#D0202E]" checked={draft.sendEmail} onChange={(event) => setDraft({ ...draft, sendEmail: event.target.checked })} />
+          Send payment confirmation / entry pass email
+        </label>
+        <label className="mt-3 flex items-start gap-2 text-sm font-semibold">
+          <input type="checkbox" className="mt-0.5 h-5 w-5 accent-[#D0202E]" checked={confirm} onChange={(event) => setConfirm(event.target.checked)} />
+          <span>I confirmed this bank payment and want to register {target.fullName} now.</span>
+        </label>
+        <div className="mt-5 flex flex-wrap gap-2">
+          <button type="submit" className={buttonClass} disabled={busy || !confirm || !quote}>
+            {busy ? "Registering…" : "Register with bank payment"}
+          </button>
+          <button type="button" className={ghostButton} disabled={busy} onClick={onClose}>Cancel</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+type ChapterProgressMember = {
+  id: number;
+  fullName: string;
+  email: string;
+  mobile: string;
+  registered: boolean;
+  reference: string | null;
+  plan: "full" | "installment" | null;
+  planLabel: string;
+  fullyPaid: boolean;
+  registeredAt: string | null;
+};
+
+type ChapterProgress = {
+  id: number | null;
+  name: string;
+  total: number;
+  registered: number;
+  percent: number | null;
+  members: ChapterProgressMember[];
+};
+
+function Chapters({
+  onError,
+  onOpenRegistration,
+  onEditMember,
+}: {
+  onError: (message: string) => void;
+  onOpenRegistration?: (reference: string) => void;
+  onEditMember?: (id: number) => void;
+}) {
   const [rows, setRows] = useState<Chapter[]>([]);
+  const [progress, setProgress] = useState<ChapterProgress[]>([]);
   const [name, setName] = useState("");
   const [editor, setEditor] = useState<null | "add" | number>(null);
+  const [managing, setManaging] = useState(false);
   const [query, setQuery] = useState("");
-  async function load() { setRows(await api("/api/admin/chapters")); }
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [registerTarget, setRegisterTarget] = useState<RegisterMemberTarget | null>(null);
+
+  async function load() {
+    const [chapterRows, progressRows] = await Promise.all([
+      api("/api/admin/chapters"),
+      api("/api/admin/chapters/progress"),
+    ]);
+    setRows(chapterRows);
+    setProgress(progressRows);
+  }
   useEffect(() => { load().catch((error) => onError(error.message)); }, []);
+
   async function save(event: FormEvent) {
     event.preventDefault();
     try {
@@ -1273,31 +2330,60 @@ function Chapters({ onError }: { onError: (message: string) => void }) {
       onError(error instanceof Error ? error.message : "Could not save the chapter");
     }
   }
+
   async function upload(file: File) {
     const csv = await file.text();
     try {
       const payload = await api("/api/admin/chapters/upload", { method: "POST", body: JSON.stringify({ csv }) });
       setRows(payload.chapters);
+      setProgress(await api("/api/admin/chapters/progress"));
     } catch (error) {
       onError(error instanceof Error ? error.message : "Upload failed");
     }
   }
-  const visible = rows.filter((row) => matches(query, [row.name]));
-  const empty = rows.length === 0 ? "No chapters yet." : visible.length === 0 ? "No chapters match that search." : "";
+
+  const visibleProgress = progress.filter((row) => matches(query, [row.name, ...row.members.flatMap((member) => [member.fullName, member.email, member.reference, member.planLabel])]));
+  const visibleChapters = rows.filter((row) => matches(query, [row.name]));
+  const progressEmpty = progress.length === 0 ? "No chapters yet." : visibleProgress.length === 0 ? "No chapters match that search." : "";
+  const manageEmpty = rows.length === 0 ? "No chapters yet." : visibleChapters.length === 0 ? "No chapters match that search." : "";
+  const registeredTotal = progress.reduce((sum, row) => sum + row.registered, 0);
+  const memberTotal = progress.reduce((sum, row) => sum + row.total, 0);
+
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="m-0 font-archivo text-[28px] font-extrabold">Chapters</h1>
+        <div>
+          <h1 className="m-0 font-archivo text-[28px] font-extrabold">Chapters</h1>
+          <p className="m-0 mt-1 text-sm text-[#5C5C63]">
+            Registered members over roster size. Expand a chapter to see the full roster, sorted by name.
+            {memberTotal ? ` ${registeredTotal} of ${memberTotal} registered overall.` : ""}
+          </p>
+        </div>
         <div className="flex flex-wrap gap-2">
-          <label className={ghostButton}>
-            Upload chapters
-            <input className="sr-only" type="file" accept=".csv,text/csv,.txt,text/plain" onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file); event.target.value = ""; }} />
-          </label>
-          <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setName(""); }}>Add</button>
+          <button
+            type="button"
+            className={ghostButton}
+            onClick={() => {
+              setManaging((current) => !current);
+              setEditor(null);
+              setName("");
+            }}
+          >
+            {managing ? "Back to progress" : "Manage chapters"}
+          </button>
+          {managing ? (
+            <>
+              <label className={ghostButton}>
+                Upload chapters
+                <input className="sr-only" type="file" accept=".csv,text/csv,.txt,text/plain" onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file); event.target.value = ""; }} />
+              </label>
+              <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setName(""); }}>Add</button>
+            </>
+          ) : null}
         </div>
       </div>
-      <SearchBox value={query} onChange={setQuery} placeholder="Search chapters" />
-      {editor !== null ? (
+      <SearchBox value={query} onChange={setQuery} placeholder={managing ? "Search chapters" : "Search chapters or members"} />
+      {managing && editor !== null ? (
         <form className="flex flex-wrap items-end gap-3 rounded-[14px] border border-[#E4E1DC] bg-white p-4" onSubmit={save}>
           <Field label="Chapter name"><input className={field} required value={name} onChange={(event) => setName(event.target.value)} /></Field>
           <button type="submit" className={buttonClass}>{editor === "add" ? "Add chapter" : "Save chapter"}</button>
@@ -1305,40 +2391,203 @@ function Chapters({ onError }: { onError: (message: string) => void }) {
           <p className="m-0 w-full text-[13px] text-[#5C5C63]">Upload one chapter name per line. A header named chapter or name is optional.</p>
         </form>
       ) : null}
-      <DataTable columns={["Chapter", ""]} empty={empty}>
-        {visible.map((row) => (
-          <tr key={row.id}>
-            <td className={`${tdClass} font-semibold`}>{row.name}</td>
-            <td className={`${tdClass} text-right`}><button type="button" className={linkButton} onClick={() => { setEditor(row.id); setName(row.name); }}>Edit</button></td>
-          </tr>
-        ))}
-      </DataTable>
+      {managing ? (
+        <DataTable columns={["Chapter", ""]} empty={manageEmpty}>
+          {visibleChapters.map((row) => (
+            <tr key={row.id}>
+              <td className={`${tdClass} font-semibold`}>{row.name}</td>
+              <td className={`${tdClass} text-right`}><button type="button" className={linkButton} onClick={() => { setEditor(row.id); setName(row.name); }}>Edit</button></td>
+            </tr>
+          ))}
+        </DataTable>
+      ) : (
+        <div className="overflow-x-auto rounded-[14px] border border-[#E4E1DC] bg-white">
+          {progressEmpty ? <p className="m-0 px-3 py-4 text-sm text-[#5C5C63]">{progressEmpty}</p> : (
+            <table className={tableClass}>
+              <thead>
+                <tr>
+                  <th className={thClass}>Chapter</th>
+                  <th className={`${thClass} text-right`}>Registered</th>
+                  <th className={`${thClass} text-right`}>%</th>
+                  <th className={thClass} />
+                </tr>
+              </thead>
+              <tbody>
+                {visibleProgress.map((row) => {
+                  const key = row.id == null ? `name:${row.name}` : String(row.id);
+                  const open = Boolean(expanded[key]);
+                  return (
+                    <Fragment key={key}>
+                      <tr>
+                        <td className={`${tdClass} font-semibold`}>{row.name}</td>
+                        <td className={`${tdClass} whitespace-nowrap text-right`}>{row.registered} / {row.total}</td>
+                        <td className={`${tdClass} whitespace-nowrap text-right font-semibold`}>{row.percent === null ? "—" : `${row.percent}%`}</td>
+                        <td className={`${tdClass} whitespace-nowrap text-right`}>
+                          <button
+                            type="button"
+                            className={linkButton}
+                            onClick={() => setExpanded((current) => ({ ...current, [key]: !open }))}
+                          >
+                            {open ? "Collapse" : "Expand"}
+                          </button>
+                        </td>
+                      </tr>
+                      {open ? (
+                        <tr>
+                          <td className={`${tdClass} bg-[#FDFCFA]`} colSpan={4}>
+                            {row.members.length === 0 ? (
+                              <p className="m-0 text-sm text-[#5C5C63]">No members on this chapter roster yet.</p>
+                            ) : (
+                              <div className="flex flex-col gap-2">
+                                {row.members.map((member) => (
+                                  <div key={member.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-[#F0EDE8] pb-2 last:border-b-0 last:pb-0">
+                                    <div className="flex min-w-0 items-start gap-1">
+                                      <div className="flex shrink-0 items-center gap-0.5 pt-0.5">
+                                        {member.reference ? (
+                                          <button type="button" className={iconButton} title="View registration" aria-label="View registration" onClick={() => onOpenRegistration?.(member.reference!)}>
+                                            <Ticket className="h-4 w-4" strokeWidth={2.25} />
+                                          </button>
+                                        ) : (
+                                          <button
+                                            type="button"
+                                            className={iconButton}
+                                            title="Register"
+                                            aria-label="Register"
+                                            onClick={() => setRegisterTarget({ id: member.id, fullName: member.fullName })}
+                                          >
+                                            <UserPlus className="h-4 w-4" strokeWidth={2.25} />
+                                          </button>
+                                        )}
+                                        <button type="button" className={iconButton} title="Edit" aria-label="Edit" onClick={() => onEditMember?.(member.id)}>
+                                          <Pencil className="h-4 w-4" strokeWidth={2.25} />
+                                        </button>
+                                      </div>
+                                      <div className="min-w-0">
+                                        <p className="m-0 font-semibold">{member.fullName}</p>
+                                        <p className="m-0 text-[13px] text-[#5C5C63]">{member.email} · {member.mobile}</p>
+                                        {member.registered && member.registeredAt ? (
+                                          <p className="m-0 text-[13px] text-[#5C5C63]">Registered {formatDateTime(member.registeredAt)}</p>
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-3 text-right">
+                                      <span className="text-sm text-[#5C5C63]">{member.planLabel}</span>
+                                      {member.reference ? (
+                                        <button type="button" className={linkButton} onClick={() => onOpenRegistration?.(member.reference!)}>
+                                          {member.reference}
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+      <MemberBankRegisterDialog
+        target={registerTarget}
+        onClose={() => setRegisterTarget(null)}
+        onError={onError}
+        onAlreadyRegistered={(reference) => onOpenRegistration?.(reference)}
+        onRegistered={async () => {
+          try {
+            setProgress(await api("/api/admin/chapters/progress"));
+          } catch (error) {
+            onError(error instanceof Error ? error.message : "Could not refresh chapter progress");
+          }
+        }}
+      />
     </section>
   );
 }
 
 const memberPageSize = 20;
 
-function Members({ onError }: { onError: (message: string) => void }) {
+function Members({
+  onError,
+  onOpenRegistration,
+  focusMemberId = null,
+  onFocusedMember,
+}: {
+  onError: (message: string) => void;
+  onOpenRegistration?: (reference: string) => void;
+  focusMemberId?: number | null;
+  onFocusedMember?: () => void;
+}) {
   const [rows, setRows] = useState<Member[]>([]);
   const [chapters, setChapters] = useState<Chapter[]>([]);
+  const [tags, setTags] = useState<MessageTag[]>([]);
+  const [memberTags, setMemberTags] = useState<Record<number, number[]>>({});
   const [form, setForm] = useState(emptyMember);
   const [editor, setEditor] = useState<null | "add" | number>(null);
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [query, setQuery] = useState("");
+  const [goldFilter, setGoldFilter] = useState("all");
+  const [rewardFilter, setRewardFilter] = useState("");
   const [page, setPage] = useState(1);
+  const [registerTarget, setRegisterTarget] = useState<RegisterMemberTarget | null>(null);
+  const [loaded, setLoaded] = useState(false);
+
   async function load() {
-    const [members, chapterRows] = await Promise.all([api("/api/admin/members"), api("/api/admin/chapters")]);
+    const [members, chapterRows, tagRows, assignments] = await Promise.all([
+      api("/api/admin/members"),
+      api("/api/admin/chapters"),
+      api("/api/admin/message-tags"),
+      api("/api/admin/message-tag-assignments"),
+    ]);
     setRows(members);
     setChapters(chapterRows);
+    setTags(tagRows);
+    setMemberTags(assignments.members || {});
+    setLoaded(true);
   }
   useEffect(() => { load().catch((error) => onError(error.message)); }, []);
+
+  async function createTag(label: string) {
+    try {
+      const tag = await api("/api/admin/message-tags", { method: "POST", body: JSON.stringify({ label }) });
+      setTags((current) => current.some((row) => row.id === tag.id) ? current : [...current, tag]);
+      return tag as MessageTag;
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not create tag");
+      return null;
+    }
+  }
+
+  async function saveTags(nextIds: number[]) {
+    setSelectedTagIds(nextIds);
+    if (!editor || editor === "add") return;
+    try {
+      await api(`/api/admin/members/${editor}/tags`, { method: "PUT", body: JSON.stringify({ tagIds: nextIds }) });
+      setMemberTags((current) => ({ ...current, [editor]: nextIds }));
+    } catch (error) {
+      onError(error instanceof Error ? error.message : "Could not save tags");
+    }
+  }
 
   async function save(event: FormEvent) {
     event.preventDefault();
     try {
-      if (editor && editor !== "add") await api(`/api/admin/members/${editor}`, { method: "PATCH", body: JSON.stringify(form) });
-      else await api("/api/admin/members", { method: "POST", body: JSON.stringify(form) });
+      if (editor && editor !== "add") {
+        await api(`/api/admin/members/${editor}`, { method: "PATCH", body: JSON.stringify(form) });
+        await api(`/api/admin/members/${editor}/tags`, { method: "PUT", body: JSON.stringify({ tagIds: selectedTagIds }) });
+      } else {
+        const created = await api("/api/admin/members", { method: "POST", body: JSON.stringify(form) });
+        if (created?.id && selectedTagIds.length) {
+          await api(`/api/admin/members/${created.id}/tags`, { method: "PUT", body: JSON.stringify({ tagIds: selectedTagIds }) });
+        }
+      }
       setForm(emptyMember);
+      setSelectedTagIds([]);
       setEditor(null);
       await load();
     } catch (error) {
@@ -1356,7 +2605,25 @@ function Members({ onError }: { onError: (message: string) => void }) {
     }
   }
 
-  const visible = rows.filter((row) => matches(query, [row.fullName, row.email, row.mobile, row.chapter, row.category, row.businessName, row.ticketType, row.regStatus, row.country]));
+  useEffect(() => {
+    if (!focusMemberId || !loaded) return;
+    const row = rows.find((member) => member.id === focusMemberId);
+    if (!row) {
+      onError("That member was not found.");
+      onFocusedMember?.();
+      return;
+    }
+    setEditor(row.id);
+    setForm(row);
+    setSelectedTagIds(memberTags[row.id] || []);
+    onFocusedMember?.();
+  }, [focusMemberId, loaded, rows]);
+
+  const visible = rows.filter((row) => {
+    if (goldFilter === "gold" && !row.goldClub) return false;
+    if (rewardFilter && row.goldReward !== rewardFilter) return false;
+    return matches(query, [row.fullName, row.email, row.mobile, row.chapter, row.category, row.businessName, row.ticketType, row.regStatus, row.country, row.registrationReference]);
+  });
   const pageCount = Math.max(1, Math.ceil(visible.length / memberPageSize));
   const currentPage = Math.min(page, pageCount);
   const pageStart = (currentPage - 1) * memberPageSize;
@@ -1372,10 +2639,22 @@ function Members({ onError }: { onError: (message: string) => void }) {
             Upload roster
             <input className="sr-only" type="file" accept=".csv,text/csv" onChange={(event) => { const file = event.target.files?.[0]; if (file) upload(file); event.target.value = ""; }} />
           </label>
-          <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setForm(emptyMember); }}>Add</button>
+          <button type="button" className={buttonClass} onClick={() => { setEditor("add"); setForm(emptyMember); setSelectedTagIds([]); }}>Add</button>
         </div>
       </div>
-      <SearchBox value={query} onChange={(value) => { setQuery(value); setPage(1); }} placeholder="Search name, email, mobile, chapter, or business" />
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="min-w-0 flex-1">
+          <SearchBox value={query} onChange={(value) => { setQuery(value); setPage(1); }} placeholder="Search name, email, mobile, chapter, or business" />
+        </div>
+        <select className={`${field} sm:w-44`} value={goldFilter} onChange={(event) => { setGoldFilter(event.target.value); setPage(1); }}>
+          <option value="all">All members</option>
+          <option value="gold">Gold club</option>
+        </select>
+        <select className={`${field} sm:w-44`} value={rewardFilter} onChange={(event) => { setRewardFilter(event.target.value); setPage(1); }}>
+          <option value="">All rewards</option>
+          {goldRewards.map((reward) => <option key={reward.value} value={reward.value}>{reward.label}</option>)}
+        </select>
+      </div>
       {visible.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="m-0 text-sm text-[#5C5C63]">{pageStart + 1}–{pageStart + pageRows.length} of {visible.length}</p>
@@ -1413,16 +2692,60 @@ function Members({ onError }: { onError: (message: string) => void }) {
             <input type="checkbox" className="h-5 w-5 accent-[#D0202E]" checked={form.goldClub} onChange={(event) => setForm({ ...form, goldClub: event.target.checked })} />
             Gold club member
           </label>
+          <Field label="Sponsors 2026"><input className={field} type="number" min="0" value={form.sponsors2026 ?? ""} onChange={(event) => setForm({ ...form, sponsors2026: event.target.value === "" ? null : Number(event.target.value) })} /></Field>
+          <Field label="Sponsors Aug–Dec 2026"><input className={field} type="number" min="0" value={form.sponsorsAugDec2026 ?? ""} onChange={(event) => setForm({ ...form, sponsorsAugDec2026: event.target.value === "" ? null : Number(event.target.value) })} /></Field>
+          <Field label="Sponsor data as of"><input className={field} type="date" value={form.sponsorDataAsOf} onChange={(event) => setForm({ ...form, sponsorDataAsOf: event.target.value })} /></Field>
+          <Field label="Gold reward">
+            <select className={field} value={form.goldReward} onChange={(event) => setForm({ ...form, goldReward: event.target.value })}>
+              <option value="">None</option>
+              {goldRewards.map((reward) => <option key={reward.value} value={reward.value}>{reward.label}</option>)}
+              {form.goldReward && !goldRewards.some((reward) => reward.value === form.goldReward) ? <option value={form.goldReward}>{form.goldReward}</option> : null}
+            </select>
+          </Field>
+          <div className="flex flex-col gap-1 sm:col-span-2">
+            <span className="text-[13px] font-semibold text-[#3A3A40]">Messaging tags</span>
+            <TagPicker tags={tags} selectedIds={selectedTagIds} onChange={(ids) => { saveTags(ids).catch(() => undefined); }} onCreate={createTag} lockManaged />
+            <p className="m-0 text-[13px] text-[#5C5C63]">{editor === "add" ? "Tags are saved when you add the member." : "Clicking a tag saves it on this member. Payment tags update automatically."}</p>
+          </div>
           <p className="m-0 text-[13px] text-[#5C5C63] sm:col-span-2">CSV columns: name, email, mobile, chapter, category, business name, ticket type, reg status, country, gold club member.</p>
           <div className="flex gap-2 sm:col-span-2">
             <button type="submit" className={buttonClass}>{editor === "add" ? "Add member" : "Save member"}</button>
-            <button type="button" className={ghostButton} onClick={() => setEditor(null)}>Back</button>
+            <button type="button" className={ghostButton} onClick={() => { setEditor(null); setSelectedTagIds([]); }}>Back</button>
           </div>
         </form>
       ) : null}
-      <DataTable columns={["Name", "Email", "Mobile", "Chapter", "Category", "Business", "Ticket", "Status", "Country", "Gold club", ""]} empty={empty}>
+      <DataTable columns={["", "Date / time", "Name", "Email", "Mobile", "Chapter", "Category", "Business", "Ticket", "Status", "Country", "Gold club", "Tags"]} empty={empty}>
         {pageRows.map((row) => (
           <tr key={row.id}>
+            <td className={`${tdClass} whitespace-nowrap`}>
+              <div className="flex items-center gap-0.5">
+                {row.registrationReference ? (
+                  <button type="button" className={iconButton} title="View registration" aria-label="View registration" onClick={() => onOpenRegistration?.(row.registrationReference!)}>
+                    <Ticket className="h-4 w-4" strokeWidth={2.25} />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className={iconButton}
+                    title="Register"
+                    aria-label="Register"
+                    onClick={() => setRegisterTarget({ id: row.id, fullName: row.fullName })}
+                  >
+                    <UserPlus className="h-4 w-4" strokeWidth={2.25} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className={iconButton}
+                  title="Edit"
+                  aria-label="Edit"
+                  onClick={() => { setEditor(row.id); setForm(row); setSelectedTagIds(memberTags[row.id] || []); }}
+                >
+                  <Pencil className="h-4 w-4" strokeWidth={2.25} />
+                </button>
+              </div>
+            </td>
+            <td className={`${tdClass} whitespace-nowrap`}>{row.registrationReference ? formatDateTime(row.registeredAt) : ""}</td>
             <td className={`${tdClass} font-semibold`}>{row.fullName}</td>
             <td className={tdClass}>{row.email}</td>
             <td className={tdClass}>{row.mobile}</td>
@@ -1433,10 +2756,24 @@ function Members({ onError }: { onError: (message: string) => void }) {
             <td className={tdClass}>{titleCase(row.regStatus)}</td>
             <td className={tdClass}>{row.country}</td>
             <td className={tdClass}>{row.goldClub ? "Yes" : ""}</td>
-            <td className={`${tdClass} text-right`}><button type="button" className={linkButton} onClick={() => { setEditor(row.id); setForm(row); }}>Edit</button></td>
+            <td className={tdClass}>{(memberTags[row.id] || []).map((id) => tags.find((tag) => tag.id === id)?.label).filter(Boolean).join(", ")}</td>
           </tr>
         ))}
       </DataTable>
+      <MemberBankRegisterDialog
+        target={registerTarget}
+        onClose={() => setRegisterTarget(null)}
+        onError={onError}
+        onAlreadyRegistered={(reference) => onOpenRegistration?.(reference)}
+        onRegistered={async (reference) => {
+          try {
+            await load();
+          } catch (error) {
+            onError(error instanceof Error ? error.message : "Could not refresh members");
+          }
+          onOpenRegistration?.(reference);
+        }}
+      />
     </section>
   );
 }

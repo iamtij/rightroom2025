@@ -3,6 +3,8 @@ import { openDatabase } from "./db.js";
 import { cancelRegistration, createRegistration, recordPayment } from "./registrations.js";
 import { buildDailyReport, runDailyReport, runRegistrationPoster } from "./daily-report.js";
 import { renderDailyReport } from "./daily-report-email.js";
+import { saveChapter } from "./chapters.js";
+import { saveMember } from "./members.js";
 import { buildRegistrationPoster, renderRegistrationPoster } from "./registration-poster.js";
 
 const asOf = new Date("2026-11-11T01:00:00.000Z");
@@ -11,6 +13,8 @@ const db = openDatabase(":memory:");
 const empty = buildDailyReport(db, asOf);
 assert.equal(empty.seatsConfirmed, 0);
 assert.equal(empty.overdueAlert, false);
+assert.equal(empty.unpaid.PHP, 0);
+assert.equal(empty.unpaidRegistrations, 0);
 assert.equal(empty.health.total, 0);
 assert.equal(empty.tickets.length, 5);
 assert.equal(empty.tickets.find((ticket) => ticket.code === "first_mover").phaseLabel, "Open · ends Nov 30");
@@ -71,6 +75,21 @@ db.prepare(`
 
 setSecondDue(payFirst(installment("Bea Santos", "bea@example.com", "09171000002"), "upay:instapay"), "2026-11-16");
 setSecondDue(payFirst(installment("Carlo Reyes", "carlo@example.com", "09171000003"), "upay:instapay"), "2026-11-09");
+saveChapter(db, { name: "BNI Legacy" });
+saveMember(db, {
+  fullName: "Joy Dizon",
+  email: "joy@example.com",
+  mobile: "09171000004",
+  chapter: "BNI Legacy",
+  regStatus: "updated",
+});
+saveMember(db, {
+  fullName: "Legacy Waiting",
+  email: "legacy.wait@example.com",
+  mobile: "09171000014",
+  chapter: "BNI Legacy",
+  regStatus: "updated",
+});
 setSecondDue(payFirst(installment("Joy Dizon", "joy@example.com", "09171000004", "BNI Legacy"), "upay:instapay"), "2026-10-28");
 setSecondDue(payFirst(installment("Paolo Lim", "paolo@example.com", "09171000005"), "upay:instapay"), "2026-10-26");
 
@@ -97,7 +116,8 @@ db.prepare("UPDATE payments SET recorded_at = '2026-11-10 06:00:00' WHERE extern
 db.prepare("UPDATE payments SET recorded_at = '2026-11-10 07:00:00' WHERE registration_id = ?").run(comp.id);
 
 const report = buildDailyReport(db, asOf);
-assert.equal(report.seatsConfirmed, 8);
+assert.equal(report.seatsConfirmed, 7);
+assert.equal(report.unpaidHold, 1);
 assert.equal(report.cancelledToDate, 1);
 assert.equal(report.activity.registrations, 1);
 assert.equal(report.activity.paymentCount, 1);
@@ -105,15 +125,17 @@ assert.equal(report.activity.collected.PHP, 30_000);
 assert.equal(report.activity.cancellations, 1);
 assert.equal(report.activity.reached15, 1);
 assert.equal(report.collected.PHP, 1_730_000);
-assert.equal(report.scheduled.PHP, 7_870_000);
+assert.equal(report.scheduled.PHP, 6_570_000);
 assert.equal(report.overdue.PHP, 600_000);
 assert.equal(report.overdueRegistrations, 3);
+assert.equal(report.unpaid.PHP, 0);
+assert.equal(report.unpaidRegistrations, 0);
 assert.equal(report.late15, 1);
 assert.equal(report.overdueAlert, true);
-assert.equal(report.health.total, 7);
+assert.equal(report.health.total, 6);
 assert.deepEqual(report.health.bands.map((band) => [band.key, band.count]), [
   ["track", 2],
-  ["soon", 2],
+  ["soon", 1],
   ["nudge", 1],
   ["call", 0],
   ["escalate", 1],
@@ -123,7 +145,7 @@ assert.equal(report.health.atRisk.length, 1);
 const firstMover = report.tickets.find((ticket) => ticket.code === "first_mover");
 assert.equal(firstMover.paidFull, 1);
 assert.equal(firstMover.paidFullCents, 1_200_000);
-assert.equal(firstMover.installment, 7);
+assert.equal(firstMover.installment, 6);
 assert.equal(firstMover.installmentCents, 530_000);
 assert.equal(report.fullyPaid, 1);
 assert.equal(report.totals.PHP.paidFull, 1);
@@ -145,7 +167,7 @@ const mail = renderDailyReport(report);
 assert.match(mail.html, /As of Wednesday, November 11, 2026 · 9:00 AM \(PHT\)/);
 assert.match(mail.html, /Covers Nov 10, 9:00 AM to Nov 11, 9:00 AM/);
 assert.match(mail.html, /₱17,300/);
-assert.match(mail.html, /₱78,700/);
+assert.match(mail.html, /₱65,700/);
 assert.match(mail.html, /₱6,000/);
 assert.match(mail.html, /3 registrations behind · 1 moved to the Regular price/);
 assert.match(mail.html, /Joy Dizon/);
@@ -164,13 +186,13 @@ assert.match(mail.text, /Joy Dizon, BNI Legacy/);
 assert.match(mail.html, /Full paid/);
 assert.match(mail.html, /Installments/);
 assert.match(mail.html, /₱12,000 · 1/);
-assert.match(mail.html, /₱5,300 · 7/);
+assert.match(mail.html, /₱5,300 · 6/);
 assert.match(mail.text, /full paid ₱12,000 · 1/);
-assert.match(mail.text, /Total \(PHP\): 8 seats/);
+assert.match(mail.text, /Total \(PHP\): 7 seats/);
 const countMail = renderDailyReport({
   ...report,
   omitSales: true,
-  firstMovers: 8,
+  firstMovers: 7,
   notes: ["Seat counts only."],
   healthHint: "Installment health.",
   roster: { total: 3, updated: "2", delayed: 1, firstMovers: 1 },
@@ -178,24 +200,43 @@ const countMail = renderDailyReport({
 assert.match(countMail.html, /IBMC 2027 Report/);
 assert.equal(countMail.html.includes("₱"), false);
 assert.equal(countMail.html.includes("USD "), false);
-assert.match(countMail.text, /full paid 1 · installments 7/);
+assert.match(countMail.text, /full paid 1 · installments 6/);
+createRegistration(db, {
+  productCode: "first_mover",
+  paymentPlan: "full",
+  fullName: "Lara Cruz",
+  email: "lara@example.com",
+  mobile: "09171000010",
+  registeredOn: "2026-11-11",
+});
+const withUnpaid = buildDailyReport(db, asOf);
+assert.equal(withUnpaid.unpaidHold, 2);
+assert.equal(withUnpaid.seatsConfirmed, report.seatsConfirmed);
+assert.equal(withUnpaid.overdue.PHP, 600_000);
+assert.equal(withUnpaid.overdueRegistrations, 3);
+assert.equal(withUnpaid.unpaid.PHP, 1_200_000);
+assert.equal(withUnpaid.unpaidRegistrations, 1);
+const unpaidMail = renderDailyReport(withUnpaid);
+assert.match(unpaidMail.html, /Not yet paid/);
+assert.match(unpaidMail.html, /1 pay-in-full seat/);
+assert.match(unpaidMail.text, /Not yet paid: ₱12,000/);
 const posterModel = buildRegistrationPoster(db, asOf);
-assert.equal(posterModel.paid, 8);
+assert.equal(posterModel.paid, 7);
 assert.equal(posterModel.fullPaid, 1);
-assert.equal(posterModel.installments, 7);
-assert.equal(posterModel.sinceYesterday, 1);
+assert.equal(posterModel.installments, 6);
+assert.equal(posterModel.sinceYesterday, 0);
 assert.equal(posterModel.daysLeft, 19);
 assert.equal(posterModel.bannerTitle, "First Mover · ₱12,000");
 assert.match(posterModel.bannerNote, /Ends Nov 30 · Early Bird is ₱15,000/);
-assert.deepEqual(posterModel.chapters, [{ name: "BNI Legacy", count: 1 }]);
+assert.deepEqual(posterModel.chapters, [{ name: "BNI Legacy", count: 1, total: 2, percent: 50 }]);
 const poster = await renderRegistrationPoster(posterModel);
 assert.equal(poster.subject, "IBMC 2027 Registration update · Nov 11, 2026");
 assert.equal(poster.filename, "IBMC-2027-registration-update.jpg");
 assert.equal(poster.jpeg[0], 0xff);
 assert.equal(poster.jpeg[1], 0xd8);
 assert.match(poster.html, /cid:registration-poster/);
-assert.match(poster.text, /Paid registrations: 8/);
-assert.match(poster.text, /BNI Legacy: 1/);
+assert.match(poster.text, /Paid registrations: 7/);
+assert.match(poster.text, /BNI Legacy: 1\/2 · 50%/);
 
 const previousKey = process.env.RESEND_API_KEY;
 delete process.env.RESEND_API_KEY;

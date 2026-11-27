@@ -1,12 +1,13 @@
 import QRCode from "qrcode";
-import { daysLabel, formatLongDate, formatMoney } from "./time.js";
+import { daysLabel, formatDateTimeManila, formatLongDate, formatMoney } from "./time.js";
 
 const EVENT = "June 16–17, 2027 · Newport Performing Arts Theater, Pasay City";
-const EVENT_LOGO = "https://ibmcph.com/assets/ibmc-2027-logo.png?v=3";
+const AMPLIFY_LOGO = "https://ibmcph.com/assets/amplify-logo-white.png";
 
 function brandHeader() {
   return `<tr><td style="background:#0E0E10;padding:22px 32px 18px;">
-          <img src="${EVENT_LOGO}" width="320" height="89" alt="IBMC 2027" style="display:block;border:0;width:320px;max-width:100%;height:auto;">
+          <div style="font-family:Arial,sans-serif;font-size:13px;font-weight:700;letter-spacing:0.16em;color:#FFFFFF;">IBMC 2027</div>
+          <img src="${AMPLIFY_LOGO}" width="240" height="35" alt="AMPLIFY" style="display:block;margin-top:10px;border:0;width:240px;max-width:100%;height:auto;">
         </td></tr>
         <tr><td style="height:4px;background:#D0202E;font-size:0;line-height:0;">&nbsp;</td></tr>`;
 }
@@ -214,6 +215,99 @@ export function renderInstallmentReminder({ registration, installment, daysBefor
         </td></tr>
       </table>`,
     action: button(payUrl, "Pay this installment"),
+  });
+  return { subject, body: text, html, includesQr: false };
+}
+
+export function renderPaymentConfirmation({
+  registration,
+  installment,
+  amountCents,
+  payUrl,
+  manageUrl,
+  paymentChannel = "",
+  paidAt = "",
+  paymentReference = "",
+}) {
+  const amount = formatMoney(amountCents, registration.currency);
+  const paidTotal = registration.installments.reduce((sum, item) => sum + item.amount_paid_cents, 0);
+  const seatTotal = registration.installments.reduce((sum, item) => sum + item.amount_cents, 0);
+  const paidSoFar = formatMoney(paidTotal, registration.currency);
+  const seatTotalLabel = formatMoney(seatTotal, registration.currency);
+  const balance = formatMoney(registration.balance_cents, registration.currency);
+  const name = firstName(registration.full_name);
+  const paidCount = registration.installments.filter((item) => item.status === "paid").length;
+  const next = registration.installments.find((item) => item.status === "due");
+  const fullyPaid = registration.balance_cents === 0;
+  const installmentLine = registration.payment_plan === "installment" && registration.installment_count > 1
+    ? `Payment ${installment.sequence} of ${registration.installment_count}`
+    : "";
+  const subject = fullyPaid
+    ? `IBMC 2027 · Payment received · ${amount} · fully paid`
+    : installmentLine
+      ? `IBMC 2027 · Payment received · ${amount} · ${installment.sequence} of ${registration.installment_count}`
+      : `IBMC 2027 · Payment received · ${amount}`;
+  const headline = fullyPaid ? "You're all paid up." : "Payment received.";
+  const intro = fullyPaid
+    ? `Hi ${escapeHtml(name)}, we recorded ${escapeHtml(amount)} for your ${escapeHtml(registration.product_name)} seat. Your QR ticket is on its way by email and SMS.`
+    : `Hi ${escapeHtml(name)}, we recorded ${escapeHtml(amount)} for your ${escapeHtml(registration.product_name)} seat.${installmentLine ? ` ${escapeHtml(installmentLine)}.` : ""} Your QR ticket is sent only after the seat is fully paid.`;
+  const paidWhen = formatDateTimeManila(paidAt);
+  const receiptMeta = [
+    paymentChannel ? `Payment channel: ${paymentChannel}` : "",
+    paidWhen ? `Date & time: ${paidWhen}` : "",
+    `Reference: ${registration.reference}`,
+    paymentReference && paymentReference !== registration.reference
+      ? `Payment reference: ${paymentReference}`
+      : "",
+  ].filter(Boolean);
+  const receiptMetaHtml = receiptMeta.length
+    ? `<div style="margin-top:16px;padding-top:16px;border-top:1px solid #E4E1DC;font-size:14px;line-height:1.7;color:#5C5C63;">
+          ${receiptMeta.map((line) => {
+            const [label, ...rest] = line.split(": ");
+            return `<div><span style="color:#3A3A40;font-weight:700;">${escapeHtml(label)}</span><span style="color:#3A3A40;">: </span>${escapeHtml(rest.join(": "))}</div>`;
+          }).join("")}
+        </div>`
+    : "";
+  const nextBlock = !fullyPaid && next
+    ? `<div style="margin-top:14px;padding-top:14px;border-top:1px solid #E4E1DC;font-size:15px;color:#3A3A40;">
+          <span style="color:#5C5C63;">Next payment</span><br>
+          <span style="font-size:18px;font-weight:800;">${escapeHtml(formatMoney(next.amount_cents - next.amount_paid_cents, registration.currency))}</span>
+          <span style="color:#5C5C63;"> · Due ${escapeHtml(formatLongDate(next.due_on))}</span>
+        </div>`
+    : "";
+  const text = [
+    "IBMC 2027",
+    fullyPaid
+      ? `Hi ${name}, we recorded ${amount} for your ${registration.product_name} seat. Your seat is fully paid.`
+      : `Hi ${name}, we recorded ${amount} for your ${registration.product_name} seat.${installmentLine ? ` ${installmentLine}.` : ""}`,
+    ...receiptMeta,
+    `Paid so far: ${paidSoFar} of ${seatTotalLabel}.`,
+    fullyPaid ? "Balance: ₱0." : `Balance: ${balance}.`,
+    !fullyPaid && next
+      ? `Next payment: ${formatMoney(next.amount_cents - next.amount_paid_cents, registration.currency)} due ${formatLongDate(next.due_on)}.`
+      : "",
+    fullyPaid
+      ? "Your QR ticket is on its way by email and SMS."
+      : "Reminders come by email and SMS. Your QR ticket unlocks when you're fully paid.",
+    !fullyPaid && next ? payUrl : manageUrl,
+  ].filter(Boolean).join("\n");
+  const html = shell({
+    headline: escapeHtml(headline),
+    intro,
+    body: `
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-top:24px;background:#F6F4F1;border-radius:16px;">
+        <tr><td style="padding:20px 22px;">
+          <div style="font-size:12px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:#A8131F;">${escapeHtml(registration.product_name)}${installmentLine ? ` · ${escapeHtml(installmentLine)}` : ""}</div>
+          <div style="margin-top:8px;font-size:36px;font-weight:800;line-height:1;">${escapeHtml(amount)}</div>
+          <div style="margin-top:8px;font-size:16px;color:#3A3A40;">Paid so far <strong>${escapeHtml(paidSoFar)}</strong> of ${escapeHtml(seatTotalLabel)}</div>
+          <div style="margin-top:6px;font-size:14px;color:#5C5C63;">${paidCount} of ${registration.installment_count} payments made · Balance ${escapeHtml(balance)}</div>
+          ${nextBlock}
+          ${receiptMetaHtml}
+        </td></tr>
+      </table>`,
+    action: fullyPaid
+      ? button(manageUrl, "Manage my registration")
+      : button(next ? payUrl : manageUrl, next ? "Pay next installment" : "Manage my registration"),
   });
   return { subject, body: text, html, includesQr: false };
 }

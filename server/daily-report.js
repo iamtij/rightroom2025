@@ -6,6 +6,7 @@ import { sendEmail } from "./providers.js";
 import { reportError } from "./report-error.js";
 import { renderDailyReport } from "./daily-report-email.js";
 import { buildRegistrationPoster, posterRecipients, renderRegistrationPoster } from "./registration-poster.js";
+import { HAS_RECORDED_PAYMENT_SQL } from "./registrations.js";
 import { addDays, formatMoney, manilaParts } from "./time.js";
 
 const TEST_PRODUCT = "test%";
@@ -184,17 +185,18 @@ export function buildDailyReport(db, asOf = new Date()) {
   const from = utcStamp(windowStart);
   const until = utcStamp(asOf);
 
+  const paid = HAS_RECORDED_PAYMENT_SQL;
   const ticketRows = db.prepare(`
     SELECT
       p.code, p.name, p.currency, p.full_price_cents, p.installment_total_cents, p.sales_start, p.sales_end,
-      SUM(CASE WHEN r.id IS NOT NULL AND r.status != 'cancelled' THEN 1 ELSE 0 END) AS seats,
+      SUM(CASE WHEN r.id IS NOT NULL AND r.status != 'cancelled' AND ${paid} THEN 1 ELSE 0 END) AS seats,
       SUM(CASE WHEN r.status = 'confirmed' AND r.fully_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS paid_full,
       COALESCE(SUM(CASE WHEN r.status = 'confirmed' AND r.fully_paid_at IS NOT NULL THEN (
         SELECT COALESCE(SUM(pay.amount_cents), 0) FROM payments pay
         WHERE pay.registration_id = r.id AND COALESCE(pay.method, '') != 'comp'
       ) ELSE 0 END), 0) AS paid_full_cents,
-      SUM(CASE WHEN r.status = 'confirmed' AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN 1 ELSE 0 END) AS installment,
-      COALESCE(SUM(CASE WHEN r.status = 'confirmed' AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN (
+      SUM(CASE WHEN r.status = 'confirmed' AND ${paid} AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN 1 ELSE 0 END) AS installment,
+      COALESCE(SUM(CASE WHEN r.status = 'confirmed' AND ${paid} AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN (
         SELECT COALESCE(SUM(pay.amount_cents), 0) FROM payments pay
         WHERE pay.registration_id = r.id AND COALESCE(pay.method, '') != 'comp'
       ) ELSE 0 END), 0) AS installment_cents,
@@ -202,7 +204,7 @@ export function buildDailyReport(db, asOf = new Date()) {
         SELECT COALESCE(SUM(pay.amount_cents), 0) FROM payments pay
         WHERE pay.registration_id = r.id AND COALESCE(pay.method, '') != 'comp'
       ) ELSE 0 END), 0) AS collected_cents,
-      COALESCE(SUM(CASE WHEN r.status = 'confirmed' THEN (
+      COALESCE(SUM(CASE WHEN r.status = 'confirmed' AND ${paid} THEN (
         SELECT COALESCE(SUM(i.amount_cents - i.amount_paid_cents), 0)
         FROM registration_installments i
         WHERE i.registration_id = r.id AND i.status = 'due' AND i.due_on >= ? AND i.amount_cents > i.amount_paid_cents
@@ -260,6 +262,7 @@ export function buildDailyReport(db, asOf = new Date()) {
     JOIN registrations r ON r.id = i.registration_id
     JOIN ticket_products p ON p.id = r.product_id
     WHERE r.status = 'confirmed' AND p.code NOT LIKE ?
+      AND r.payment_plan = 'installment' AND i.kind = 'fixed_date'
       AND i.status = 'due' AND i.due_on < ? AND i.amount_cents > i.amount_paid_cents
     GROUP BY r.currency
   `).all(TEST_PRODUCT, today);
@@ -270,10 +273,33 @@ export function buildDailyReport(db, asOf = new Date()) {
     overdueRegistrations += Number(row.registrations) || 0;
   }
 
+  const unpaidRows = db.prepare(`
+    SELECT r.currency AS currency, COUNT(DISTINCT r.id) AS registrations,
+      COALESCE(SUM(i.amount_cents - i.amount_paid_cents), 0) AS cents
+    FROM registration_installments i
+    JOIN registrations r ON r.id = i.registration_id
+    JOIN ticket_products p ON p.id = r.product_id
+    WHERE r.status = 'confirmed' AND p.code NOT LIKE ?
+      AND r.payment_plan = 'full'
+      AND i.status = 'due' AND i.amount_cents > i.amount_paid_cents
+    GROUP BY r.currency
+  `).all(TEST_PRODUCT);
+  const unpaid = moneyBucket();
+  let unpaidRegistrations = 0;
+  for (const row of unpaidRows) {
+    addMoney(unpaid, row.currency, Number(row.cents) || 0);
+    unpaidRegistrations += Number(row.registrations) || 0;
+  }
+
   const seatsConfirmed = Number(db.prepare(`
     SELECT COUNT(*) AS count FROM registrations r
     JOIN ticket_products p ON p.id = r.product_id
-    WHERE r.status != 'cancelled' AND p.code NOT LIKE ?
+    WHERE r.status != 'cancelled' AND ${paid} AND p.code NOT LIKE ?
+  `).get(TEST_PRODUCT).count) || 0;
+  const unpaidHold = Number(db.prepare(`
+    SELECT COUNT(*) AS count FROM registrations r
+    JOIN ticket_products p ON p.id = r.product_id
+    WHERE r.status != 'cancelled' AND NOT ${paid} AND p.code NOT LIKE ?
   `).get(TEST_PRODUCT).count) || 0;
   const cancelledToDate = Number(db.prepare(`
     SELECT COUNT(*) AS count FROM registrations r
@@ -323,7 +349,7 @@ export function buildDailyReport(db, asOf = new Date()) {
     FROM registrations r
     JOIN ticket_products p ON p.id = r.product_id
     JOIN registration_installments i ON i.registration_id = r.id
-    WHERE r.status = 'confirmed' AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL
+    WHERE r.status = 'confirmed' AND ${paid} AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL
       AND p.code NOT LIKE ?
     ORDER BY r.id, i.sequence
   `).all(TEST_PRODUCT);
@@ -388,7 +414,7 @@ export function buildDailyReport(db, asOf = new Date()) {
   const firstMovers = Number(db.prepare(`
     SELECT COUNT(*) AS count FROM registrations r
     JOIN ticket_products p ON p.id = r.product_id
-    WHERE r.status = 'confirmed' AND p.code = 'first_mover'
+    WHERE r.status = 'confirmed' AND ${paid} AND p.code = 'first_mover'
   `).get().count) || 0;
   const rosterCounts = { updated: 0, delayed: 0, cancelled: 0 };
   for (const row of db.prepare("SELECT reg_status AS status, COUNT(*) AS count FROM members GROUP BY reg_status").all()) {
@@ -406,6 +432,7 @@ export function buildDailyReport(db, asOf = new Date()) {
     FROM registrations r
     JOIN ticket_products p ON p.id = r.product_id
     WHERE lower(r.status) = 'confirmed'
+      AND ${paid}
       AND r.payment_hold_cancelled_at IS NULL
       AND p.code NOT LIKE ?
       AND TRIM(COALESCE(r.chapter, '')) != ''
@@ -417,6 +444,7 @@ export function buildDailyReport(db, asOf = new Date()) {
     windowStart,
     today,
     seatsConfirmed,
+    unpaidHold,
     fullyPaid,
     firstMovers,
     roster,
@@ -426,6 +454,8 @@ export function buildDailyReport(db, asOf = new Date()) {
     overdue,
     overdueRegistrations,
     overdueAlert: overdueRegistrations > 0 || Object.values(overdue).some((cents) => cents > 0),
+    unpaid,
+    unpaidRegistrations,
     late15,
     activity: {
       registrations: activityRegistrations,

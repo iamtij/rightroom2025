@@ -17,7 +17,7 @@ export function outboundNotificationsSuppressed() {
   return ibmcStagingSafeModeEnabled();
 }
 
-const STAGING_SAFE_ALLOWED_EMAIL = new Set(["member_otp", "registration_otp", "entry_pass"]);
+const STAGING_SAFE_ALLOWED_EMAIL = new Set(["member_otp", "registration_otp", "entry_pass", "payment_confirmation"]);
 
 /**
  * When safe mode is on, block outbound email except login codes and fully-paid QR tickets.

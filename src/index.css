@@ -57,6 +57,23 @@ body {
   50% { box-shadow: 0 0 20px 6px rgba(227, 30, 36, 0.5); }
 }
 
+@keyframes payment-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes payment-glow {
+  0%, 100% { transform: scale(0.86); opacity: 0.35; }
+  50% { transform: scale(1); opacity: 0.7; }
+}
+
+.payment-spin {
+  animation: payment-spin 0.9s linear infinite;
+}
+
+.payment-glow {
+  animation: payment-glow 1.6s ease-in-out infinite;
+}
+
 .animate-pulse-slow {
   animation: pulse-slow 2.5s ease-in-out infinite;
 }

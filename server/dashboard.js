@@ -1,4 +1,5 @@
 import { listPaymentChannels } from "./payment-channels.js";
+import { HAS_RECORDED_PAYMENT_SQL } from "./registrations.js";
 import { addDays, manilaParts } from "./time.js";
 
 function percent(part, whole) {
@@ -6,25 +7,11 @@ function percent(part, whole) {
   return Math.round((part / whole) * 100);
 }
 
-function statusCounts(rows) {
-  const counts = { updated: 0, delayed: 0, cancelled: 0 };
-  for (const row of rows) {
-    if (row.status in counts) counts[row.status] = row.count;
-  }
-  const total = counts.updated + counts.delayed + counts.cancelled;
-  return {
-    total,
-    ...counts,
-    updatedPercent: percent(counts.updated, total),
-    delayedPercent: percent(counts.delayed, total),
-    cancelledPercent: percent(counts.cancelled, total),
-  };
-}
-
 const CHANNEL_LABELS = {
   upay: "U Pay · UnionBank",
   hitpay_qr: "HitPay QR",
   hitpay_online: "HitPay online banking",
+  hitpay_card: "HitPay card",
   paynamics: "Paynamics",
   admin: "Marked in admin",
   comp: "Complimentary",
@@ -32,8 +19,8 @@ const CHANNEL_LABELS = {
   other: "Other",
 };
 
-const CHANNEL_ORDER = ["upay", "hitpay_qr", "hitpay_online", "paynamics", "admin", "comp", "manual", "other"];
-const BUYER_CHANNELS = new Set(["upay", "hitpay_qr", "hitpay_online", "paynamics"]);
+const CHANNEL_ORDER = ["upay", "hitpay_qr", "hitpay_online", "hitpay_card", "paynamics", "admin", "comp", "manual", "other"];
+const BUYER_CHANNELS = new Set(["upay", "hitpay_qr", "hitpay_online", "hitpay_card", "paynamics"]);
 
 const KNOWN_METHODS = [
   { channel: "upay", code: "upay:instapay", label: "InstaPay" },
@@ -41,12 +28,14 @@ const KNOWN_METHODS = [
   { channel: "upay", code: "upay:paygate", label: "Other banks" },
   { channel: "hitpay_qr", code: "hitpay:qr", label: "HitPay QR" },
   { channel: "hitpay_online", code: "hitpay:online", label: "HitPay online banking" },
+  { channel: "hitpay_card", code: "hitpay:card", label: "HitPay card" },
   { channel: "paynamics", code: "paynamics", label: "Paynamics" },
 ];
 
 const DEFAULT_METHOD = {
   hitpay_qr: "hitpay:qr",
   hitpay_online: "hitpay:online",
+  hitpay_card: "hitpay:card",
   paynamics: "paynamics",
   admin: "admin",
   comp: "comp",
@@ -96,8 +85,8 @@ function classifyPayment(method, detail) {
       label: UPAY_LABELS[method] || titleLabel(method.slice(5)) || "U Pay",
     };
   }
-  if (method === "hitpay:qr" || method === "hitpay:online" || method === "admin" || method === "comp" || method === "manual") {
-    const channel = method === "hitpay:qr" ? "hitpay_qr" : method === "hitpay:online" ? "hitpay_online" : method;
+  if (method === "hitpay:qr" || method === "hitpay:online" || method === "hitpay:card" || method === "admin" || method === "comp" || method === "manual") {
+    const channel = method === "hitpay:qr" ? "hitpay_qr" : method === "hitpay:online" ? "hitpay_online" : method === "hitpay:card" ? "hitpay_card" : method;
     return { channel, code: method, label: CHANNEL_LABELS[channel] };
   }
   if (method === "paynamics") {
@@ -231,14 +220,19 @@ export function collectPaymentMethods(db) {
 export function dashboardStats(db) {
   const today = manilaParts().date;
   const through = addDays(today, 30);
+  const paid = HAS_RECORDED_PAYMENT_SQL;
+  const firstMoverProduct = "(SELECT id FROM ticket_products WHERE code = 'first_mover')";
   const headline = db.prepare(`
     SELECT
       COUNT(*) AS total,
-      SUM(CASE WHEN status != 'cancelled' THEN 1 ELSE 0 END) AS confirmed,
-      SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
-      SUM(CASE WHEN status != 'cancelled' AND product_id = (SELECT id FROM ticket_products WHERE code = 'first_mover') THEN 1 ELSE 0 END) AS first_movers,
-      SUM(CASE WHEN status = 'cancelled' AND product_id = (SELECT id FROM ticket_products WHERE code = 'first_mover') THEN 1 ELSE 0 END) AS first_movers_cancelled
-    FROM registrations
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} THEN 1 ELSE 0 END) AS confirmed,
+      SUM(CASE WHEN r.status != 'cancelled' AND NOT ${paid} THEN 1 ELSE 0 END) AS unpaid_hold,
+      SUM(CASE WHEN r.status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} AND r.product_id = ${firstMoverProduct} THEN 1 ELSE 0 END) AS first_movers,
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} AND r.product_id = ${firstMoverProduct} AND r.fully_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS first_movers_fully_paid,
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} AND r.product_id = ${firstMoverProduct} AND r.fully_paid_at IS NULL THEN 1 ELSE 0 END) AS first_movers_installment,
+      SUM(CASE WHEN r.status = 'cancelled' AND r.product_id = ${firstMoverProduct} THEN 1 ELSE 0 END) AS first_movers_cancelled
+    FROM registrations r
   `).get();
 
   const tickets = db.prepare(`
@@ -246,7 +240,8 @@ export function dashboardStats(db) {
       p.code,
       p.name,
       p.currency,
-      SUM(CASE WHEN r.status != 'cancelled' THEN 1 ELSE 0 END) AS signups,
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} THEN 1 ELSE 0 END) AS signups,
+      SUM(CASE WHEN r.status != 'cancelled' AND NOT ${paid} THEN 1 ELSE 0 END) AS unpaid_hold,
       SUM(CASE WHEN r.status = 'cancelled' THEN 1 ELSE 0 END) AS cancelled,
       SUM(CASE WHEN r.status != 'cancelled' AND r.fully_paid_at IS NOT NULL THEN 1 ELSE 0 END) AS fully_paid,
       COALESCE(SUM(CASE WHEN r.status != 'cancelled' AND r.fully_paid_at IS NOT NULL THEN (
@@ -254,15 +249,15 @@ export function dashboardStats(db) {
         FROM registration_installments i
         WHERE i.registration_id = r.id
       ) ELSE 0 END), 0) AS fully_paid_cents,
-      SUM(CASE WHEN r.status != 'cancelled' AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN 1 ELSE 0 END) AS installment_seats,
-      COALESCE(SUM(CASE WHEN r.status != 'cancelled' AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN (
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN 1 ELSE 0 END) AS installment_seats,
+      COALESCE(SUM(CASE WHEN r.status != 'cancelled' AND ${paid} AND r.payment_plan = 'installment' AND r.fully_paid_at IS NULL THEN (
         SELECT COALESCE(SUM(i.amount_paid_cents), 0)
         FROM registration_installments i
         WHERE i.registration_id = r.id
       ) ELSE 0 END), 0) AS installment_cents,
-      SUM(CASE WHEN r.status != 'cancelled' AND r.payment_plan = 'full' THEN 1 ELSE 0 END) AS pay_in_full,
-      SUM(CASE WHEN r.status != 'cancelled' AND r.payment_plan = 'installment' THEN 1 ELSE 0 END) AS installment,
-      COALESCE(SUM(CASE WHEN r.status != 'cancelled' THEN r.amount_due_cents ELSE 0 END), 0) AS booked_cents,
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} AND r.payment_plan = 'full' THEN 1 ELSE 0 END) AS pay_in_full,
+      SUM(CASE WHEN r.status != 'cancelled' AND ${paid} AND r.payment_plan = 'installment' THEN 1 ELSE 0 END) AS installment,
+      COALESCE(SUM(CASE WHEN r.status != 'cancelled' AND ${paid} THEN r.amount_due_cents ELSE 0 END), 0) AS booked_cents,
       COALESCE(SUM(CASE WHEN r.status != 'cancelled' THEN (
         SELECT COALESCE(SUM(i.amount_paid_cents), 0)
         FROM registration_installments i
@@ -275,11 +270,11 @@ export function dashboardStats(db) {
   `).all();
 
   const byDay = db.prepare(`
-    SELECT registered_on AS day, COUNT(*) AS signups
-    FROM registrations
-    WHERE status != 'cancelled'
-    GROUP BY registered_on
-    ORDER BY registered_on
+    SELECT r.registered_on AS day, COUNT(*) AS signups
+    FROM registrations r
+    WHERE r.status != 'cancelled' AND ${paid}
+    GROUP BY r.registered_on
+    ORDER BY r.registered_on
   `).all();
 
   const dueSoon = db.prepare(`
@@ -295,18 +290,17 @@ export function dashboardStats(db) {
     GROUP BY r.currency
   `).all(through);
 
-  const rosterRows = db.prepare(`
-    SELECT reg_status AS status, COUNT(*) AS count
-    FROM members
-    GROUP BY reg_status
-  `).all();
-  const firstMoverRosterRows = db.prepare(`
-    SELECT reg_status AS status, COUNT(*) AS count
-    FROM members
-    WHERE lower(COALESCE(ticket_type, '')) LIKE '%first mover%'
-    GROUP BY reg_status
-  `).all();
   const goldClub = db.prepare("SELECT COUNT(*) AS count FROM members WHERE gold_club = 1").get().count;
+  const delayedCount = Number(db.prepare(`
+    SELECT COUNT(DISTINCT r.id) AS count
+    FROM registrations r
+    JOIN registration_installments i ON i.registration_id = r.id
+    WHERE r.status != 'cancelled'
+      AND ${paid}
+      AND i.status = 'due'
+      AND i.due_on < ?
+      AND i.amount_cents > i.amount_paid_cents
+  `).get(today).count) || 0;
 
   const money = new Map();
   let payInFull = 0;
@@ -323,12 +317,18 @@ export function dashboardStats(db) {
   }
 
   const confirmed = headline.confirmed || 0;
+  const unpaidHold = headline.unpaid_hold || 0;
+  const firstMoversFullyPaid = headline.first_movers_fully_paid || 0;
+  const firstMoversInstallment = headline.first_movers_installment || 0;
   return {
     signups: {
       total: headline.total || 0,
       confirmed,
+      unpaidHold,
       cancelled: headline.cancelled || 0,
       firstMovers: headline.first_movers || 0,
+      firstMoversFullyPaid,
+      firstMoversInstallment,
       firstMoversCancelled: headline.first_movers_cancelled || 0,
       firstMoverPercent: percent(headline.first_movers || 0, confirmed),
     },
@@ -337,6 +337,7 @@ export function dashboardStats(db) {
       name: ticket.name,
       currency: ticket.currency,
       signups: ticket.signups,
+      unpaidHold: ticket.unpaid_hold,
       cancelled: ticket.cancelled,
       fullyPaid: ticket.fully_paid,
       fullyPaidCents: ticket.fully_paid_cents,
@@ -351,6 +352,10 @@ export function dashboardStats(db) {
       fullyPaid,
       owing: confirmed - fullyPaid,
     },
+    delayed: {
+      count: delayedCount,
+      percent: percent(delayedCount, confirmed),
+    },
     money: [...money.values()].map((row) => ({
       currency: row.currency,
       collectedCents: row.collectedCents,
@@ -361,8 +366,7 @@ export function dashboardStats(db) {
       through,
       rows: dueSoon.map((row) => ({ currency: row.currency, count: row.count, cents: row.cents })),
     },
-    roster: { ...statusCounts(rosterRows), goldClub },
-    firstMoverRoster: statusCounts(firstMoverRosterRows),
+    roster: { goldClub },
     paymentMethods: paymentMethodTotals(db),
   };
 }

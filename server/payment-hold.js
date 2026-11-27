@@ -1,9 +1,16 @@
 import { ibmcDeploymentEnv, railwayDeploymentClass, railwaySignalsPresent } from "./deployment-identity.js";
 import { getRegistration, recordPayment, registrationContactClash } from "./registrations.js";
 
-export const HOLD_MS = 24 * 60 * 60 * 1000;
+/**
+ * How long an unpaid PHP registration waits for its first payment.
+ * The deadline is written once per registration (payment_hold_until) when hosted checkout opens,
+ * so changing this only affects new holds. Holds already stored keep the deadline they were given.
+ */
+export const HOLD_HOURS = 2;
+export const HOLD_MS = HOLD_HOURS * 60 * 60 * 1000;
+/** Extra time before cancel when a gateway page opened before the deadline is still pending. */
 export const HOLD_GRACE_MS = 2 * 60 * 60 * 1000;
-export const HOLD_EXPIRED_MESSAGE = "The 24-hour hold ended. Start again to lock the ticket.";
+export const HOLD_EXPIRED_MESSAGE = "The payment hold ended. Start again to lock the ticket.";
 
 const SESSION_TABLES = ["hitpay_payments", "paynamics_payments", "upay_payments"];
 
@@ -53,6 +60,21 @@ function openingStillOpen(db, registrationId) {
   if (first.amount_paid_cents > 0 || first.status === "paid" || first.status === "waived") return false;
   const payments = db.prepare("SELECT COUNT(*) AS n FROM payments WHERE registration_id = ?").get(registrationId).n;
   return payments === 0;
+}
+
+/**
+ * When the first-payment hold for this checkout ends, or null when no hold applies.
+ * Used to clamp gateway session expiry so a payment page never outlives the hold.
+ * A registration with no stored hold yet is a new checkout: its hold is written right
+ * after the gateway session starts, so now + HOLD_MS is never later than that hold.
+ */
+export function checkoutHoldEndMs(db, registration, now = Date.now()) {
+  if (!firstPaymentHoldEnabled() || !registration?.id) return null;
+  if (registration.status !== "confirmed" || registration.currency !== "PHP") return null;
+  if (!openingStillOpen(db, registration.id)) return null;
+  if (!registration.payment_hold_until) return now + HOLD_MS;
+  const holdMs = Date.parse(registration.payment_hold_until);
+  return Number.isFinite(holdMs) ? holdMs : null;
 }
 
 function hasPendingSessionBeforeHold(db, registrationId, holdMs) {
